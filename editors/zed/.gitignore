@@ -2,3 +2,11 @@
 # purpose: this is an application-like cdylib, and pinning the
 # `zed_extension_api` version keeps Zed's wasm build reproducible.
 /target
+
+# Build artifacts. When this directory is installed as a dev extension, Zed
+# compiles `extension.wasm` here and clones + compiles each grammar into
+# `grammars/<name>/` and `grammars/<name>.wasm`. They are outputs, not sources:
+# the grammar sources live in `editors/tree-sitter-fx` and
+# `editors/tree-sitter-fxc`.
+/extension.wasm
+/grammars/
