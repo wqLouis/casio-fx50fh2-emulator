@@ -23,6 +23,7 @@
 pub mod ast;
 pub mod builtins;
 pub mod error;
+pub mod include;
 pub mod lexer;
 pub mod mode;
 pub mod parser;
@@ -34,6 +35,8 @@ mod emit;
 mod validate;
 
 pub use mode::Mode;
+
+use std::path::Path;
 
 use error::TranspileError;
 
@@ -61,7 +64,76 @@ pub fn transpile(source: &str) -> Result<String, TranspileError> {
 /// first line whenever it came from the header or the override (never for the
 /// implicit COMP default), and the program is validated against its
 /// capabilities (currently only BASE rejects anything).
+///
+/// `#include` directives resolve relative to the current directory; use
+/// [`transpile_file`] or [`transpile_with_base`] to resolve them relative to a
+/// specific location instead.
 pub fn transpile_with(source: &str, opts: Options) -> Result<String, TranspileError> {
+    transpile_with_base(source, opts, Path::new("."))
+}
+
+/// Transpile a `.fxc` file, resolving `#include` relative to that file.
+pub fn transpile_file(path: &Path, opts: Options) -> Result<String, TranspileError> {
+    let source = std::fs::read_to_string(path).map_err(|e| {
+        TranspileError::new(format!("cannot read `{}`: {e}", path.display()), 0, 1, 1)
+            .in_file(Some(path))
+    })?;
+    transpile_named(
+        &source,
+        opts,
+        Some(path),
+        path.parent().unwrap_or(Path::new(".")),
+    )
+}
+
+/// Transpile `source`, resolving `#include` relative to `base_dir`.
+///
+/// This is the entry point for callers that hold the text rather than a path
+/// (an editor buffer, an inline test suite) but still know where relative
+/// includes should be looked up.
+pub fn transpile_with_base(
+    source: &str,
+    opts: Options,
+    base_dir: &Path,
+) -> Result<String, TranspileError> {
+    transpile_named(source, opts, None, base_dir)
+}
+
+/// The shared implementation behind the public entry points.
+fn transpile_named(
+    source: &str,
+    opts: Options,
+    root: Option<&Path>,
+    base_dir: &Path,
+) -> Result<String, TranspileError> {
+    let expanded = include::expand(source, root, base_dir)?;
+    match transpile_expanded(&expanded.text, opts) {
+        Ok(prgm) => Ok(prgm),
+        // Positions refer to the expanded text, so translate them back to the
+        // file and line the user actually wrote.
+        Err(error) => Err(attribute(error, &expanded)),
+    }
+}
+
+/// Point an error at the file and line it came from after include expansion.
+fn attribute(error: TranspileError, expanded: &include::Expanded) -> TranspileError {
+    if error.file.is_some() {
+        return error;
+    }
+    let (file, line) = expanded.origin(error.line);
+    match file {
+        Some(path) => TranspileError {
+            file: Some(path.display().to_string()),
+            line,
+            ..error
+        },
+        // Anonymous source: leave the position as it is.
+        None => error,
+    }
+}
+
+/// Transpile include-expanded source (no further preprocessing).
+fn transpile_expanded(source: &str, opts: Options) -> Result<String, TranspileError> {
     let tokens = lexer::lex(source)?;
     let header = tokens.iter().find_map(|token| match &token.tok {
         lexer::Tok::Mode(mode) => Some(*mode),

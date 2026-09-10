@@ -17,6 +17,9 @@ impl TempDir {
 
     fn write(&self, name: &str, content: &str) -> PathBuf {
         let path = self.0.join(name);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).expect("create parent dir");
+        }
         std::fs::write(&path, content).expect("write temp file");
         path
     }
@@ -149,7 +152,7 @@ fn filter_selects_a_subset_of_cases() {
 #[test]
 fn the_shipped_examples_pass_through_the_cli() {
     let examples = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples");
-    for name in ["factorial", "quadratic"] {
+    for name in ["factorial", "quadratic", "include"] {
         let out = fx50()
             .arg("test")
             .arg(examples.join(format!("{name}.fxc")))
@@ -159,4 +162,68 @@ fn the_shipped_examples_pass_through_the_cli() {
         assert!(out.status.success(), "{name}: {stdout}");
         assert!(stdout.contains("0 failed"), "{name}: {stdout}");
     }
+}
+
+/// `fx50 build`/`run`/`test` must resolve `#include` relative to the program
+/// file, not the process's working directory.
+#[test]
+fn includes_resolve_relative_to_the_program() {
+    let dir = TempDir::new("includes");
+    dir.write("lib/double.fxc", "// doubles a into b\nlet b = a * 2;");
+    let program = dir.write(
+        "prog.fxc",
+        "let a = input();\n#include \"lib/double.fxc\"\nprint(b);\n",
+    );
+
+    // Build: the fragment is inlined.
+    let out = fx50().arg("build").arg(&program).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(out.status.success(), "{stdout}");
+    assert_eq!(stdout, "?→A\nA×2→B\nB◢\n");
+
+    // Run: end to end, feeding the `?` prompt.
+    let out = fx50()
+        .arg("run")
+        .arg(&program)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .and_then(|mut child| {
+            use std::io::Write;
+            child
+                .stdin
+                .as_mut()
+                .expect("stdin")
+                .write_all(b"21\n")
+                .expect("write stdin");
+            child.wait_with_output()
+        })
+        .expect("run fx50");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(out.status.success(), "{stdout}");
+    assert!(stdout.contains("42"), "{stdout}");
+
+    // And through a suite.
+    dir.write(
+        "prog.tests.json",
+        r#"{"program": "prog.fxc", "cases": [{"input": [21], "output": ["42"]}]}"#,
+    );
+    let out = fx50().arg("test").arg(&program).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(out.status.success(), "{stdout}");
+    assert!(stdout.contains("1 passed, 0 failed"), "{stdout}");
+}
+
+/// A broken include is reported with the file and line that caused it.
+#[test]
+fn a_missing_include_is_reported_with_its_location() {
+    let dir = TempDir::new("missing-include");
+    let program = dir.write("prog.fxc", "let a = 1;\n#include \"nope.fxc\"\n");
+
+    let out = fx50().arg("build").arg(&program).output().unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success());
+    assert!(stderr.contains("cannot include"), "{stderr}");
+    assert!(stderr.contains("nope.fxc"), "{stderr}");
+    assert!(stderr.contains(":2:1"), "{stderr}");
 }

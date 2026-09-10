@@ -1,19 +1,27 @@
 //! Errors produced while transpiling `.fxc` source into PRGM.
 
 use std::fmt;
+use std::path::Path;
 
 /// A transpile error carrying the message plus both the byte offset and the
 /// 1-based line/column of the offending source.
+///
+/// `file` is set when the error can be attributed to a specific file — an
+/// included fragment, or the root file when transpiling from a path. It is
+/// `None` for anonymous source, in which case `line`/`column` refer to that
+/// text directly.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TranspileError {
     /// Human-readable description of what went wrong.
     pub message: String,
-    /// Byte offset into the `.fxc` source.
+    /// Byte offset into the (include-expanded) `.fxc` source.
     pub offset: usize,
-    /// 1-based line number.
+    /// 1-based line number, within [`TranspileError::file`] when that is set.
     pub line: usize,
     /// 1-based column number, counted in `char`s.
     pub column: usize,
+    /// The file the position refers to, when known.
+    pub file: Option<String>,
 }
 
 impl TranspileError {
@@ -24,6 +32,7 @@ impl TranspileError {
             offset,
             line,
             column,
+            file: None,
         }
     }
 
@@ -32,15 +41,30 @@ impl TranspileError {
         let (line, column) = line_col(source, offset);
         TranspileError::new(message, offset, line, column)
     }
+
+    /// Attribute the error to `file`, unless it already names one.
+    pub fn in_file(mut self, file: Option<&Path>) -> Self {
+        if self.file.is_none() {
+            self.file = file.map(|p| p.display().to_string());
+        }
+        self
+    }
 }
 
 impl fmt::Display for TranspileError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "{} (line {}, column {})",
-            self.message, self.line, self.column
-        )
+        match &self.file {
+            Some(file) => write!(
+                f,
+                "{} ({}:{}:{})",
+                self.message, file, self.line, self.column
+            ),
+            None => write!(
+                f,
+                "{} (line {}, column {})",
+                self.message, self.line, self.column
+            ),
+        }
     }
 }
 

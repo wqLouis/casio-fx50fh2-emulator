@@ -204,6 +204,7 @@ table.
 | Forced modes with a `#mode` header, CLI `--mode` and static checks | ✅ |
 | 15-digit rounding + autocorrection | ✅ (f64-based — see note) |
 | C-like front end (`fx50 run x.fxc`) | ✅ |
+| `#include` for sharing fragments (transpile-time, C-style) | ✅ |
 | JSON test suites (`fx50 test x.fxc`) | ✅ |
 | Language server (`fx50 lsp`) | ✅ |
 | 40 physical constants | ⛔ not yet |
@@ -223,4 +224,6 @@ with execution tests, and LSP logic + server tests.
 
 `examples/` contains working programs in PRGM (`factorial.fx`, `fibonacci.fx`,
 `gcd.fx`, `quadratic.fx`, `complex_quadratic.fx`, `statistics.fx`) and in the
-C-like language (`factorial.fxc`, `quadratic.fxc`).
+C-like language (`factorial.fxc`, `quadratic.fxc`, and `include.fxc`, which
+splits its work across `lib/`). The `.fxc` examples ship with JSON test suites,
+run with `fx50 test examples/<name>.fxc`.

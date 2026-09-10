@@ -157,6 +157,75 @@ A+2→A
 WhileEnd
 ```
 
+## Sharing code with `#include`
+
+A program can pull in another file's text at transpile time:
+
+```c
+// main.fxc
+let n = input();
+#include "lib/squares.fxc"
+print(result);
+```
+
+```c
+// lib/squares.fxc
+let n_squared = n * n;
+#include "increment.fxc"
+```
+
+`fx50 build main.fxc` inlines both fragments before compiling, so the
+calculator only ever sees one flat program:
+
+```text
+?→A
+A×A→B
+B+1→C
+C◢
+```
+
+This is the `.fxc` analogue of C's `#include` or Rust's `include_str!`. It is
+useful for sharing a computation between several calculator programs.
+
+Rules:
+
+* The directive is `#include "path"` and must be the first thing on its line
+  (leading whitespace is fine, and a trailing `// comment` is allowed).
+* The path is resolved **relative to the file containing the directive**, so a
+  fragment can include its own neighbours without knowing who included it.
+* Includes nest, and a cycle is reported with the chain rather than looping.
+* Expansion is textual and unguarded, exactly like C: including a file twice
+  includes its text twice.
+* **A fragment is statements, not a function.** `.fxc` has no user-defined
+  functions, so a fragment reads and writes the same seven calculator memories
+  as whatever included it. Names are allocated in expanded source order, so a
+  fragment's variables are numbered where the `#include` line sits.
+* `#mode` may only appear in the root file, since the mode applies to the whole
+  program. A fragment that declares one is an error.
+
+The include itself never reaches the calculator — only the expanded program
+does. Diagnostics are reported against the file and line that actually caused
+them, even when the error is inside a fragment:
+
+```console
+$ fx50 build main.fxc
+fx50: unknown function `nope` (lib/squares.fxc:2:11)
+```
+
+From the library, `transpile_file` resolves includes relative to the file,
+while `transpile_with_base` does the same for text you already hold:
+
+```rust
+# use std::path::Path;
+# use fx_transpiler::{transpile_file, transpile_with_base, Options};
+let prgm = transpile_file(Path::new("examples/include.fxc"), Options::default())?;
+let prgm = transpile_with_base("let a = 1;\n#include \"frag.fxc\"", Options::default(), Path::new("src"))?;
+# Ok::<(), fx_transpiler::error::TranspileError>(())
+```
+
+Note that plain [`transpile`]/[`transpile_with`] resolve includes relative to
+the **current directory**, since a bare string carries no location.
+
 ## Testing programs with JSON
 
 A program can be regression-tested against a JSON suite that pairs inputs with

@@ -226,22 +226,20 @@ fn eval(source: &str, mode: Option<Mode>) -> Result<(), Fail> {
 }
 
 fn build(file: &Path, ascii: bool, mode: Option<Mode>) -> Result<(), Fail> {
-    let source = read_source(file)?;
-    let prgm = transpile_source(&source, ascii, mode)?;
+    let prgm = transpile_file(file, ascii, mode)?;
     print!("{prgm}");
     Ok(())
 }
 
 fn run_file(file: &Path, ascii: bool, mode: Option<Mode>) -> Result<(), Fail> {
-    let source = read_source(file)?;
     let name = file.display().to_string();
     let is_c_like = file
         .extension()
         .is_some_and(|ext| ext.eq_ignore_ascii_case("fxc"));
     let prgm = if is_c_like {
-        transpile_source(&source, ascii, mode)?
+        transpile_file(file, ascii, mode)?
     } else {
-        source
+        read_source(file)?
     };
     execute(&prgm, &name, mode)
 }
@@ -449,23 +447,21 @@ fn write_completions(shell: Shell) {
 // ---------------------------------------------------------------------------
 // Optional integrations (compiled in with the `transpiler` / `lsp` features)
 
-fn transpile_source(source: &str, ascii: bool, mode: Option<Mode>) -> Result<String, Fail> {
-    #[cfg(feature = "transpiler")]
-    {
-        let options = fx_transpiler::Options {
-            ascii,
-            mode: mode.map(to_transpiler_mode),
-        };
-        fx_transpiler::transpile_with(source, options).map_err(|e| Fail::Message(e.to_string()))
-    }
-    #[cfg(not(feature = "transpiler"))]
-    {
-        let _ = (source, ascii, mode);
-        Err(Fail::Message(
-            "transpiler support is not compiled in (rebuild with `--features transpiler`)"
-                .to_string(),
-        ))
-    }
+/// Transpile a `.fxc` file, resolving `#include` relative to that file.
+#[cfg(feature = "transpiler")]
+fn transpile_file(file: &Path, ascii: bool, mode: Option<Mode>) -> Result<String, Fail> {
+    let options = fx_transpiler::Options {
+        ascii,
+        mode: mode.map(to_transpiler_mode),
+    };
+    fx_transpiler::transpile_file(file, options).map_err(|e| Fail::Message(e.to_string()))
+}
+
+#[cfg(not(feature = "transpiler"))]
+fn transpile_file(_file: &Path, _ascii: bool, _mode: Option<Mode>) -> Result<String, Fail> {
+    Err(Fail::Message(
+        "transpiler support is not compiled in (rebuild with `--features transpiler`)".to_string(),
+    ))
 }
 
 /// The transpiler keeps its own `Mode` so it can build without the core crate.

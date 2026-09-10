@@ -1,0 +1,8 @@
+// Fragment: squares `n` into `n_squared`.
+//
+// A fragment is plain statements, not a function: it reads and writes the same
+// seven calculator memories as whatever included it. `n` is defined by the
+// including program; `n_squared` is handed back to it.
+let n_squared = n * n;
+
+#include "increment.fxc"

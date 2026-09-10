@@ -59,7 +59,7 @@ use serde::{Deserialize, Serialize};
 
 use casio_fx50fh2::{Interpreter, MockHost};
 
-use crate::{Mode, Options, transpile_with};
+use crate::{Mode, Options, transpile_with_base};
 
 // ---------------------------------------------------------------------------
 // Errors
@@ -107,6 +107,10 @@ pub struct TestSuite {
     pub name: String,
     /// The `.fxc` source under test.
     pub program: String,
+    /// Directory that `#include` directives in the program resolve against:
+    /// the program's own directory when `program` named a file, otherwise the
+    /// directory holding the suite.
+    pub base_dir: PathBuf,
     /// Operating mode override, if the suite specified one.
     pub mode: Option<Mode>,
     /// Whether to transpile with ASCII aliases.
@@ -196,7 +200,8 @@ pub fn parse_suite(
         column: e.column(),
     })?;
 
-    let program = match (raw.program.as_deref(), raw.source.as_deref()) {
+    // The program's text, plus the directory its `#include`s resolve against.
+    let (program, program_dir) = match (raw.program.as_deref(), raw.source.as_deref()) {
         (Some(_), Some(_)) => {
             return Err(TestError::Schema(
                 "give either `program` or `source`, not both".to_string(),
@@ -204,17 +209,31 @@ pub fn parse_suite(
         }
         (Some(relative), None) => {
             let path = base_dir.join(relative);
-            std::fs::read_to_string(&path).map_err(|e| TestError::Io {
-                path,
+            let text = std::fs::read_to_string(&path).map_err(|e| TestError::Io {
+                path: path.clone(),
                 message: e.to_string(),
-            })?
+            })?;
+            let dir = path
+                .parent()
+                .map(Path::to_path_buf)
+                .unwrap_or_else(|| base_dir.to_path_buf());
+            (text, dir)
         }
-        (None, Some(inline)) => inline.to_string(),
+        // Inline source has no directory of its own, so includes resolve
+        // alongside the suite file.
+        (None, Some(inline)) => (inline.to_string(), base_dir.to_path_buf()),
         (None, None) => match fallback_program {
-            Some(path) => std::fs::read_to_string(path).map_err(|e| TestError::Io {
-                path: path.to_path_buf(),
-                message: e.to_string(),
-            })?,
+            Some(path) => {
+                let text = std::fs::read_to_string(path).map_err(|e| TestError::Io {
+                    path: path.to_path_buf(),
+                    message: e.to_string(),
+                })?;
+                let dir = path
+                    .parent()
+                    .map(Path::to_path_buf)
+                    .unwrap_or_else(|| base_dir.to_path_buf());
+                (text, dir)
+            }
             None => {
                 return Err(TestError::Schema(
                     "give `program` (a path) or `source` (inline .fxc text)".to_string(),
@@ -269,6 +288,7 @@ pub fn parse_suite(
         // (usually the file name) is used.
         name: raw.name.unwrap_or_else(|| name.to_string()),
         program,
+        base_dir: program_dir,
         mode,
         ascii: raw.ascii,
         cases,
@@ -416,7 +436,9 @@ fn prepare(suite: &TestSuite) -> Prepared {
         ascii: suite.ascii,
         mode: suite.mode,
     };
-    let prgm = match transpile_with(&suite.program, options) {
+    // Resolve the program's `#include` directives relative to wherever the
+    // program actually lives, not the process's working directory.
+    let prgm = match transpile_with_base(&suite.program, options, &suite.base_dir) {
         Ok(prgm) => prgm,
         Err(e) => return Prepared::Failed(format!("transpile error: {e}")),
     };

@@ -341,7 +341,54 @@ fx50: `sqrt` is not available in BASE mode (switch to COMP, CMPLX, SD or REG) (l
 
 ---
 
-## 8. Verify your program with a JSON test suite
+## 8. Splitting a program with `#include`
+
+A program can inline another file's text at transpile time:
+
+```c
+// main.fxc
+let n = input();
+#include "lib/squares.fxc"
+print(result);
+```
+
+`fx50 build main.fxc` substitutes the fragment before compiling, so the
+calculator still receives one flat program. This is the `.fxc` analogue of
+C's `#include` or Rust's `include_str!`.
+
+Rules that matter when generating code:
+
+* Syntax is exactly `#include "path"`, starting the line.
+* The path is relative to the file containing the directive, and includes
+  nest.
+* **A fragment is statements, not a function.** There are no user-defined
+  functions, so a fragment reads and writes the same seven memories as its
+  includer. `#include "f.fxc"` where `f.fxc` says `let total = a + 1;` is
+  exactly as if you had typed that line yourself — it can see `a` and leaves
+  `total` behind.
+* Variables are allocated in **expanded** source order, so the names inside a
+  fragment are numbered where the `#include` line sits. Place includes after
+  the inputs that should be allocated first if the numbering matters to you.
+* The seven-memory budget is shared across all files. Two fragments plus the
+  main program still fit in seven distinct names in total.
+* A fragment may **not** contain `#mode`; only the root file may declare a mode.
+* Expansion is unguarded, so including the same file twice duplicates its
+  statements.
+
+Errors inside a fragment are reported against that fragment, with its own line
+numbers:
+
+```text
+fx50: unknown function `nope` (lib/squares.fxc:2:11)
+```
+
+Prefer `#include` when two programs share a computation. Do **not** use it to
+simulate functions or parameter passing: there is no call, no arguments and no
+return value.
+
+---
+
+## 9. Verify your program with a JSON test suite
 
 You do not have to trust your own reading of a program: a `.fxc` file can be
 shipped with a JSON suite that pins its behaviour. Writing one is the strongest
@@ -422,7 +469,7 @@ Use `fx50 test prog.fxc --json` for a machine-readable report, and
 
 ---
 
-## 9. Checklist before you emit `.fxc`
+## 10. Checklist before you emit `.fxc`
 
 - [ ] Every statement ends with `;`.
 - [ ] `#mode` (if used) is the very first line, and the mode is spelled
@@ -439,6 +486,8 @@ Use `fx50 test prog.fxc --json` for a machine-readable report, and
 - [ ] Every `goto` has a matching `label`, and `break` only appears inside a
       loop.
 - [ ] In `#mode BASE`, no built-ins, no `pi`, no `e`.
+- [ ] `#include` paths exist, start the line, and contain no `#mode`; the
+      seven-memory budget is respected *after* expansion.
 - [ ] If you can run commands, a `.tests.json` suite covers the happy path
       **and** at least one error case, and `fx50 test` reports `0 failed`.
 
@@ -454,7 +503,7 @@ and, where inputs are known, execute it:
 printf '5\n' | fx50 run your.fxc
 ```
 
-Best of all, write a `your.tests.json` suite (§8) and run it — that checks
+Best of all, write a `your.tests.json` suite (§9) and run it — that checks
 many cases at once and leaves evidence behind:
 
 ```bash

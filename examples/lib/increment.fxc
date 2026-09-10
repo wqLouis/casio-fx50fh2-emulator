@@ -1,0 +1,5 @@
+// Fragment: adds one to `n_squared`, producing `result`.
+//
+// This file is included by another fragment (`squares.fxc`), which shows that
+// includes nest and that paths resolve relative to the *including* file.
+let result = n_squared + 1;

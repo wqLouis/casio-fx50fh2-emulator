@@ -168,9 +168,10 @@ impl<'a> Lexer<'a> {
             }
             if ch == '#' {
                 if !tokens.is_empty() {
-                    return Err(
-                        self.error("`#mode` must be the first non-comment, non-blank line", pos)
-                    );
+                    return Err(self.error(
+                        "a `#` directive must be the first non-comment, non-blank line",
+                        pos,
+                    ));
                 }
                 let mode = self.mode_directive()?;
                 tokens.push(Token {

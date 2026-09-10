@@ -1,0 +1,9 @@
+// Pulls in shared fragments at transpile time.
+//
+// `fx50 build examples/include.fxc` inlines each `#include` before compiling,
+// so the calculator only ever sees one flat program. Removing the files under
+// `examples/lib/` stops this building — that is the point of the example.
+
+let n = input();
+#include "lib/squares.fxc"
+print(result);
