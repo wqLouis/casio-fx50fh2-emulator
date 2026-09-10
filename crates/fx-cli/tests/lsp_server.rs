@@ -52,13 +52,19 @@ fn recv_until(stdout: &mut BufReader<ChildStdout>, needle: &str, limit: usize) -
 }
 
 fn spawn() -> (Child, ChildStdin, BufReader<ChildStdout>) {
+    spawn_with(&["lsp"])
+}
+
+/// Spawn `fx50` with an explicit argument list, so tests can cover the launch
+/// forms that different editor clients use.
+fn spawn_with(args: &[&str]) -> (Child, ChildStdin, BufReader<ChildStdout>) {
     let mut child = Command::new(env!("CARGO_BIN_EXE_fx50"))
-        .arg("lsp")
+        .args(args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
-        .expect("spawn `fx50 lsp`");
+        .unwrap_or_else(|e| panic!("spawn `fx50 {}`: {e}", args.join(" ")));
     let stdin = child.stdin.take().unwrap();
     let stdout = BufReader::new(child.stdout.take().unwrap());
     (child, stdin, stdout)
@@ -150,4 +156,41 @@ fn mode_errors_are_published() {
     );
     drop(stdin);
     let _ = child.wait();
+}
+
+/// Editor clients disagree about how to ask for stdio. All of these must
+/// start the very same server, because users paste launch commands from
+/// wherever they find them.
+#[test]
+fn every_launch_form_starts_the_server() {
+    for args in [
+        vec!["lsp"],
+        vec!["lsp", "--stdio"],
+        vec!["--stdio", "lsp"],
+        vec!["--lsp"],
+        vec!["--stdio", "--lsp"],
+    ] {
+        let (mut child, mut stdin, mut stdout) = spawn_with(&args);
+        send(
+            &mut stdin,
+            r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}"#,
+        );
+        let reply = recv_until(&mut stdout, "\"id\":1", 5);
+        assert!(
+            reply.contains("capabilities"),
+            "`fx50 {}` did not initialize: {reply}",
+            args.join(" ")
+        );
+        send(
+            &mut stdin,
+            r#"{"jsonrpc":"2.0","id":2,"method":"shutdown","params":null}"#,
+        );
+        let _ = recv_until(&mut stdout, "\"id\":2", 5);
+        send(
+            &mut stdin,
+            r#"{"jsonrpc":"2.0","method":"exit","params":null}"#,
+        );
+        drop(stdin);
+        let _ = child.wait();
+    }
 }

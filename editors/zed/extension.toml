@@ -1,0 +1,27 @@
+id = "fx50"
+name = "CASIO fx-50FH II"
+version = "0.1.0"
+schema_version = 1
+authors = ["wqLouis"]
+description = "Zed support for the CASIO fx-50FH II: the PRGM programming language (fx) and its C-like transpiler source (fxc)."
+repository = "https://github.com/wqLouis/casio-fx50fh2-emulator"
+
+[grammars.fx]
+repository = "https://github.com/wqLouis/casio-fx50fh2-emulator"
+rev = "PLACEHOLDER_REV"
+path = "editors/tree-sitter-fx"
+
+[grammars.fxc]
+repository = "https://github.com/wqLouis/casio-fx50fh2-emulator"
+rev = "PLACEHOLDER_REV"
+path = "editors/tree-sitter-fxc"
+
+[language_servers.fx50]
+name = "fx-50FH II"
+# These must match the `name` in each languages/<dir>/config.toml, which is how
+# Zed identifies a language.
+languages = ["fx-50FH II PRGM", "fx-50FH II C-like"]
+# Zed derives the LSP `languageId` from the language name (lowercased), which
+# would be "fx-50fh ii prgm".  Map it back to the short ids the server expects
+# (`fx` / `fxc`), the same ids VS Code and Neovim use.
+language_ids = { "fx-50FH II PRGM" = "fx", "fx-50FH II C-like" = "fxc" }

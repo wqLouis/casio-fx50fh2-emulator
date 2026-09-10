@@ -1,0 +1,1281 @@
+[
+  {
+    "type": "assignment",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "expression",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "binary_operator",
+    "named": true,
+    "fields": {}
+  },
+  {
+    "type": "complex_format",
+    "named": true,
+    "fields": {}
+  },
+  {
+    "type": "conditional_statement",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "expression",
+          "named": true
+        },
+        {
+          "type": "statement",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "constant",
+    "named": true,
+    "fields": {}
+  },
+  {
+    "type": "display_statement",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "expression",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "expression",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": false,
+      "types": [
+        {
+          "type": "binary_operator",
+          "named": true
+        },
+        {
+          "type": "complex_format",
+          "named": true
+        },
+        {
+          "type": "constant",
+          "named": true
+        },
+        {
+          "type": "expression",
+          "named": true
+        },
+        {
+          "type": "function",
+          "named": true
+        },
+        {
+          "type": "number",
+          "named": true
+        },
+        {
+          "type": "postfix_operator",
+          "named": true
+        },
+        {
+          "type": "random",
+          "named": true
+        },
+        {
+          "type": "scientific_constant",
+          "named": true
+        },
+        {
+          "type": "stat_variable",
+          "named": true
+        },
+        {
+          "type": "variable",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "expression_statement",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "expression",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "function",
+    "named": true,
+    "fields": {}
+  },
+  {
+    "type": "goto_statement",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "number",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "input_statement",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": false,
+      "types": [
+        {
+          "type": "expression",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "keyword_statement",
+    "named": true,
+    "fields": {}
+  },
+  {
+    "type": "label_statement",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "number",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "mode_directive",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "mode_name",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "number",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "base_number",
+          "named": true
+        },
+        {
+          "type": "decimal_number",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "postfix_operator",
+    "named": true,
+    "fields": {}
+  },
+  {
+    "type": "scientific_constant",
+    "named": true,
+    "fields": {}
+  },
+  {
+    "type": "source_file",
+    "named": true,
+    "root": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": false,
+      "types": [
+        {
+          "type": "assignment",
+          "named": true
+        },
+        {
+          "type": "conditional_statement",
+          "named": true
+        },
+        {
+          "type": "display_statement",
+          "named": true
+        },
+        {
+          "type": "expression_statement",
+          "named": true
+        },
+        {
+          "type": "goto_statement",
+          "named": true
+        },
+        {
+          "type": "input_statement",
+          "named": true
+        },
+        {
+          "type": "keyword_statement",
+          "named": true
+        },
+        {
+          "type": "label_statement",
+          "named": true
+        },
+        {
+          "type": "mode_directive",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "stat_variable",
+    "named": true,
+    "fields": {}
+  },
+  {
+    "type": "statement",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "assignment",
+          "named": true
+        },
+        {
+          "type": "conditional_statement",
+          "named": true
+        },
+        {
+          "type": "display_statement",
+          "named": true
+        },
+        {
+          "type": "expression_statement",
+          "named": true
+        },
+        {
+          "type": "goto_statement",
+          "named": true
+        },
+        {
+          "type": "input_statement",
+          "named": true
+        },
+        {
+          "type": "keyword_statement",
+          "named": true
+        },
+        {
+          "type": "label_statement",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "variable",
+    "named": true,
+    "fields": {}
+  },
+  {
+    "type": "!",
+    "named": false
+  },
+  {
+    "type": "%",
+    "named": false
+  },
+  {
+    "type": "(",
+    "named": false
+  },
+  {
+    "type": ")",
+    "named": false
+  },
+  {
+    "type": "*",
+    "named": false
+  },
+  {
+    "type": "+",
+    "named": false
+  },
+  {
+    "type": ",",
+    "named": false
+  },
+  {
+    "type": "-",
+    "named": false
+  },
+  {
+    "type": "->",
+    "named": false
+  },
+  {
+    "type": "/",
+    "named": false
+  },
+  {
+    "type": "10^",
+    "named": false
+  },
+  {
+    "type": ":",
+    "named": false
+  },
+  {
+    "type": ";",
+    "named": false
+  },
+  {
+    "type": "<",
+    "named": false
+  },
+  {
+    "type": "<=",
+    "named": false
+  },
+  {
+    "type": "<>",
+    "named": false
+  },
+  {
+    "type": "=",
+    "named": false
+  },
+  {
+    "type": "==",
+    "named": false
+  },
+  {
+    "type": "=>",
+    "named": false
+  },
+  {
+    "type": ">",
+    "named": false
+  },
+  {
+    "type": ">=",
+    "named": false
+  },
+  {
+    "type": ">a+bi",
+    "named": false
+  },
+  {
+    "type": ">rangle",
+    "named": false
+  },
+  {
+    "type": "?",
+    "named": false
+  },
+  {
+    "type": "A",
+    "named": false
+  },
+  {
+    "type": "Abs",
+    "named": false
+  },
+  {
+    "type": "Ans",
+    "named": false
+  },
+  {
+    "type": "B",
+    "named": false
+  },
+  {
+    "type": "Bin",
+    "named": false
+  },
+  {
+    "type": "Break",
+    "named": false
+  },
+  {
+    "type": "C",
+    "named": false
+  },
+  {
+    "type": "C0",
+    "named": false
+  },
+  {
+    "type": "C1",
+    "named": false
+  },
+  {
+    "type": "C2",
+    "named": false
+  },
+  {
+    "type": "ClrMemory",
+    "named": false
+  },
+  {
+    "type": "ClrStat",
+    "named": false
+  },
+  {
+    "type": "Conjg",
+    "named": false
+  },
+  {
+    "type": "D",
+    "named": false
+  },
+  {
+    "type": "DT",
+    "named": false
+  },
+  {
+    "type": "Dec",
+    "named": false
+  },
+  {
+    "type": "Deg",
+    "named": false
+  },
+  {
+    "type": "Else",
+    "named": false
+  },
+  {
+    "type": "F",
+    "named": false
+  },
+  {
+    "type": "Fix",
+    "named": false
+  },
+  {
+    "type": "For",
+    "named": false
+  },
+  {
+    "type": "FreqOff",
+    "named": false
+  },
+  {
+    "type": "FreqOn",
+    "named": false
+  },
+  {
+    "type": "G",
+    "named": false
+  },
+  {
+    "type": "G0",
+    "named": false
+  },
+  {
+    "type": "Goto",
+    "named": false
+  },
+  {
+    "type": "Gra",
+    "named": false
+  },
+  {
+    "type": "Hex",
+    "named": false
+  },
+  {
+    "type": "If",
+    "named": false
+  },
+  {
+    "type": "IfEnd",
+    "named": false
+  },
+  {
+    "type": "Lbl",
+    "named": false
+  },
+  {
+    "type": "M",
+    "named": false
+  },
+  {
+    "type": "M+",
+    "named": false
+  },
+  {
+    "type": "M-",
+    "named": false
+  },
+  {
+    "type": "NA",
+    "named": false
+  },
+  {
+    "type": "Neg",
+    "named": false
+  },
+  {
+    "type": "Next",
+    "named": false
+  },
+  {
+    "type": "Norm",
+    "named": false
+  },
+  {
+    "type": "Not",
+    "named": false
+  },
+  {
+    "type": "Oct",
+    "named": false
+  },
+  {
+    "type": "Pol",
+    "named": false
+  },
+  {
+    "type": "R",
+    "named": false
+  },
+  {
+    "type": "Rad",
+    "named": false
+  },
+  {
+    "type": "Rec",
+    "named": false
+  },
+  {
+    "type": "Rinf",
+    "named": false
+  },
+  {
+    "type": "Rnd",
+    "named": false
+  },
+  {
+    "type": "R∞",
+    "named": false
+  },
+  {
+    "type": "Sci",
+    "named": false
+  },
+  {
+    "type": "Step",
+    "named": false
+  },
+  {
+    "type": "Then",
+    "named": false
+  },
+  {
+    "type": "To",
+    "named": false
+  },
+  {
+    "type": "Vm",
+    "named": false
+  },
+  {
+    "type": "While",
+    "named": false
+  },
+  {
+    "type": "WhileEnd",
+    "named": false
+  },
+  {
+    "type": "X",
+    "named": false
+  },
+  {
+    "type": "Y",
+    "named": false
+  },
+  {
+    "type": "Z0",
+    "named": false
+  },
+  {
+    "type": "^",
+    "named": false
+  },
+  {
+    "type": "^-1",
+    "named": false
+  },
+  {
+    "type": "^2",
+    "named": false
+  },
+  {
+    "type": "^3",
+    "named": false
+  },
+  {
+    "type": "a0",
+    "named": false
+  },
+  {
+    "type": "acos",
+    "named": false
+  },
+  {
+    "type": "acosh",
+    "named": false
+  },
+  {
+    "type": "alpha",
+    "named": false
+  },
+  {
+    "type": "and",
+    "named": false
+  },
+  {
+    "type": "arg",
+    "named": false
+  },
+  {
+    "type": "asin",
+    "named": false
+  },
+  {
+    "type": "asinh",
+    "named": false
+  },
+  {
+    "type": "atan",
+    "named": false
+  },
+  {
+    "type": "atanh",
+    "named": false
+  },
+  {
+    "type": "atm",
+    "named": false
+  },
+  {
+    "type": "base_number",
+    "named": true
+  },
+  {
+    "type": "cbrt",
+    "named": false
+  },
+  {
+    "type": "comment",
+    "named": true,
+    "extra": true
+  },
+  {
+    "type": "cos",
+    "named": false
+  },
+  {
+    "type": "cos^-1",
+    "named": false
+  },
+  {
+    "type": "cosh",
+    "named": false
+  },
+  {
+    "type": "cosh^-1",
+    "named": false
+  },
+  {
+    "type": "cosh⁻¹",
+    "named": false
+  },
+  {
+    "type": "cos⁻¹",
+    "named": false
+  },
+  {
+    "type": "decimal_number",
+    "named": true
+  },
+  {
+    "type": "disp",
+    "named": false
+  },
+  {
+    "type": "div",
+    "named": false
+  },
+  {
+    "type": "e",
+    "named": false
+  },
+  {
+    "type": "e^",
+    "named": false
+  },
+  {
+    "type": "eps0",
+    "named": false
+  },
+  {
+    "type": "eq",
+    "named": false
+  },
+  {
+    "type": "g",
+    "named": false
+  },
+  {
+    "type": "goto",
+    "named": false
+  },
+  {
+    "type": "gp",
+    "named": false
+  },
+  {
+    "type": "h",
+    "named": false
+  },
+  {
+    "type": "hbar",
+    "named": false
+  },
+  {
+    "type": "i",
+    "named": false
+  },
+  {
+    "type": "k",
+    "named": false
+  },
+  {
+    "type": "lbl",
+    "named": false
+  },
+  {
+    "type": "lc",
+    "named": false
+  },
+  {
+    "type": "lcn",
+    "named": false
+  },
+  {
+    "type": "lcp",
+    "named": false
+  },
+  {
+    "type": "ln",
+    "named": false
+  },
+  {
+    "type": "log",
+    "named": false
+  },
+  {
+    "type": "maxX",
+    "named": false
+  },
+  {
+    "type": "maxY",
+    "named": false
+  },
+  {
+    "type": "maxx",
+    "named": false
+  },
+  {
+    "type": "maxy",
+    "named": false
+  },
+  {
+    "type": "me",
+    "named": false
+  },
+  {
+    "type": "meanx",
+    "named": false
+  },
+  {
+    "type": "meany",
+    "named": false
+  },
+  {
+    "type": "minX",
+    "named": false
+  },
+  {
+    "type": "minY",
+    "named": false
+  },
+  {
+    "type": "minx",
+    "named": false
+  },
+  {
+    "type": "miny",
+    "named": false
+  },
+  {
+    "type": "mmu",
+    "named": false
+  },
+  {
+    "type": "mn",
+    "named": false
+  },
+  {
+    "type": "mode_name",
+    "named": true
+  },
+  {
+    "type": "mp",
+    "named": false
+  },
+  {
+    "type": "mu0",
+    "named": false
+  },
+  {
+    "type": "muB",
+    "named": false
+  },
+  {
+    "type": "muN",
+    "named": false
+  },
+  {
+    "type": "mue",
+    "named": false
+  },
+  {
+    "type": "mumu",
+    "named": false
+  },
+  {
+    "type": "mun",
+    "named": false
+  },
+  {
+    "type": "mup",
+    "named": false
+  },
+  {
+    "type": "mμ",
+    "named": false
+  },
+  {
+    "type": "n",
+    "named": false
+  },
+  {
+    "type": "nCr",
+    "named": false
+  },
+  {
+    "type": "nPr",
+    "named": false
+  },
+  {
+    "type": "or",
+    "named": false
+  },
+  {
+    "type": "phi0",
+    "named": false
+  },
+  {
+    "type": "pi",
+    "named": false
+  },
+  {
+    "type": "random",
+    "named": true
+  },
+  {
+    "type": "re",
+    "named": false
+  },
+  {
+    "type": "regA",
+    "named": false
+  },
+  {
+    "type": "regB",
+    "named": false
+  },
+  {
+    "type": "regR",
+    "named": false
+  },
+  {
+    "type": "rega",
+    "named": false
+  },
+  {
+    "type": "regb",
+    "named": false
+  },
+  {
+    "type": "regr",
+    "named": false
+  },
+  {
+    "type": "sigma",
+    "named": false
+  },
+  {
+    "type": "sigmax",
+    "named": false
+  },
+  {
+    "type": "sigmay",
+    "named": false
+  },
+  {
+    "type": "sin",
+    "named": false
+  },
+  {
+    "type": "sin^-1",
+    "named": false
+  },
+  {
+    "type": "sinh",
+    "named": false
+  },
+  {
+    "type": "sinh^-1",
+    "named": false
+  },
+  {
+    "type": "sinh⁻¹",
+    "named": false
+  },
+  {
+    "type": "sin⁻¹",
+    "named": false
+  },
+  {
+    "type": "sqrt",
+    "named": false
+  },
+  {
+    "type": "sumx",
+    "named": false
+  },
+  {
+    "type": "sumx2",
+    "named": false
+  },
+  {
+    "type": "sumxy",
+    "named": false
+  },
+  {
+    "type": "sumy",
+    "named": false
+  },
+  {
+    "type": "sumy2",
+    "named": false
+  },
+  {
+    "type": "sx",
+    "named": false
+  },
+  {
+    "type": "sy",
+    "named": false
+  },
+  {
+    "type": "t",
+    "named": false
+  },
+  {
+    "type": "tK",
+    "named": false
+  },
+  {
+    "type": "tan",
+    "named": false
+  },
+  {
+    "type": "tan^-1",
+    "named": false
+  },
+  {
+    "type": "tanh",
+    "named": false
+  },
+  {
+    "type": "tanh^-1",
+    "named": false
+  },
+  {
+    "type": "tanh⁻¹",
+    "named": false
+  },
+  {
+    "type": "tan⁻¹",
+    "named": false
+  },
+  {
+    "type": "u",
+    "named": false
+  },
+  {
+    "type": "xnor",
+    "named": false
+  },
+  {
+    "type": "xor",
+    "named": false
+  },
+  {
+    "type": "x̄",
+    "named": false
+  },
+  {
+    "type": "x√",
+    "named": false
+  },
+  {
+    "type": "²",
+    "named": false
+  },
+  {
+    "type": "³",
+    "named": false
+  },
+  {
+    "type": "×",
+    "named": false
+  },
+  {
+    "type": "÷",
+    "named": false
+  },
+  {
+    "type": "ħ",
+    "named": false
+  },
+  {
+    "type": "ȳ",
+    "named": false
+  },
+  {
+    "type": "Σx",
+    "named": false
+  },
+  {
+    "type": "Σxy",
+    "named": false
+  },
+  {
+    "type": "Σx²",
+    "named": false
+  },
+  {
+    "type": "Σy",
+    "named": false
+  },
+  {
+    "type": "Σy²",
+    "named": false
+  },
+  {
+    "type": "α",
+    "named": false
+  },
+  {
+    "type": "γp",
+    "named": false
+  },
+  {
+    "type": "ε0",
+    "named": false
+  },
+  {
+    "type": "λc",
+    "named": false
+  },
+  {
+    "type": "λcn",
+    "named": false
+  },
+  {
+    "type": "λcp",
+    "named": false
+  },
+  {
+    "type": "μ0",
+    "named": false
+  },
+  {
+    "type": "μB",
+    "named": false
+  },
+  {
+    "type": "μN",
+    "named": false
+  },
+  {
+    "type": "μe",
+    "named": false
+  },
+  {
+    "type": "μn",
+    "named": false
+  },
+  {
+    "type": "μp",
+    "named": false
+  },
+  {
+    "type": "μμ",
+    "named": false
+  },
+  {
+    "type": "π",
+    "named": false
+  },
+  {
+    "type": "σ",
+    "named": false
+  },
+  {
+    "type": "σx",
+    "named": false
+  },
+  {
+    "type": "σy",
+    "named": false
+  },
+  {
+    "type": "φ0",
+    "named": false
+  },
+  {
+    "type": "⁻¹",
+    "named": false
+  },
+  {
+    "type": "→",
+    "named": false
+  },
+  {
+    "type": "⇒",
+    "named": false
+  },
+  {
+    "type": "√",
+    "named": false
+  },
+  {
+    "type": "∛",
+    "named": false
+  },
+  {
+    "type": "∠",
+    "named": false
+  },
+  {
+    "type": "≠",
+    "named": false
+  },
+  {
+    "type": "≤",
+    "named": false
+  },
+  {
+    "type": "≥",
+    "named": false
+  },
+  {
+    "type": "┘",
+    "named": false
+  },
+  {
+    "type": "▶a+bi",
+    "named": false
+  },
+  {
+    "type": "▶a+b𝑖",
+    "named": false
+  },
+  {
+    "type": "▶a+b𝒾",
+    "named": false
+  },
+  {
+    "type": "▶r∠θ",
+    "named": false
+  },
+  {
+    "type": "◢",
+    "named": false
+  }
+]

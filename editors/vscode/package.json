@@ -1,0 +1,96 @@
+{
+  "name": "fx50-vscode",
+  "displayName": "CASIO fx-50FH II",
+  "description": "Language support for the CASIO fx-50FH II calculator: PRGM (.fx) and the C-like .fxc language, powered by the fx50 language server.",
+  "version": "0.1.0",
+  "publisher": "casio-fx50fh2",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.82.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Linters"
+  ],
+  "activationEvents": [
+    "onLanguage:fx",
+    "onLanguage:fxc"
+  ],
+  "main": "./out/extension.js",
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ."
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.82.0",
+    "typescript": "^5.3.0"
+  },
+  "contributes": {
+    "languages": [
+      {
+        "id": "fx",
+        "aliases": [
+          "CASIO fx-50FH II PRGM",
+          "fx"
+        ],
+        "extensions": [
+          ".fx"
+        ],
+        "configuration": "./language-configuration.json"
+      },
+      {
+        "id": "fxc",
+        "aliases": [
+          "CASIO fx-50FH II C-like",
+          "fxc"
+        ],
+        "extensions": [
+          ".fxc"
+        ],
+        "configuration": "./language-configuration-fxc.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "fx",
+        "scopeName": "source.fx",
+        "path": "./syntaxes/fx.tmLanguage.json"
+      },
+      {
+        "language": "fxc",
+        "scopeName": "source.fxc",
+        "path": "./syntaxes/fxc.tmLanguage.json"
+      }
+    ],
+    "commands": [
+      {
+        "command": "fx50.restartServer",
+        "title": "fx-50FH II: Restart Language Server"
+      }
+    ],
+    "configuration": {
+      "title": "CASIO fx-50FH II",
+      "properties": {
+        "fx50.serverPath": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Absolute path to the `fx50` binary that provides `fx50 lsp`. Leave empty to search `PATH` for `fx50`, and then each workspace folder's `target/release/fx50` and `target/debug/fx50`. Build the binary from this repository with `cargo build`."
+        },
+        "fx50.trace.server": {
+          "type": "string",
+          "enum": [
+            "off",
+            "messages",
+            "verbose"
+          ],
+          "default": "off",
+          "description": "Trace level for the fx50 language server."
+        }
+      }
+    }
+  }
+}

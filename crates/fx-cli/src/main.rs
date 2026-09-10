@@ -75,6 +75,12 @@ struct Cli {
     #[arg(short = 'l', long = "lsp")]
     lsp: bool,
 
+    /// Accepted and ignored.  Many editor clients append `--stdio` to any
+    /// language server command; this server always speaks stdio, so the flag
+    /// exists only so those launch configurations work unchanged.
+    #[arg(long, hide = true, global = true)]
+    stdio: bool,
+
     /// A program file to run, like `python script.py`
     #[arg(value_name = "FILE")]
     file: Option<PathBuf>,

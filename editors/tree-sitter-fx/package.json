@@ -1,0 +1,25 @@
+{
+  "name": "tree-sitter-fx",
+  "version": "0.1.0",
+  "description": "Tree-sitter grammar for the CASIO fx-50FH II PRGM language",
+  "license": "MIT",
+  "main": "bindings/node",
+  "keywords": [
+    "tree-sitter",
+    "parser",
+    "casio",
+    "fx-50fh2"
+  ],
+  "files": [
+    "grammar.js",
+    "queries",
+    "src"
+  ],
+  "tree-sitter": {
+    "name": "fx",
+    "scope": "source.fx"
+  },
+  "devDependencies": {
+    "tree-sitter-cli": "^0.25.0"
+  }
+}

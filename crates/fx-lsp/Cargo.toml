@@ -11,5 +11,6 @@ path = "src/lib.rs"
 
 [dependencies]
 casio-fx50fh2 = { path = "../.." }
+fx-transpiler = { path = "../fx-transpiler", default-features = false }
 tower-lsp = "0.20"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "io-std"] }

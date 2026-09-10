@@ -1,0 +1,1427 @@
+{
+  "$schema": "https://tree-sitter.github.io/tree-sitter/assets/schemas/grammar.schema.json",
+  "name": "fx",
+  "rules": {
+    "source_file": {
+      "type": "REPEAT",
+      "content": {
+        "type": "SYMBOL",
+        "name": "_statement"
+      }
+    },
+    "_statement": {
+      "type": "CHOICE",
+      "members": [
+        {
+          "type": "SYMBOL",
+          "name": "mode_directive"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "input_statement"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "display_statement"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "assignment"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "conditional_statement"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "goto_statement"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "label_statement"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "keyword_statement"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "expression_statement"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "_separator"
+        }
+      ]
+    },
+    "statement": {
+      "type": "CHOICE",
+      "members": [
+        {
+          "type": "SYMBOL",
+          "name": "input_statement"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "display_statement"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "assignment"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "conditional_statement"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "goto_statement"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "label_statement"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "keyword_statement"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "expression_statement"
+        }
+      ]
+    },
+    "_separator": {
+      "type": "CHOICE",
+      "members": [
+        {
+          "type": "STRING",
+          "value": ":"
+        },
+        {
+          "type": "STRING",
+          "value": ";"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "_newline"
+        }
+      ]
+    },
+    "_newline": {
+      "type": "TOKEN",
+      "content": {
+        "type": "PATTERN",
+        "value": "\\r?\\n"
+      }
+    },
+    "mode_directive": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "TOKEN",
+          "content": {
+            "type": "PREC",
+            "value": 3,
+            "content": {
+              "type": "PATTERN",
+              "value": "#[mM][oO][dD][eE]"
+            }
+          }
+        },
+        {
+          "type": "CHOICE",
+          "members": [
+            {
+              "type": "STRING",
+              "value": "="
+            },
+            {
+              "type": "BLANK"
+            }
+          ]
+        },
+        {
+          "type": "SYMBOL",
+          "name": "mode_name"
+        }
+      ]
+    },
+    "mode_name": {
+      "type": "TOKEN",
+      "content": {
+        "type": "PREC",
+        "value": 2,
+        "content": {
+          "type": "PATTERN",
+          "value": "[A-Za-z][A-Za-z0-9_-]*"
+        }
+      }
+    },
+    "comment": {
+      "type": "TOKEN",
+      "content": {
+        "type": "SEQ",
+        "members": [
+          {
+            "type": "STRING",
+            "value": "//"
+          },
+          {
+            "type": "PATTERN",
+            "value": "[^\\n]*"
+          }
+        ]
+      }
+    },
+    "input_statement": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "?"
+        },
+        {
+          "type": "CHOICE",
+          "members": [
+            {
+              "type": "SEQ",
+              "members": [
+                {
+                  "type": "SYMBOL",
+                  "name": "_assign_arrow"
+                },
+                {
+                  "type": "SYMBOL",
+                  "name": "expression"
+                }
+              ]
+            },
+            {
+              "type": "BLANK"
+            }
+          ]
+        }
+      ]
+    },
+    "display_statement": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "SYMBOL",
+          "name": "expression"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "_display"
+        }
+      ]
+    },
+    "assignment": {
+      "type": "PREC_RIGHT",
+      "value": 0,
+      "content": {
+        "type": "SEQ",
+        "members": [
+          {
+            "type": "SYMBOL",
+            "name": "expression"
+          },
+          {
+            "type": "SYMBOL",
+            "name": "_assign_arrow"
+          },
+          {
+            "type": "SYMBOL",
+            "name": "expression"
+          }
+        ]
+      }
+    },
+    "conditional_statement": {
+      "type": "PREC_RIGHT",
+      "value": 0,
+      "content": {
+        "type": "SEQ",
+        "members": [
+          {
+            "type": "SYMBOL",
+            "name": "expression"
+          },
+          {
+            "type": "SYMBOL",
+            "name": "_condjump"
+          },
+          {
+            "type": "SYMBOL",
+            "name": "statement"
+          }
+        ]
+      }
+    },
+    "_assign_arrow": {
+      "type": "CHOICE",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "→"
+        },
+        {
+          "type": "STRING",
+          "value": "->"
+        }
+      ]
+    },
+    "_display": {
+      "type": "CHOICE",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "◢"
+        },
+        {
+          "type": "STRING",
+          "value": "disp"
+        }
+      ]
+    },
+    "_condjump": {
+      "type": "CHOICE",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "⇒"
+        },
+        {
+          "type": "STRING",
+          "value": "=>"
+        }
+      ]
+    },
+    "goto_statement": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "SYMBOL",
+          "name": "_goto"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "number"
+        }
+      ]
+    },
+    "label_statement": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "SYMBOL",
+          "name": "_lbl"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "number"
+        }
+      ]
+    },
+    "_goto": {
+      "type": "CHOICE",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "Goto"
+        },
+        {
+          "type": "STRING",
+          "value": "goto"
+        }
+      ]
+    },
+    "_lbl": {
+      "type": "CHOICE",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "Lbl"
+        },
+        {
+          "type": "STRING",
+          "value": "lbl"
+        }
+      ]
+    },
+    "keyword_statement": {
+      "type": "CHOICE",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "If"
+        },
+        {
+          "type": "STRING",
+          "value": "Then"
+        },
+        {
+          "type": "STRING",
+          "value": "Else"
+        },
+        {
+          "type": "STRING",
+          "value": "IfEnd"
+        },
+        {
+          "type": "STRING",
+          "value": "For"
+        },
+        {
+          "type": "STRING",
+          "value": "To"
+        },
+        {
+          "type": "STRING",
+          "value": "Step"
+        },
+        {
+          "type": "STRING",
+          "value": "Next"
+        },
+        {
+          "type": "STRING",
+          "value": "While"
+        },
+        {
+          "type": "STRING",
+          "value": "WhileEnd"
+        },
+        {
+          "type": "STRING",
+          "value": "Break"
+        },
+        {
+          "type": "STRING",
+          "value": "ClrMemory"
+        },
+        {
+          "type": "STRING",
+          "value": "ClrStat"
+        },
+        {
+          "type": "STRING",
+          "value": "FreqOn"
+        },
+        {
+          "type": "STRING",
+          "value": "FreqOff"
+        },
+        {
+          "type": "STRING",
+          "value": "Deg"
+        },
+        {
+          "type": "STRING",
+          "value": "Rad"
+        },
+        {
+          "type": "STRING",
+          "value": "Gra"
+        },
+        {
+          "type": "STRING",
+          "value": "Fix"
+        },
+        {
+          "type": "STRING",
+          "value": "Sci"
+        },
+        {
+          "type": "STRING",
+          "value": "Norm"
+        },
+        {
+          "type": "STRING",
+          "value": "Dec"
+        },
+        {
+          "type": "STRING",
+          "value": "Hex"
+        },
+        {
+          "type": "STRING",
+          "value": "Bin"
+        },
+        {
+          "type": "STRING",
+          "value": "Oct"
+        },
+        {
+          "type": "STRING",
+          "value": "DT"
+        },
+        {
+          "type": "STRING",
+          "value": "M+"
+        },
+        {
+          "type": "STRING",
+          "value": "M-"
+        }
+      ]
+    },
+    "expression_statement": {
+      "type": "SYMBOL",
+      "name": "expression"
+    },
+    "expression": {
+      "type": "CHOICE",
+      "members": [
+        {
+          "type": "SYMBOL",
+          "name": "_expression_item"
+        },
+        {
+          "type": "PREC_LEFT",
+          "value": 1,
+          "content": {
+            "type": "SEQ",
+            "members": [
+              {
+                "type": "SYMBOL",
+                "name": "expression"
+              },
+              {
+                "type": "SYMBOL",
+                "name": "_expression_item"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "_expression_item": {
+      "type": "CHOICE",
+      "members": [
+        {
+          "type": "SYMBOL",
+          "name": "number"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "variable"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "constant"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "scientific_constant"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "stat_variable"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "function"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "random"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "binary_operator"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "postfix_operator"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "complex_format"
+        },
+        {
+          "type": "STRING",
+          "value": "^"
+        },
+        {
+          "type": "STRING",
+          "value": "("
+        },
+        {
+          "type": "STRING",
+          "value": ")"
+        },
+        {
+          "type": "STRING",
+          "value": ","
+        }
+      ]
+    },
+    "number": {
+      "type": "CHOICE",
+      "members": [
+        {
+          "type": "SYMBOL",
+          "name": "base_number"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "decimal_number"
+        }
+      ]
+    },
+    "decimal_number": {
+      "type": "TOKEN",
+      "content": {
+        "type": "PREC",
+        "value": 1,
+        "content": {
+          "type": "CHOICE",
+          "members": [
+            {
+              "type": "PATTERN",
+              "value": "[0-9]+(\\.[0-9]*)?([eE][+-]?[0-9]+)?"
+            },
+            {
+              "type": "PATTERN",
+              "value": "\\.[0-9]+([eE][+-]?[0-9]+)?"
+            }
+          ]
+        }
+      }
+    },
+    "base_number": {
+      "type": "TOKEN",
+      "content": {
+        "type": "PREC",
+        "value": 2,
+        "content": {
+          "type": "CHOICE",
+          "members": [
+            {
+              "type": "PATTERN",
+              "value": "[0-9A-Fa-f]+[hH]"
+            },
+            {
+              "type": "PATTERN",
+              "value": "[01]+b"
+            },
+            {
+              "type": "PATTERN",
+              "value": "[0-7]+o"
+            },
+            {
+              "type": "PATTERN",
+              "value": "[0-9]+d"
+            }
+          ]
+        }
+      }
+    },
+    "variable": {
+      "type": "CHOICE",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "A"
+        },
+        {
+          "type": "STRING",
+          "value": "B"
+        },
+        {
+          "type": "STRING",
+          "value": "C"
+        },
+        {
+          "type": "STRING",
+          "value": "D"
+        },
+        {
+          "type": "STRING",
+          "value": "X"
+        },
+        {
+          "type": "STRING",
+          "value": "Y"
+        },
+        {
+          "type": "STRING",
+          "value": "M"
+        },
+        {
+          "type": "STRING",
+          "value": "Ans"
+        }
+      ]
+    },
+    "constant": {
+      "type": "CHOICE",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "π"
+        },
+        {
+          "type": "STRING",
+          "value": "pi"
+        },
+        {
+          "type": "STRING",
+          "value": "e"
+        },
+        {
+          "type": "STRING",
+          "value": "i"
+        }
+      ]
+    },
+    "scientific_constant": {
+      "type": "CHOICE",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "mp"
+        },
+        {
+          "type": "STRING",
+          "value": "mn"
+        },
+        {
+          "type": "STRING",
+          "value": "me"
+        },
+        {
+          "type": "STRING",
+          "value": "mmu"
+        },
+        {
+          "type": "STRING",
+          "value": "a0"
+        },
+        {
+          "type": "STRING",
+          "value": "h"
+        },
+        {
+          "type": "STRING",
+          "value": "muN"
+        },
+        {
+          "type": "STRING",
+          "value": "muB"
+        },
+        {
+          "type": "STRING",
+          "value": "hbar"
+        },
+        {
+          "type": "STRING",
+          "value": "alpha"
+        },
+        {
+          "type": "STRING",
+          "value": "re"
+        },
+        {
+          "type": "STRING",
+          "value": "lc"
+        },
+        {
+          "type": "STRING",
+          "value": "gp"
+        },
+        {
+          "type": "STRING",
+          "value": "lcp"
+        },
+        {
+          "type": "STRING",
+          "value": "lcn"
+        },
+        {
+          "type": "STRING",
+          "value": "Rinf"
+        },
+        {
+          "type": "STRING",
+          "value": "u"
+        },
+        {
+          "type": "STRING",
+          "value": "mup"
+        },
+        {
+          "type": "STRING",
+          "value": "mue"
+        },
+        {
+          "type": "STRING",
+          "value": "mun"
+        },
+        {
+          "type": "STRING",
+          "value": "mumu"
+        },
+        {
+          "type": "STRING",
+          "value": "F"
+        },
+        {
+          "type": "STRING",
+          "value": "eq"
+        },
+        {
+          "type": "STRING",
+          "value": "NA"
+        },
+        {
+          "type": "STRING",
+          "value": "k"
+        },
+        {
+          "type": "STRING",
+          "value": "Vm"
+        },
+        {
+          "type": "STRING",
+          "value": "R"
+        },
+        {
+          "type": "STRING",
+          "value": "C0"
+        },
+        {
+          "type": "STRING",
+          "value": "C1"
+        },
+        {
+          "type": "STRING",
+          "value": "C2"
+        },
+        {
+          "type": "STRING",
+          "value": "sigma"
+        },
+        {
+          "type": "STRING",
+          "value": "eps0"
+        },
+        {
+          "type": "STRING",
+          "value": "mu0"
+        },
+        {
+          "type": "STRING",
+          "value": "phi0"
+        },
+        {
+          "type": "STRING",
+          "value": "g"
+        },
+        {
+          "type": "STRING",
+          "value": "G0"
+        },
+        {
+          "type": "STRING",
+          "value": "Z0"
+        },
+        {
+          "type": "STRING",
+          "value": "tK"
+        },
+        {
+          "type": "STRING",
+          "value": "G"
+        },
+        {
+          "type": "STRING",
+          "value": "atm"
+        },
+        {
+          "type": "STRING",
+          "value": "mμ"
+        },
+        {
+          "type": "STRING",
+          "value": "μN"
+        },
+        {
+          "type": "STRING",
+          "value": "μB"
+        },
+        {
+          "type": "STRING",
+          "value": "ħ"
+        },
+        {
+          "type": "STRING",
+          "value": "α"
+        },
+        {
+          "type": "STRING",
+          "value": "λc"
+        },
+        {
+          "type": "STRING",
+          "value": "γp"
+        },
+        {
+          "type": "STRING",
+          "value": "λcp"
+        },
+        {
+          "type": "STRING",
+          "value": "λcn"
+        },
+        {
+          "type": "STRING",
+          "value": "R∞"
+        },
+        {
+          "type": "STRING",
+          "value": "μp"
+        },
+        {
+          "type": "STRING",
+          "value": "μe"
+        },
+        {
+          "type": "STRING",
+          "value": "μn"
+        },
+        {
+          "type": "STRING",
+          "value": "μμ"
+        },
+        {
+          "type": "STRING",
+          "value": "σ"
+        },
+        {
+          "type": "STRING",
+          "value": "ε0"
+        },
+        {
+          "type": "STRING",
+          "value": "μ0"
+        },
+        {
+          "type": "STRING",
+          "value": "φ0"
+        },
+        {
+          "type": "STRING",
+          "value": "t"
+        }
+      ]
+    },
+    "stat_variable": {
+      "type": "CHOICE",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "Σx"
+        },
+        {
+          "type": "STRING",
+          "value": "Σx²"
+        },
+        {
+          "type": "STRING",
+          "value": "Σy"
+        },
+        {
+          "type": "STRING",
+          "value": "Σy²"
+        },
+        {
+          "type": "STRING",
+          "value": "Σxy"
+        },
+        {
+          "type": "STRING",
+          "value": "x̄"
+        },
+        {
+          "type": "STRING",
+          "value": "ȳ"
+        },
+        {
+          "type": "STRING",
+          "value": "σx"
+        },
+        {
+          "type": "STRING",
+          "value": "σy"
+        },
+        {
+          "type": "STRING",
+          "value": "sx"
+        },
+        {
+          "type": "STRING",
+          "value": "sy"
+        },
+        {
+          "type": "STRING",
+          "value": "minX"
+        },
+        {
+          "type": "STRING",
+          "value": "maxX"
+        },
+        {
+          "type": "STRING",
+          "value": "minY"
+        },
+        {
+          "type": "STRING",
+          "value": "maxY"
+        },
+        {
+          "type": "STRING",
+          "value": "regA"
+        },
+        {
+          "type": "STRING",
+          "value": "regB"
+        },
+        {
+          "type": "STRING",
+          "value": "regR"
+        },
+        {
+          "type": "STRING",
+          "value": "n"
+        },
+        {
+          "type": "STRING",
+          "value": "sumx"
+        },
+        {
+          "type": "STRING",
+          "value": "sumx2"
+        },
+        {
+          "type": "STRING",
+          "value": "sumy"
+        },
+        {
+          "type": "STRING",
+          "value": "sumy2"
+        },
+        {
+          "type": "STRING",
+          "value": "sumxy"
+        },
+        {
+          "type": "STRING",
+          "value": "meanx"
+        },
+        {
+          "type": "STRING",
+          "value": "meany"
+        },
+        {
+          "type": "STRING",
+          "value": "sigmax"
+        },
+        {
+          "type": "STRING",
+          "value": "sigmay"
+        },
+        {
+          "type": "STRING",
+          "value": "minx"
+        },
+        {
+          "type": "STRING",
+          "value": "maxx"
+        },
+        {
+          "type": "STRING",
+          "value": "miny"
+        },
+        {
+          "type": "STRING",
+          "value": "maxy"
+        },
+        {
+          "type": "STRING",
+          "value": "rega"
+        },
+        {
+          "type": "STRING",
+          "value": "regb"
+        },
+        {
+          "type": "STRING",
+          "value": "regr"
+        }
+      ]
+    },
+    "function": {
+      "type": "CHOICE",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "sinh⁻¹"
+        },
+        {
+          "type": "STRING",
+          "value": "cosh⁻¹"
+        },
+        {
+          "type": "STRING",
+          "value": "tanh⁻¹"
+        },
+        {
+          "type": "STRING",
+          "value": "sin⁻¹"
+        },
+        {
+          "type": "STRING",
+          "value": "cos⁻¹"
+        },
+        {
+          "type": "STRING",
+          "value": "tan⁻¹"
+        },
+        {
+          "type": "STRING",
+          "value": "sinh^-1"
+        },
+        {
+          "type": "STRING",
+          "value": "cosh^-1"
+        },
+        {
+          "type": "STRING",
+          "value": "tanh^-1"
+        },
+        {
+          "type": "STRING",
+          "value": "sin^-1"
+        },
+        {
+          "type": "STRING",
+          "value": "cos^-1"
+        },
+        {
+          "type": "STRING",
+          "value": "tan^-1"
+        },
+        {
+          "type": "STRING",
+          "value": "sinh"
+        },
+        {
+          "type": "STRING",
+          "value": "cosh"
+        },
+        {
+          "type": "STRING",
+          "value": "tanh"
+        },
+        {
+          "type": "STRING",
+          "value": "sin"
+        },
+        {
+          "type": "STRING",
+          "value": "cos"
+        },
+        {
+          "type": "STRING",
+          "value": "tan"
+        },
+        {
+          "type": "STRING",
+          "value": "asin"
+        },
+        {
+          "type": "STRING",
+          "value": "acos"
+        },
+        {
+          "type": "STRING",
+          "value": "atan"
+        },
+        {
+          "type": "STRING",
+          "value": "asinh"
+        },
+        {
+          "type": "STRING",
+          "value": "acosh"
+        },
+        {
+          "type": "STRING",
+          "value": "atanh"
+        },
+        {
+          "type": "STRING",
+          "value": "log"
+        },
+        {
+          "type": "STRING",
+          "value": "ln"
+        },
+        {
+          "type": "STRING",
+          "value": "sqrt"
+        },
+        {
+          "type": "STRING",
+          "value": "cbrt"
+        },
+        {
+          "type": "STRING",
+          "value": "Abs"
+        },
+        {
+          "type": "STRING",
+          "value": "Pol"
+        },
+        {
+          "type": "STRING",
+          "value": "Rec"
+        },
+        {
+          "type": "STRING",
+          "value": "Rnd"
+        },
+        {
+          "type": "STRING",
+          "value": "arg"
+        },
+        {
+          "type": "STRING",
+          "value": "Conjg"
+        },
+        {
+          "type": "STRING",
+          "value": "Not"
+        },
+        {
+          "type": "STRING",
+          "value": "Neg"
+        },
+        {
+          "type": "STRING",
+          "value": "√"
+        },
+        {
+          "type": "STRING",
+          "value": "∛"
+        },
+        {
+          "type": "STRING",
+          "value": "x√"
+        },
+        {
+          "type": "STRING",
+          "value": "10^"
+        },
+        {
+          "type": "STRING",
+          "value": "e^"
+        }
+      ]
+    },
+    "binary_operator": {
+      "type": "CHOICE",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "+"
+        },
+        {
+          "type": "STRING",
+          "value": "-"
+        },
+        {
+          "type": "STRING",
+          "value": "*"
+        },
+        {
+          "type": "STRING",
+          "value": "/"
+        },
+        {
+          "type": "STRING",
+          "value": "×"
+        },
+        {
+          "type": "STRING",
+          "value": "÷"
+        },
+        {
+          "type": "STRING",
+          "value": "┘"
+        },
+        {
+          "type": "STRING",
+          "value": "∠"
+        },
+        {
+          "type": "STRING",
+          "value": "nPr"
+        },
+        {
+          "type": "STRING",
+          "value": "nCr"
+        },
+        {
+          "type": "STRING",
+          "value": "="
+        },
+        {
+          "type": "STRING",
+          "value": "=="
+        },
+        {
+          "type": "STRING",
+          "value": "≠"
+        },
+        {
+          "type": "STRING",
+          "value": "<>"
+        },
+        {
+          "type": "STRING",
+          "value": ">"
+        },
+        {
+          "type": "STRING",
+          "value": "<"
+        },
+        {
+          "type": "STRING",
+          "value": "≥"
+        },
+        {
+          "type": "STRING",
+          "value": "<="
+        },
+        {
+          "type": "STRING",
+          "value": "≤"
+        },
+        {
+          "type": "STRING",
+          "value": ">="
+        },
+        {
+          "type": "STRING",
+          "value": "div"
+        },
+        {
+          "type": "STRING",
+          "value": "and"
+        },
+        {
+          "type": "STRING",
+          "value": "or"
+        },
+        {
+          "type": "STRING",
+          "value": "xor"
+        },
+        {
+          "type": "STRING",
+          "value": "xnor"
+        }
+      ]
+    },
+    "postfix_operator": {
+      "type": "CHOICE",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "²"
+        },
+        {
+          "type": "STRING",
+          "value": "³"
+        },
+        {
+          "type": "STRING",
+          "value": "⁻¹"
+        },
+        {
+          "type": "STRING",
+          "value": "!"
+        },
+        {
+          "type": "STRING",
+          "value": "%"
+        },
+        {
+          "type": "STRING",
+          "value": "^2"
+        },
+        {
+          "type": "STRING",
+          "value": "^3"
+        },
+        {
+          "type": "STRING",
+          "value": "^-1"
+        }
+      ]
+    },
+    "random": {
+      "type": "STRING",
+      "value": "Ran#"
+    },
+    "complex_format": {
+      "type": "CHOICE",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "▶a+b𝑖"
+        },
+        {
+          "type": "STRING",
+          "value": "▶a+b𝒾"
+        },
+        {
+          "type": "STRING",
+          "value": "▶a+bi"
+        },
+        {
+          "type": "STRING",
+          "value": "▶r∠θ"
+        },
+        {
+          "type": "STRING",
+          "value": ">a+bi"
+        },
+        {
+          "type": "STRING",
+          "value": ">rangle"
+        }
+      ]
+    }
+  },
+  "extras": [
+    {
+      "type": "PATTERN",
+      "value": "[ \\t\\r]+"
+    },
+    {
+      "type": "SYMBOL",
+      "name": "comment"
+    }
+  ],
+  "conflicts": [],
+  "precedences": [],
+  "externals": [],
+  "inline": [],
+  "supertypes": [],
+  "reserved": {}
+}

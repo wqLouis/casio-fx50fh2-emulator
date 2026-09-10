@@ -1,0 +1,25 @@
+{
+  "name": "tree-sitter-fxc",
+  "version": "0.1.0",
+  "description": "Tree-sitter grammar for the CASIO fx-50FH II C-like language",
+  "license": "MIT",
+  "main": "bindings/node",
+  "keywords": [
+    "tree-sitter",
+    "parser",
+    "casio",
+    "fx-50fh2"
+  ],
+  "files": [
+    "grammar.js",
+    "queries",
+    "src"
+  ],
+  "tree-sitter": {
+    "name": "fxc",
+    "scope": "source.fxc"
+  },
+  "devDependencies": {
+    "tree-sitter-cli": "^0.25.0"
+  }
+}

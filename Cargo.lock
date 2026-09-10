@@ -355,6 +355,7 @@ name = "fx-lsp"
 version = "0.1.0"
 dependencies = [
  "casio-fx50fh2",
+ "fx-transpiler",
  "tokio",
  "tower-lsp",
 ]

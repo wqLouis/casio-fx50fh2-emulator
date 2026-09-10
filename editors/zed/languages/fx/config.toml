@@ -1,0 +1,23 @@
+name = "fx-50FH II PRGM"
+grammar = "fx"
+path_suffixes = ["fx"]
+
+# The program editor skips `//` to end-of-line, so a line comment does exist
+# even though the hardware keyboard has no comment key.  Every shipped example
+# in the repository uses it.
+line_comments = ["// "]
+
+tab_size = 2
+hard_tabs = false
+
+autoclose_before = ")"
+
+brackets = [
+  { start = "(", end = ")", close = true, surround = true, newline = false },
+]
+
+# Calculator glyphs that should be treated as part of a word.
+word_characters = [
+  "π", "√", "∛", "²", "³", "×", "÷", "┘", "∠",
+  "≠", "≥", "≤", "→", "◢", "⇒", "Σ", "σ",
+]

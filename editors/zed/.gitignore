@@ -1,0 +1,4 @@
+# Rust build output for the wasm extension. `Cargo.lock` is committed on
+# purpose: this is an application-like cdylib, and pinning the
+# `zed_extension_api` version keeps Zed's wasm build reproducible.
+/target

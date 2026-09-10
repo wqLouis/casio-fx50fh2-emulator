@@ -100,8 +100,36 @@ $ printf '5\n' | fx50 run examples/factorial.fxc
 See [`crates/fx-transpiler/README.md`](crates/fx-transpiler/README.md) for the
 full language and [`docs/AI-AGENTS.md`](docs/AI-AGENTS.md) for a
 rule-oriented authoring guide (intended for AI agents generating `.fxc`
-source), plus [`crates/fx-lsp/README.md`](crates/fx-lsp/README.md) for editor
-setup.
+source).
+
+## Editor support
+
+`fx50 lsp` is a language server for **both** languages. It serves:
+
+| Language ID | Files | Language |
+| --- | --- | --- |
+| `fx` | `.fx` | PRGM (what the calculator actually runs) |
+| `fxc` | `.fxc` | the C-like front end |
+
+The client sends the language ID, so one server process covers both. For each
+language it provides diagnostics (including `#mode` violations and `#include`
+resolution for `.fxc`), completion, hover and document symbols.
+
+Ready-made integrations live in [`editors/`](editors/):
+
+| Editor | Where | Notes |
+| --- | --- | --- |
+| VS Code | [`editors/vscode`](editors/vscode) | TypeScript client extension; finds the `fx50` binary automatically |
+| Zed | [`editors/zed`](editors/zed) | Zed extension, with tree-sitter grammars in [`editors/tree-sitter-fx`](editors/tree-sitter-fx) and [`editors/tree-sitter-fxc`](editors/tree-sitter-fxc) |
+| Neovim, Helix, … | [`crates/fx-lsp/README.md`](crates/fx-lsp/README.md) | point your client at `fx50 lsp` |
+
+Every client launches the same command:
+
+```console
+$ fx50 lsp
+```
+
+`--stdio` is accepted and ignored, because many clients append it by default.
 
 ## Design
 
@@ -206,7 +234,7 @@ table.
 | C-like front end (`fx50 run x.fxc`) | ✅ |
 | `#include` for sharing fragments (transpile-time, C-style) | ✅ |
 | JSON test suites (`fx50 test x.fxc`) | ✅ |
-| Language server (`fx50 lsp`) | ✅ |
+| Language server (`fx50 lsp`) | ✅ (PRGM **and** `.fxc`) |
 | 40 scientific constants (2010 CODATA) | ✅ |
 | Exact decimal-arithmetic chains from the reference notes | ⚠️ approximate |
 

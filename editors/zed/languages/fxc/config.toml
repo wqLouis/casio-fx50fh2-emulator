@@ -1,0 +1,18 @@
+name = "fx-50FH II C-like"
+grammar = "fxc"
+path_suffixes = ["fxc"]
+line_comments = ["// "]
+block_comment = { start = "/*", end = "*/", prefix = "*", tab_size = 1 }
+
+tab_size = 2
+hard_tabs = false
+
+autoclose_before = ")]}"
+
+brackets = [
+  { start = "(", end = ")", close = true, surround = true, newline = false },
+  { start = "{", end = "}", close = true, surround = true, newline = true },
+]
+
+# `_` is part of identifiers; `phys.` symbols are ordinary Unicode letters.
+word_characters = ["_"]

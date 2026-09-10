@@ -222,3 +222,85 @@ result against the interpreter. In `.fxc` the constants are reached through a
 `phys.` namespace — `phys.h`, `phys.C0` — so that forty global names do not
 collide with the user's variables; `phys` is a reserved word. Bare names are
 deliberately *not* recognised.
+
+## ADR 0010 — One language server for two languages, selected by `languageId`
+
+`.fx` (PRGM) and `.fxc` (C-like) are different languages with different
+front ends, and there was a choice between shipping two servers or one. There
+is one process, `fx50 lsp`, and it routes per document.
+
+**What selects the front end.** The `languageId` from
+`textDocument/didOpen`, with the URI's file extension as a fallback and `fx` as
+the final default. The ids are `fx` and `fxc` — the same ids VS Code, Neovim
+and Zed are configured with, so the editor side and the server side agree on a
+single vocabulary.
+
+**Why one server.** The two languages are alternatives for the same artifact —
+`.fxc` is simply a friendlier way to write the PRGM program — so a user
+routinely has both open, and the diagnostics, completion and hover logic share
+almost all of their plumbing (position mapping, diagnostic shape, symbol
+walking). Two processes would also mean two entries in every editor
+configuration.
+
+**Cost.** `logic.rs` grows a `Language` parameter on its four entry points, and
+the server must remember a document's language (the client sends it once, at
+`didOpen`). That is a small, local cost for a much smaller editor setup.
+
+**BASE-mode and `#include` diagnostics.** For `.fxc`, the server calls
+`fx_transpiler::transpile_with_base` with the document's directory, which means
+it performs real `#include` file I/O. That is deliberate: a missing or circular
+include is one of the most common mistakes in a `.fxc` file, and the only way
+to report it is to attempt the resolution. The failure is turned into a
+diagnostic (`Include ERROR`, naming the path) and can never panic the server.
+
+## ADR 0011 — Zed's language id comes from `config.toml`'s `name`
+
+Zed derives the LSP `languageId` it sends from the language config's
+human-readable `name`, lowercased (`LanguageName::lsp_id`), with no separate id
+field. A name like `fx-50FH II PRGM` would therefore be sent as
+`fx-50fh ii prgm`, and a naive `[language_servers] languages = ["fx", "fxc"]`
+would not even match, because that list is matched against the same `name`.
+
+The fix follows the pattern the official Vue extension uses: keep the readable
+`name`, list those exact names in `languages`, and map them back to the short
+ids with an explicit `language_ids` table:
+
+```toml
+[language_servers.fx50]
+languages = ["fx-50FH II PRGM", "fx-50FH II C-like"]
+language_ids = { "fx-50FH II PRGM" = "fx", "fx-50FH II C-like" = "fxc" }
+```
+
+The server would still work if this were wrong, because it falls back to the
+file extension, but relying on that fallback would leave `languageId` reporting
+the wrong string to every other consumer.
+
+**Zed extension packaging.** The extension is a `cdylib` built for
+`wasm32-wasip2`, and it needs an empty `[workspace]` table in its
+`Cargo.toml`: without it, cargo walks up, finds this repository's workspace,
+and refuses to build the package. It builds and lints clean with
+`cargo build --target wasm32-wasip2`.
+
+## ADR 0012 — Grammars live in this repository
+
+Zed grammars are normally separate repositories, and `extension.toml` takes a
+`repository` + `rev`. Zed's `GrammarManifestEntry` also supports a `path`, so
+the two grammars live here under `editors/tree-sitter-fx` and
+`editors/tree-sitter-fxc`, referenced by `rev` pointing at this repository.
+
+**Why.** The grammar and the language cannot drift apart if they are reviewed
+and versioned together: a change to `.fxc` syntax and the grammar that
+highlights it land in the same commit. The `rev` is a placeholder in-tree
+(`PLACEHOLDER_REV`) because a commit cannot name itself; the publishing step
+substitutes the real SHA.
+
+**Acceptance test.** Both grammars are checked against the programs the project
+actually ships — every `examples/*.fx` and `examples/*.fxc`, including
+`examples/lib/*.fxc` — and must parse with zero `ERROR`/`MISSING` nodes. The
+generated `src/parser.c` is committed, as Zed's build expects it.
+
+**One deviation from the obvious grammar.** PRGM treats a newline as the `:`
+statement separator, so a newline cannot be an `extra` the way it is in most
+grammars: with it as trivia, an expression happily swallows the next
+statement's first token as implied multiplication. It is modelled as an
+explicit separator token instead, which parses all six `.fx` examples cleanly.

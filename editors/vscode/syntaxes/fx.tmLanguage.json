@@ -1,0 +1,166 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "CASIO fx-50FH II PRGM",
+  "scopeName": "source.fx",
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#mode-directive" },
+    { "include": "#ten-pow" },
+    { "include": "#numbers" },
+    { "include": "#functions" },
+    { "include": "#statistics" },
+    { "include": "#constants" },
+    { "include": "#variables" },
+    { "include": "#keywords" },
+    { "include": "#postfix" },
+    { "include": "#operators" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "match": "//.*$",
+          "name": "comment.line.double-slash.fx"
+        }
+      ]
+    },
+    "mode-directive": {
+      "patterns": [
+        {
+          "match": "(?i)^\\s*(#mode)\\b\\s*=?\\s*([A-Za-z0-9_-]+)",
+          "captures": {
+            "1": { "name": "keyword.control.directive.fx" },
+            "2": { "name": "constant.language.mode.fx" }
+          }
+        }
+      ]
+    },
+    "ten-pow": {
+      "patterns": [
+        {
+          "match": "10\\^",
+          "name": "support.function.fx"
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "match": "(?<![A-Za-z0-9_])([0-9]+(?:\\.[0-9]+)?)([A-Z]+)(?![A-Za-z0-9_])",
+          "captures": {
+            "1": { "name": "constant.numeric.fx" },
+            "2": { "name": "variable.other.fx" }
+          }
+        },
+        {
+          "match": "(?<![A-Za-z0-9_])[0-9A-Fa-f]+[hH](?![A-Za-z0-9_])",
+          "name": "constant.numeric.base.fx"
+        },
+        {
+          "match": "(?<![A-Za-z0-9_])[01]+b(?![A-Za-z0-9_])",
+          "name": "constant.numeric.base.fx"
+        },
+        {
+          "match": "(?<![A-Za-z0-9_])[0-7]+o(?![A-Za-z0-9_])",
+          "name": "constant.numeric.base.fx"
+        },
+        {
+          "match": "(?<![A-Za-z0-9_])[0-9]+d(?![A-Za-z0-9_])",
+          "name": "constant.numeric.base.fx"
+        },
+        {
+          "match": "(?<![A-Za-z0-9_])[0-9]+(?:\\.[0-9]*)?(?:[eE][+-]?[0-9]+)?(?![A-Za-z0-9_])",
+          "name": "constant.numeric.fx"
+        },
+        {
+          "match": "(?<![A-Za-z0-9_])\\.[0-9]+(?:[eE][+-]?[0-9]+)?(?![A-Za-z0-9_])",
+          "name": "constant.numeric.fx"
+        }
+      ]
+    },
+    "functions": {
+      "patterns": [
+        {
+          "match": "(?<![A-Za-z_])(?:sinh|cosh|tanh|sin|cos|tan)\\^-1(?![A-Za-z0-9_])",
+          "name": "support.function.fx"
+        },
+        {
+          "match": "(?<![A-Za-z_])(?:sinh⁻¹|cosh⁻¹|tanh⁻¹|sin⁻¹|cos⁻¹|tan⁻¹)(?![A-Za-z0-9_])",
+          "name": "support.function.fx"
+        },
+        {
+          "match": "(?<![A-Za-z_])(?:sinh|cosh|tanh|sin|cos|tan|asin|acos|atan|asinh|acosh|atanh|log|ln|Abs|Pol|Rec|Rnd|arg|Conjg|Not|Neg)(?![A-Za-z0-9_])",
+          "name": "support.function.fx"
+        },
+        {
+          "match": "x√",
+          "name": "support.function.fx"
+        },
+        {
+          "match": "[√∛]",
+          "name": "support.function.fx"
+        }
+      ]
+    },
+    "statistics": {
+      "patterns": [
+        {
+          "match": "(?<![A-Za-z_])(?:sumx2|sumy2|sumxy|meanx|meany|sigmax|sigmay|regA|regB|regR|minX|maxX|minY|maxY|minx|maxx|miny|maxy|rega|regb|regr|Σx²|Σy²|Σxy|Σx|Σy|x̄|ȳ|σx|σy|sx|sy|n)(?![A-Za-z0-9_])",
+          "name": "variable.language.statistic.fx"
+        }
+      ]
+    },
+    "constants": {
+      "patterns": [
+        {
+          "match": "(?<![A-Za-z_])(?:mumu|alpha|sigma|hbar|Rinf|phi0|eps0|mmu|muN|muB|mup|mue|mun|λcp|λcn|atm|C0|C1|C2|G0|Z0|NA|Vm|tK|a0|mu0|lcp|mμ|μN|μB|μp|μe|μn|μμ|ε0|μ0|φ0|R∞|γp|λc|mp|mn|me|lc|gp|re|eq|u|k|F|R|g|G|h|e|i|π|ħ|α|σ)(?![A-Za-z0-9_])",
+          "name": "constant.language.fx"
+        }
+      ]
+    },
+    "variables": {
+      "patterns": [
+        {
+          "match": "(?<![A-Za-z_])(?:Ans|[ABCDXYM])(?![A-Za-z0-9_])",
+          "name": "variable.other.fx"
+        }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "match": "(?<![A-Za-z_])(?:ClrMemory|ClrStat|WhileEnd|FreqOn|FreqOff|IfEnd|Goto|Lbl|If|Then|Else|For|To|Step|Next|While|Break|Deg|Rad|Gra|Fix|Sci|Norm|DT|Ran#)(?![A-Za-z0-9_])",
+          "name": "keyword.control.fx"
+        }
+      ]
+    },
+    "postfix": {
+      "patterns": [
+        {
+          "match": "(?:\\^-1|⁻¹|\\^2|²|\\^3|³|[!%])",
+          "name": "keyword.operator.postfix.fx"
+        }
+      ]
+    },
+    "operators": {
+      "patterns": [
+        {
+          "match": "(?:->|=>|<>|<=|>=)",
+          "name": "keyword.operator.fx"
+        },
+        {
+          "match": "(?<![A-Za-z_])disp(?![A-Za-z0-9_])",
+          "name": "keyword.operator.fx"
+        },
+        {
+          "match": "[→◢⇒×÷≠≤≥∠┘]",
+          "name": "keyword.operator.fx"
+        },
+        {
+          "match": "[+\\-*/=<>(),:?^;]",
+          "name": "keyword.operator.fx"
+        }
+      ]
+    }
+  }
+}
