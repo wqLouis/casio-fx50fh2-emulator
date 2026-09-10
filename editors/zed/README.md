@@ -58,27 +58,29 @@ The command is always started with the single argument `lsp`, i.e. `fx50 lsp`.
 If the server does not start, check Zed's log (`zed: open log`) while launching
 Zed from a terminal with `zed --foreground`.
 
-## `PLACEHOLDER_REV`
+## Grammar revision
 
-`extension.toml` registers both grammars against this repository:
+`extension.toml` registers both grammars against this repository rather than a
+separate grammar repo, so the grammar and the language are versioned together:
 
 ```toml
 [grammars.fx]
 repository = "https://github.com/wqLouis/casio-fx50fh2-emulator"
-rev = "PLACEHOLDER_REV"
+rev = "<commit that contains editors/tree-sitter-fx>"
 path = "editors/tree-sitter-fx"
 ```
 
-Zed needs a concrete Git revision for `rev`. After the commit that contains
-`editors/tree-sitter-fx` and `editors/tree-sitter-fxc` is pushed, replace each
-`PLACEHOLDER_REV` with that commit's full SHA:
+Zed needs a concrete Git revision, and a commit cannot name its own SHA, so
+`rev` is pinned to the commit that introduced the grammars. The `path` key
+points at the grammar subdirectory, which is what lets one repository host the
+extension and both grammars.
+
+**If you move or change a grammar**, update `rev` to a newer commit that
+contains the change, otherwise Zed keeps building the old parser:
 
 ```bash
-git rev-parse HEAD
+git rev-parse HEAD   # take the SHA of the commit with the grammar change
 ```
-
-The `path` key points at the grammar subdirectory inside the repository, so a
-single repository can host both grammars (and the extension).
 
 ## Files
 

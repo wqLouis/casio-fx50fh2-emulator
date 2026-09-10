@@ -290,9 +290,10 @@ the two grammars live here under `editors/tree-sitter-fx` and
 
 **Why.** The grammar and the language cannot drift apart if they are reviewed
 and versioned together: a change to `.fxc` syntax and the grammar that
-highlights it land in the same commit. The `rev` is a placeholder in-tree
-(`PLACEHOLDER_REV`) because a commit cannot name itself; the publishing step
-substitutes the real SHA.
+highlights it land in the same commit. Zed needs a concrete Git revision, and a
+commit cannot name its own SHA, so `rev` is pinned to the commit that
+introduced the grammars — updating a grammar therefore means bumping `rev` to a
+newer commit that contains it.
 
 **Acceptance test.** Both grammars are checked against the programs the project
 actually ships — every `examples/*.fx` and `examples/*.fxc`, including

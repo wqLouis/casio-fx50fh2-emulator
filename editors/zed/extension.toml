@@ -8,12 +8,12 @@ repository = "https://github.com/wqLouis/casio-fx50fh2-emulator"
 
 [grammars.fx]
 repository = "https://github.com/wqLouis/casio-fx50fh2-emulator"
-rev = "PLACEHOLDER_REV"
+rev = "5f9c6d4e3ced7ccd34e067162d906e6693ee65f5"
 path = "editors/tree-sitter-fx"
 
 [grammars.fxc]
 repository = "https://github.com/wqLouis/casio-fx50fh2-emulator"
-rev = "PLACEHOLDER_REV"
+rev = "5f9c6d4e3ced7ccd34e067162d906e6693ee65f5"
 path = "editors/tree-sitter-fxc"
 
 [language_servers.fx50]
