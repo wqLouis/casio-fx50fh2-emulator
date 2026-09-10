@@ -3,25 +3,32 @@
 ; This is the grammar-side copy, for editors that read queries from the grammar
 ; checkout (Neovim, Helix, ...). Zed ignores it and loads
 ; `editors/zed/languages/fxc/highlights.scm` instead, which is kept
-; byte-identical to this file.
+; byte-identical to this file (the bodies must match; the headers differ).
 ;
 ; Only captures known to Zed are used.
-
-; --- comments -------------------------------------------------------------
 
 (comment) @comment
 
 ; --- directives -----------------------------------------------------------
+;
+; `#mode`, `#reg`, `#data` and `#tests` are whole-line directives.  Capturing
+; the node marks the directive keyword; the identifiers and JSON inside are
+; re-captured below and take precedence.
 
 (mode_directive) @keyword
 (mode_name) @constant
 (include_directive) @keyword
-(include_directive (string) @string)
+(reg_directive) @keyword
+(reg_directive (identifier) @variable)
+(data_directive) @keyword
+(data_directive (identifier) @constant)
+(tests_directive) @keyword
 
 ; --- keywords -------------------------------------------------------------
 
 [
   "let"
+  "const"
   "if"
   "else"
   "while"
@@ -32,6 +39,13 @@
   "print"
   "phys"
 ] @keyword
+
+; --- JSON carried by `#data` / `#tests` -----------------------------------
+
+(string) @string
+(json_pair (string) @property)
+(json_number) @number
+(json_literal) @boolean
 
 ; --- literals -------------------------------------------------------------
 
@@ -64,5 +78,5 @@
 
 ; --- punctuation ----------------------------------------------------------
 
-["(" ")" "{" "}"] @punctuation.bracket
-[";" "," "."] @punctuation.delimiter
+["(" ")" "{" "}" "[" "]"] @punctuation.bracket
+[";" "," "." ":"] @punctuation.delimiter

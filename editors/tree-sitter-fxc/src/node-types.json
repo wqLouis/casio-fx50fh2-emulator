@@ -69,6 +69,10 @@
           "named": true
         },
         {
+          "type": "const_statement",
+          "named": true
+        },
+        {
           "type": "empty_statement",
           "named": true
         },
@@ -132,6 +136,25 @@
     }
   },
   {
+    "type": "const_statement",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "expression",
+          "named": true
+        },
+        {
+          "type": "identifier",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
     "type": "constant_ref",
     "named": true,
     "fields": {},
@@ -156,6 +179,44 @@
     "fields": {}
   },
   {
+    "type": "data_directive",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "identifier",
+          "named": true
+        },
+        {
+          "type": "json_value",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "data_reference",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "identifier",
+          "named": true
+        },
+        {
+          "type": "number",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
     "type": "empty_statement",
     "named": true,
     "fields": {}
@@ -178,6 +239,10 @@
         },
         {
           "type": "constant_ref",
+          "named": true
+        },
+        {
+          "type": "data_reference",
           "named": true
         },
         {
@@ -255,6 +320,10 @@
         },
         {
           "type": "break_statement",
+          "named": true
+        },
+        {
+          "type": "const_statement",
           "named": true
         },
         {
@@ -363,6 +432,10 @@
           "named": true
         },
         {
+          "type": "const_statement",
+          "named": true
+        },
+        {
           "type": "empty_statement",
           "named": true
         },
@@ -426,6 +499,91 @@
     "fields": {}
   },
   {
+    "type": "json_array",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": false,
+      "types": [
+        {
+          "type": "json_value",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "json_literal",
+    "named": true,
+    "fields": {}
+  },
+  {
+    "type": "json_object",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": false,
+      "types": [
+        {
+          "type": "json_pair",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "json_pair",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "json_value",
+          "named": true
+        },
+        {
+          "type": "string",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "json_value",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "json_array",
+          "named": true
+        },
+        {
+          "type": "json_literal",
+          "named": true
+        },
+        {
+          "type": "json_number",
+          "named": true
+        },
+        {
+          "type": "json_object",
+          "named": true
+        },
+        {
+          "type": "string",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
     "type": "label_statement",
     "named": true,
     "fields": {},
@@ -458,6 +616,11 @@
         }
       ]
     }
+  },
+  {
+    "type": "memory",
+    "named": true,
+    "fields": {}
   },
   {
     "type": "mode_directive",
@@ -505,6 +668,25 @@
     }
   },
   {
+    "type": "reg_directive",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "identifier",
+          "named": true
+        },
+        {
+          "type": "memory",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
     "type": "source_file",
     "named": true,
     "root": true,
@@ -523,6 +705,14 @@
         },
         {
           "type": "break_statement",
+          "named": true
+        },
+        {
+          "type": "const_statement",
+          "named": true
+        },
+        {
+          "type": "data_directive",
           "named": true
         },
         {
@@ -566,7 +756,30 @@
           "named": true
         },
         {
+          "type": "reg_directive",
+          "named": true
+        },
+        {
+          "type": "tests_directive",
+          "named": true
+        },
+        {
           "type": "while_statement",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "tests_directive",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "json_value",
           "named": true
         }
       ]
@@ -605,6 +818,10 @@
         },
         {
           "type": "break_statement",
+          "named": true
+        },
+        {
+          "type": "const_statement",
           "named": true
         },
         {
@@ -691,6 +908,10 @@
     "named": false
   },
   {
+    "type": ":",
+    "named": false
+  },
+  {
     "type": ";",
     "named": false
   },
@@ -719,7 +940,43 @@
     "named": false
   },
   {
+    "type": "A",
+    "named": false
+  },
+  {
+    "type": "B",
+    "named": false
+  },
+  {
+    "type": "C",
+    "named": false
+  },
+  {
+    "type": "D",
+    "named": false
+  },
+  {
+    "type": "M",
+    "named": false
+  },
+  {
     "type": "R∞",
+    "named": false
+  },
+  {
+    "type": "X",
+    "named": false
+  },
+  {
+    "type": "Y",
+    "named": false
+  },
+  {
+    "type": "[",
+    "named": false
+  },
+  {
+    "type": "]",
     "named": false
   },
   {
@@ -727,7 +984,19 @@
     "named": false
   },
   {
+    "type": "a",
+    "named": false
+  },
+  {
+    "type": "b",
+    "named": false
+  },
+  {
     "type": "break",
+    "named": false
+  },
+  {
+    "type": "c",
     "named": false
   },
   {
@@ -736,7 +1005,19 @@
     "extra": true
   },
   {
+    "type": "const",
+    "named": false
+  },
+  {
+    "type": "d",
+    "named": false
+  },
+  {
     "type": "else",
+    "named": false
+  },
+  {
+    "type": "false",
     "named": false
   },
   {
@@ -760,6 +1041,10 @@
     "named": false
   },
   {
+    "type": "json_number",
+    "named": true
+  },
+  {
     "type": "label",
     "named": false
   },
@@ -772,11 +1057,19 @@
     "named": false
   },
   {
+    "type": "m",
+    "named": false
+  },
+  {
     "type": "mode_name",
     "named": true
   },
   {
     "type": "mμ",
+    "named": false
+  },
+  {
+    "type": "null",
     "named": false
   },
   {
@@ -796,7 +1089,19 @@
     "named": true
   },
   {
+    "type": "true",
+    "named": false
+  },
+  {
     "type": "while",
+    "named": false
+  },
+  {
+    "type": "x",
+    "named": false
+  },
+  {
+    "type": "y",
     "named": false
   },
   {

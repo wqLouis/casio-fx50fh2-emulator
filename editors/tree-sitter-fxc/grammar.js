@@ -3,10 +3,11 @@
  *
  * `.fxc` is a small C-like language that transpiles to PRGM.  The grammar
  * follows `docs/AI-AGENTS.md`: `//` and block comments, `#mode`/`#include`
- * directives, `let`/assignment/`print` statements, `if`/`while`/`for` with
- * optional braces, `break`/`goto`/`label`, and a conventional expression
- * grammar with `^`/`**` exponentiation.  Scientific constants live under the
- * `phys.` namespace.
+ * directives, `#data`/`#tests` compile-time JSON, `#reg` memory pins,
+ * `let`/`const`/assignment/`print` statements, `if`/`while`/`for` with
+ * optional braces, `break`/`goto`/`label`, data paths with `.field`/`[index]`,
+ * and a conventional expression grammar with `^`/`**` exponentiation.
+ * Scientific constants live under the `phys.` namespace.
  */
 
 module.exports = grammar({
@@ -25,6 +26,9 @@ module.exports = grammar({
     _top_level: $ => choice(
       $.mode_directive,
       $.include_directive,
+      $.reg_directive,
+      $.data_directive,
+      $.tests_directive,
       $._statement,
     ),
 
@@ -41,7 +45,72 @@ module.exports = grammar({
       token(prec(3, /#[iI][nN][cC][lL][uU][dD][eE]/)),
       $.string,
     ),
-    string: $ => token(seq('"', /[^"\n]*/, '"')),
+
+    // #reg NAME = M  (the `=` is optional in practice).  The memories are
+    // spelled as literals rather than a one-letter regex token: a regex token
+    // here is folded into tree-sitter's keyword lexer and its leading letters
+    // (`b`, `c`, ...) then shadow `break`, `const` and the rest.
+    reg_directive: $ => seq(
+      token(prec(3, /#[rR][eE][gG]/)),
+      $.identifier,
+      optional('='),
+      $.memory,
+    ),
+    memory: $ => choice(
+      'A', 'B', 'C', 'D', 'X', 'Y', 'M',
+      'a', 'b', 'c', 'd', 'x', 'y', 'm',
+    ),
+
+    // #data NAME = <json>;  and  #tests = <json>;
+    //
+    // The value is real JSON and may span lines.  The transpiler resolves and
+    // removes the directive before the program itself is parsed; here it only
+    // needs to be recognised so the rest of the file still highlights.
+    data_directive: $ => seq(
+      token(prec(3, /#[dD][aA][tT][aA]/)),
+      $.identifier,
+      '=',
+      $.json_value,
+      ';',
+    ),
+    tests_directive: $ => seq(
+      token(prec(3, /#[tT][eE][sS][tT][sS]/)),
+      '=',
+      $.json_value,
+      ';',
+    ),
+
+    json_value: $ => choice(
+      $.json_object,
+      $.json_array,
+      $.string,
+      $.json_number,
+      $.json_literal,
+    ),
+
+    // JSON numbers may be negative; the program's `number` rule must not
+    // accept a sign, or `a-1` would lex as `a` followed by `-1`.
+    json_number: $ => token(
+      /-?([0-9]+(\.[0-9]*)?|\.[0-9]+)([eE][+-]?[0-9]+)?/
+    ),
+    json_object: $ => seq(
+      '{',
+      optional(seq($.json_pair, repeat(seq(',', $.json_pair)))),
+      '}',
+    ),
+    json_pair: $ => seq($.string, ':', $.json_value),
+    json_array: $ => seq(
+      '[',
+      optional(seq($.json_value, repeat(seq(',', $.json_value)))),
+      ']',
+    ),
+    json_literal: $ => choice('true', 'false', 'null'),
+
+    string: $ => token(seq(
+      '"',
+      repeat(choice(/\\./, /[^"\\\n]/)),
+      '"',
+    )),
 
     comment: $ => token(choice(
       seq('//', /[^\n]*/),
@@ -50,6 +119,7 @@ module.exports = grammar({
 
     _statement: $ => choice(
       $.let_statement,
+      $.const_statement,
       $.assignment_statement,
       $.print_statement,
       $.if_statement,
@@ -64,6 +134,7 @@ module.exports = grammar({
     ),
 
     let_statement: $ => seq('let', $.identifier, '=', $.expression, ';'),
+    const_statement: $ => seq('const', $.identifier, '=', $.expression, ';'),
     assignment_statement: $ => seq($.identifier, '=', $.expression, ';'),
     print_statement: $ => seq('print', $.expression, ';'),
 
@@ -100,9 +171,18 @@ module.exports = grammar({
       $.call_expression,
       $.input_expression,
       $.constant_ref,
+      $.data_reference,
       $.parenthesized_expression,
       $.number,
       $.identifier,
+    ),
+
+    // `config.size`, `weights[0]`, and chains of those.  At least one accessor
+    // is required, so a bare name is still an ordinary identifier.
+    data_reference: $ => prec(8, seq($.identifier, repeat1($._accessor))),
+    _accessor: $ => choice(
+      seq('.', $.identifier),
+      seq('[', $.number, ']'),
     ),
 
     binary_expression: $ => choice(

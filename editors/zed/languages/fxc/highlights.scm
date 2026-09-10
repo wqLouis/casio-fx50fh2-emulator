@@ -5,23 +5,34 @@
 ; byte-identical to `editors/tree-sitter-fxc/queries/highlights.scm`, which
 ; serves editors that read queries from the grammar checkout.
 ;
-; Only captures known to Zed are used.
+; Only captures known to Zed are used.  Later captures win over earlier ones
+; for the same range, so a broad capture (a whole directive) is written before
+; the specific ones (the JSON inside it) that should override it.
 
 ; --- comments -------------------------------------------------------------
 
 (comment) @comment
 
 ; --- directives -----------------------------------------------------------
+;
+; `#mode`, `#reg`, `#data` and `#tests` are whole-line directives.  Capturing
+; the node marks the directive keyword; the identifiers and JSON inside are
+; re-captured below and take precedence.
 
 (mode_directive) @keyword
 (mode_name) @constant
 (include_directive) @keyword
-(include_directive (string) @string)
+(reg_directive) @keyword
+(reg_directive (identifier) @variable)
+(data_directive) @keyword
+(data_directive (identifier) @constant)
+(tests_directive) @keyword
 
 ; --- keywords -------------------------------------------------------------
 
 [
   "let"
+  "const"
   "if"
   "else"
   "while"
@@ -32,6 +43,13 @@
   "print"
   "phys"
 ] @keyword
+
+; --- JSON carried by `#data` / `#tests` -----------------------------------
+
+(string) @string
+(json_pair (string) @property)
+(json_number) @number
+(json_literal) @boolean
 
 ; --- literals -------------------------------------------------------------
 
@@ -64,5 +82,5 @@
 
 ; --- punctuation ----------------------------------------------------------
 
-["(" ")" "{" "}"] @punctuation.bracket
-[";" "," "."] @punctuation.delimiter
+["(" ")" "{" "}" "[" "]"] @punctuation.bracket
+[";" "," "." ":"] @punctuation.delimiter
