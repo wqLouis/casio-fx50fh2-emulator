@@ -1,0 +1,35 @@
+// Compile-time data and constants.
+//
+// `#data` parses JSON while transpiling, so its values become plain literals in
+// the program and occupy none of the calculator's seven memories. `const` does
+// the same for a fixed expression, and `#reg` pins a name to the memory the
+// calculator side expects.
+//
+//   fx50 build examples/compiletime.fxc
+//   fx50 regs  examples/compiletime.fxc
+//   fx50 test  examples/compiletime.fxc
+//
+// `#mode` and `#reg` are whole-program directives, so they come first; `#data`
+// may sit anywhere, including between statements.
+
+#mode COMP
+
+// Pin the running total to the independent memory `M`.
+#reg total = M
+
+// A JSON value written straight into the program. It could equally be
+// `#data config = "config.json";` to read a file next to this one.
+#data config = { "base": 2, "offsets": [10, 20, 30] };
+
+// A fixed value, inlined wherever it is used; it needs no memory.
+const scale = config.base;
+
+let total = config.offsets[1] * scale;
+
+print(total);
+print(scale);
+
+// The cases travel with the program: `fx50 test examples/compiletime.fxc`.
+#tests = [
+  { "name": "offset 1 scaled by base 2 is 40", "output": ["40", "2"] }
+];

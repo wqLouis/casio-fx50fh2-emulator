@@ -47,8 +47,11 @@ printf '5\n' | ./target/release/fx50 run examples/factorial.fx
 ./target/release/fx50 build program.fxc > program.fx
 ./target/release/fx50 build --ascii program.fxc
 
-# run JSON test cases against a program (uses <name>.tests.json)
+# run test cases the program carries (or a standalone .tests.json)
 ./target/release/fx50 test examples/factorial.fxc
+
+# show how a program uses the seven memories (A B C D X Y M)
+./target/release/fx50 regs examples/compiletime.fxc
 
 # language server over stdio, and shell completions
 ./target/release/fx50 lsp
@@ -71,10 +74,10 @@ assert_eq!(interp.host().output, vec!["42"]);
 
 ## The C-like language (`fx50 run x.fxc`)
 
-Real numbers only, with `let`, assignment, `print`, `input`, `if`/`else`,
-`while`, `for`, `break`, `goto`/`label`, and `sqrt/abs/sin/cos/tan/log/ln/rnd`
-built-ins. The transpiler maps your names onto the seven real memories
-`A B C D X Y M` and emits PRGM.
+Real numbers only, with `let`, `const`, assignment, `print`, `input`,
+`if`/`else`, `while`, `for`, `break`, `goto`/`label`, and
+`sqrt/abs/sin/cos/tan/log/ln/rnd` built-ins. The transpiler maps your names onto
+the seven real memories `A B C D X Y M` and emits PRGM.
 
 ```c
 let n = input();
@@ -97,10 +100,27 @@ $ printf '5\n' | fx50 run examples/factorial.fxc
 120
 ```
 
-See [`crates/fx-transpiler/README.md`](crates/fx-transpiler/README.md) for the
-full language and [`docs/AI-AGENTS.md`](docs/AI-AGENTS.md) for a
-rule-oriented authoring guide (intended for AI agents generating `.fxc`
-source).
+Values that are fixed at transpile time can avoid the seven-memory budget
+entirely: `const` is inlined at each use, and `#data` reads JSON (inline or
+from a file) into literals. `#reg` pins a name to a particular memory, and
+`fx50 regs` reports the plan.
+
+```c
+// `#mode`/`#reg` come first; `#data` may appear anywhere.
+#reg total = M
+
+#data config = { "base": 2, "offsets": [10, 20, 30] };
+const scale = config.base;
+
+let total = config.offsets[1] * scale;
+print(total);
+```
+
+Programs can also carry their own test cases in a `#tests` table, so `fx50 test
+prog.fxc` needs no separate file. See
+[`crates/fx-transpiler/README.md`](crates/fx-transpiler/README.md) for the full
+language and [`docs/AI-AGENTS.md`](docs/AI-AGENTS.md) for a rule-oriented
+authoring guide (intended for AI agents generating `.fxc` source).
 
 ## Editor support
 

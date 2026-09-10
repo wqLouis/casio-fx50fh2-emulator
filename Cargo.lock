@@ -365,8 +365,6 @@ name = "fx-transpiler"
 version = "0.1.0"
 dependencies = [
  "casio-fx50fh2",
- "serde",
- "serde_json",
 ]
 
 [[package]]

@@ -586,7 +586,11 @@ fn fxc_completion_items() -> Vec<CompletionItem> {
 
     // -- keywords -----------------------------------------------------------
     let keywords = [
-        ("let", "declare a variable"),
+        ("let", "declare a variable (uses one of A B C D X Y M)"),
+        (
+            "const",
+            "declare a compile-time constant (inlined; uses no memory)",
+        ),
         ("if", "conditional execution"),
         ("else", "alternative `if` body"),
         ("while", "conditional loop"),
@@ -602,6 +606,53 @@ fn fxc_completion_items() -> Vec<CompletionItem> {
             simple(label, CompletionItemKind::KEYWORD, detail),
         );
     }
+
+    // -- whole-program directives ------------------------------------------
+    push(
+        &mut items,
+        CompletionItem {
+            label: "#data".to_string(),
+            kind: Some(CompletionItemKind::KEYWORD),
+            detail: Some("compile-time data table".to_string()),
+            documentation: Some(Documentation::String(
+                "Read a JSON value while transpiling, as in\n\n    #data config = { \"n\": 3 };\n\n\
+                 A top-level string is a file path: `#data v = \"values.json\";`. The values \
+                 become literals, so they use none of the seven memories."
+                    .to_string(),
+            )),
+            insert_text: Some("#data ".to_string()),
+            ..Default::default()
+        },
+    );
+    push(
+        &mut items,
+        CompletionItem {
+            label: "#reg".to_string(),
+            kind: Some(CompletionItemKind::KEYWORD),
+            detail: Some("pin a variable to a memory".to_string()),
+            documentation: Some(Documentation::String(
+                "Fix a variable to one of A B C D X Y M, as in `#reg total = M`. \
+                 Must appear before the program; `fx50 regs` shows the plan."
+                    .to_string(),
+            )),
+            insert_text: Some("#reg ".to_string()),
+            ..Default::default()
+        },
+    );
+    push(
+        &mut items,
+        CompletionItem {
+            label: "#tests".to_string(),
+            kind: Some(CompletionItemKind::KEYWORD),
+            detail: Some("embedded test cases".to_string()),
+            documentation: Some(Documentation::String(
+                "Cases run by `fx50 test`, as in\n\n    #tests = [\n      { \"name\": \"one\", \"output\": [\"1\"] }\n    ];"
+                    .to_string(),
+            )),
+            insert_text: Some("#tests = [\n  { \"name\": \"\" }\n];".to_string()),
+            ..Default::default()
+        },
+    );
 
     // -- input and built-in functions --------------------------------------
     push(

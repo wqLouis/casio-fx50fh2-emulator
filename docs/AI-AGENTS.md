@@ -36,10 +36,11 @@ generated code fails.
 
 1. **Every statement ends with `;`.** There is no newline termination, and no
    automatic semicolon insertion. `print(a)` alone is a syntax error.
-2. **At most seven distinct variables per program.** PRGM has exactly seven
-   memories (`A B C D X Y M`). Names are assigned in **first-seen order** and
-   **never reused**, so an eighth distinct name is a transpile-time error no
-   matter where it lives or how short its lifetime.
+2. **At most seven mutable variables per program.** PRGM has exactly seven
+   memories (`A B C D X Y M`). Names are assigned in **first-seen order** and a
+   name keeps its memory for the whole program, so an eighth distinct name is a
+   transpile-time error. `const` and `#data` values are inlined and use **no**
+   memory, so a program full of fixed values fits easily.
 3. **`input()` is only legal as the entire right-hand side of an assignment.**
    `let a = input();` is fine; `print(input());` and `let a = input() + 1;` are
    errors.
@@ -53,9 +54,13 @@ generated code fails.
 ## 2. Complete grammar
 
 ```text
-program    := modedirective? stmt*
-modedirective := '#mode' MODENAME          -- optional; if present, must be first
+program    := directive* stmt*
+directive  := '#mode' MODENAME             -- must be first if present
+            | '#reg' NAME '=' MEMORY       -- must precede the program
+            | '#data' NAME '=' JSON ';'    -- may appear anywhere
+            | '#tests' '=' JSON ';'        -- sugar for `#data tests = ...`
 stmt       := 'let' NAME '=' expr ';'
+            | 'const' NAME '=' expr ';'
             | NAME '=' expr ';'
             | 'print' [ '(' expr ')' | expr ] ';'   -- parens optional
             | 'if' '(' expr ')' body ('else' body)?
@@ -70,16 +75,13 @@ stmt       := 'let' NAME '=' expr ';'
 body       := stmt | '{' stmt* '}'           -- braces optional for one statement
 forinit    := ['let'] NAME '=' expr
 
-expr       := equality
-equality   := comparison (('==' | '!=') comparison)*
-comparison := additive  (('<' | '<=' | '>' | '>=') additive)*
-additive   := multiplicative (('+' | '-') multiplicative)*
-multiplicative := unary (('*' | '/') unary)*
-unary      := '-' unary | power
-power      := primary (('^' | '**') unary)?   -- right-associative
-primary    := NUMBER | 'pi' | 'e' | 'input()' | NAME | NAME '(' [expr (',' expr)*] ')'
-            | '(' expr ')'
-```
+MEMORY     := 'A' | 'B' | 'C' | 'D' | 'X' | 'Y' | 'M'
+JSON       := a JSON value, or a string naming a file to read
+dataref    := NAME accessor+
+accessor   := '.' NAME | '[' INTEGER ']'
+
+primary    := NUMBER | 'pi' | 'e' | 'input()' | NAME | dataref
+            | NAME '(' [expr (',' expr)*] ')' | '(' expr ')'
 
 **Binding strength, tightest first:** `(...)` / calls → `^ **` → unary `-` →
 `* /` → `+ -` → `< <= > >=` → `== !=` (loosest).
@@ -296,10 +298,42 @@ Consequences to design around:
 Naming them `a b c d x y m` in that order makes allocation obvious and
 predictable. It is a good habit for generated code.
 
-An eighth distinct name fails at transpile time, pointing at the offending name:
+To make a program fit, in this order of preference:
+
+1. **Use `const` for fixed values.** A `const` is inlined where it is used and
+   consumes no memory:
+
+   ```c
+   const scale = 3;
+   let total = 7 * scale;   // emits `7×3→A`; only `total` uses a memory
+   ```
+
+2. **Use `#data` for values that come from JSON.** Those are literals too.
+3. **Use `#reg` when the calculator side needs a particular memory.**
+
+```c
+#reg total = M
+let total = 1;    // total → M, deliberately
+```
+
+`fx50 regs program.fxc` prints the plan without running anything:
+
+```console
+$ fx50 regs examples/compiletime.fxc
+Memory plan for examples/compiletime.fxc
+  M  total  (pinned)
+
+  1 of 7 memories used; free: A B C D X Y
+  1 const (no memory): scale
+  2 data table(s) (no memory): config, tests
+```
+
+An eighth mutable name fails at transpile time, naming the memories in use:
 
 ```text
-fx50: too many variables: PRGM only has 7 memories (A B C D X Y M), but `z` is the 8th distinct name (line 1, column 61)
+fx50: no free memory for `z`: all of A B C D X Y M are taken by A (`a`), B (`b`),
+C (`c`), D (`d`), X (`x`), Y (`y`), M (`m`). Use `const` for fixed values, or
+`#reg` to pin a memory deliberately — `fx50 regs` shows the plan
 ```
 
 ---
@@ -428,27 +462,27 @@ return value.
 
 ## 9. Verify your program with a JSON test suite
 
-You do not have to trust your own reading of a program: a `.fxc` file can be
-shipped with a JSON suite that pins its behaviour. Writing one is the strongest
-way to be sure the program you generated is correct, and it lets a human check
-your work at a glance.
+You do not have to trust your own reading of a program: a `.fxc` file can carry
+its own test cases in a `#tests` table, which is the same compile-time data
+facility as `#data`.
 
-Put the suite next to the program as `<name>.tests.json`:
+```c
+// factorial.fxc
+let n = input();
+let result = 1;
+for (let i = 1; i <= n; i = i + 1) { result = result * i; }
+print(result);
 
-```json
-{
-  "program": "factorial.fxc",
-  "cases": [
-    { "name": "5! = 120", "input": [5], "output": ["120"] },
-    { "name": "0! = 1",   "input": [0], "output": ["1"] },
-    { "name": "no input", "input": [],  "error": "Argument ERROR" }
-  ]
-}
+#tests = [
+  { "name": "5! = 120", "input": [5], "output": ["120"] },
+  { "name": "0! = 1",   "input": [0], "output": ["1"] },
+  { "name": "no input", "input": [],  "error": "Argument ERROR" }
+];
 ```
 
 ```console
 $ fx50 test factorial.fxc
-factorial
+factorial.fxc
   ok    5! = 120
   ok    0! = 1
   ok    no input
@@ -459,16 +493,23 @@ If you can run commands, **run this before reporting success**. It exits
 non-zero when a case fails, and a failure tells you the exact expected and
 actual values.
 
+A separate `<name>.tests.json` file still works for suites that prefer to live
+apart from their program; it is loaded only when the program has no `#tests`
+table.
+
 ### Fields
+
+The `#tests` table is an array of cases, or an object:
 
 | Field | Required | Meaning |
 | --- | --- | --- |
 | `name` | no | Suite label. |
-| `program` | one of | Path to the `.fxc`, **relative to the JSON file**. |
-| `source` | one of | Inline `.fxc` text instead of a file. |
 | `mode` | no | `COMP`, `CMPLX`, `BASE`, `SD` or `REG`. |
 | `ascii` | no | Transpile with ASCII aliases. |
 | `cases` | yes | The cases. |
+
+A standalone `.tests.json` additionally takes `program` (a path, **relative to
+the JSON file**) **or** `source` (inline text).
 
 | Case field | Required | Meaning |
 | --- | --- | --- |
@@ -507,12 +548,53 @@ Use `fx50 test prog.fxc --json` for a machine-readable report, and
 
 ---
 
-## 10. Checklist before you emit `.fxc`
+## 10. Reading data at transpile time
+
+A `.fxc` program can read JSON **while it is being transpiled** and use the
+values as literals. This is the general facility behind `#tests`, and it is how
+a program carries tables of numbers without spending memories on them.
+
+```c
+#data config = { "base": 2, "offsets": [10, 20, 30] };
+const scale = config.base;
+
+let total = config.offsets[1] * scale;   // emits `20×2→A`
+print(total);                            // `A◢`
+```
+
+Rules:
+
+* The directive is `#data NAME = VALUE;`. `VALUE` is JSON and may span lines.
+* A **top-level JSON string means "read this file"**:
+  `#data offsets = "offsets.json";` reads that file, resolved relative to the
+  file containing the directive.
+* Reference values with `.field` and `[index]`: `config.offsets[1]`. Indices
+  must be whole-number literals, not expressions.
+* Only **numbers and booleans** can reach the calculator. A boolean is `1` or
+  `0`. A string, array or object used as a value is an error — index into it
+  first.
+* A bare data name (`print(config)`) is allowed only if the whole table is a
+  single number or boolean.
+* `#data` names share the namespace with variables and `const`s, so they must
+  be unique.
+* `#data` may appear anywhere; `#reg` and `#mode` must come before the program.
+
+Because the values are resolved before emission, they contribute **nothing** to
+the seven-memory budget. Prefer `#data` over writing a long list of literals by
+hand when the values are already available as JSON.
+
+---
+
+## 11. Checklist before you emit `.fxc`
 
 - [ ] Every statement ends with `;`.
 - [ ] `#mode` (if used) is the very first line, and the mode is spelled
       correctly.
-- [ ] At most **seven** distinct variable names in the whole program.
+- [ ] At most **seven** mutable variable names in the whole program; fixed
+      values use `const` (and tables use `#data`) so they cost no memory.
+- [ ] `#data` paths resolve to numbers or booleans; array indices are literals.
+- [ ] Any `#reg` pin names a real, used variable and a memory the program does
+      not otherwise use.
 - [ ] `input()` appears only as a complete assignment right-hand side.
 - [ ] No `%`, `&&`, `||`, `!`, `++`, `--`, `+=`, hex literals, arrays, or
       strings.
@@ -531,10 +613,15 @@ Use `fx50 test prog.fxc --json` for a machine-readable report, and
 - [ ] If you can run commands, a `.tests.json` suite covers the happy path
       **and** at least one error case, and `fx50 test` reports `0 failed`.
 
+- [ ] If you can run commands, a `#tests` table (or a `.tests.json` suite)
+      covers the happy path **and** at least one error case, and `fx50 test`
+      reports `0 failed`.
+
 If you can, verify with the compiler before declaring success:
 
 ```bash
 fx50 build your.fxc >/dev/null && echo "transpiles"
+fx50 regs  your.fxc            # check the seven-memory budget
 ```
 
 and, where inputs are known, execute it:
@@ -543,8 +630,8 @@ and, where inputs are known, execute it:
 printf '5\n' | fx50 run your.fxc
 ```
 
-Best of all, write a `your.tests.json` suite (§9) and run it — that checks
-many cases at once and leaves evidence behind:
+Best of all, write test cases in the program itself (§9) and run them — that
+checks many cases at once and leaves evidence behind:
 
 ```bash
 fx50 test your.fxc

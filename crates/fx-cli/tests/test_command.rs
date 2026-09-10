@@ -90,15 +90,65 @@ fn json_report_is_emitted_on_request() {
 }
 
 #[test]
-fn a_missing_suite_is_a_clear_error() {
+fn a_program_without_tests_is_a_clear_error() {
     let dir = TempDir::new("missing");
     let program = dir.write("lonely.fxc", "print(1);");
 
     let out = fx50().arg("test").arg(&program).output().unwrap();
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(!out.status.success());
-    assert!(stderr.contains("no test suite at"), "{stderr}");
+    assert!(stderr.contains("has no `#tests` table"), "{stderr}");
     assert!(stderr.contains("lonely.tests.json"), "{stderr}");
+}
+
+#[test]
+fn a_program_may_carry_its_own_tests() {
+    let dir = TempDir::new("embedded");
+    let program = dir.write(
+        "prog.fxc",
+        "let a = input();\nprint(a * 2);\n\n#tests = [\n  { \"name\": \"doubles\", \"input\": [21], \"output\": [\"42\"] }\n];\n",
+    );
+
+    let out = fx50().arg("test").arg(&program).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(out.status.success(), "stdout: {stdout}");
+    assert!(stdout.contains("ok    doubles"), "{stdout}");
+    assert!(stdout.contains("1 passed, 0 failed"), "{stdout}");
+}
+
+#[test]
+fn regs_reports_the_memory_plan() {
+    let dir = TempDir::new("regs");
+    let program = dir.write(
+        "prog.fxc",
+        "#reg total = M\n#data config = { \"n\": 3 };\nconst k = config.n;\nlet total = k;\nlet i = 1;\nprint(total + i);\n",
+    );
+
+    let out = fx50().arg("regs").arg(&program).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(out.status.success(), "stdout: {stdout}");
+    assert!(stdout.contains("Memory plan for"), "{stdout}");
+    assert!(stdout.contains("M  total  (pinned)"), "{stdout}");
+    assert!(stdout.contains("of 7 memories used"), "{stdout}");
+    assert!(stdout.contains("const (no memory): k"), "{stdout}");
+    assert!(
+        stdout.contains("data table(s) (no memory): config"),
+        "{stdout}"
+    );
+}
+
+#[test]
+fn regs_reports_a_program_that_does_not_fit() {
+    let dir = TempDir::new("regs-full");
+    let program = dir.write(
+        "prog.fxc",
+        "let a=1; let b=1; let c=1; let d=1; let x=1; let y=1; let m=1; let z=1;\n",
+    );
+
+    let out = fx50().arg("regs").arg(&program).output().unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success());
+    assert!(stderr.contains("no free memory for `z`"), "{stderr}");
 }
 
 #[test]
@@ -152,7 +202,13 @@ fn filter_selects_a_subset_of_cases() {
 #[test]
 fn the_shipped_examples_pass_through_the_cli() {
     let examples = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples");
-    for name in ["factorial", "quadratic", "include", "constants"] {
+    for name in [
+        "factorial",
+        "quadratic",
+        "include",
+        "constants",
+        "compiletime",
+    ] {
         let out = fx50()
             .arg("test")
             .arg(examples.join(format!("{name}.fxc")))

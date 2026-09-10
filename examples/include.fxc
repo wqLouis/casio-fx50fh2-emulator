@@ -7,3 +7,9 @@
 let n = input();
 #include "lib/squares.fxc"
 print(result);
+
+#tests = [
+  { "name": "5^2 + 1 = 26", "input": [5], "output": ["26"] },
+  { "name": "0^2 + 1 = 1", "input": [0], "output": ["1"] },
+  { "name": "(-3)^2 + 1 = 10", "input": [-3], "output": ["10"] }
+];

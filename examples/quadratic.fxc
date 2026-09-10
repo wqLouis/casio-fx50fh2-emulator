@@ -11,3 +11,10 @@ if (discriminant >= 0) {
 } else {
   print(discriminant);
 }
+
+#tests = [
+  { "name": "x^2 - 3x + 2 has roots 2 and 1", "input": [1, -3, 2], "output": ["2", "1"] },
+  { "name": "x^2 - 1 has roots 1 and -1", "input": [1, 0, -1], "output": ["1", "-1"] },
+  { "name": "x^2 + 1 has no real roots, so it prints the discriminant",
+    "input": [1, 0, 1], "output": ["-4"] }
+];

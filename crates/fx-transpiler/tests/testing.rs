@@ -4,9 +4,7 @@
 
 use std::path::{Path, PathBuf};
 
-use fx_transpiler::testing::{
-    TestError, load_suite_file, parse_suite, run_suite, run_suite_file, sibling_suite_path,
-};
+use fx_transpiler::testing::{TestError, load_suite_file, parse_suite, run_suite, run_suite_file};
 
 /// A scratch directory that cleans itself up.
 struct TempDir(PathBuf);
@@ -44,7 +42,7 @@ fn examples_dir() -> PathBuf {
 
 #[test]
 fn shipped_factorial_suite_passes() {
-    let report = run_suite_file(&examples_dir().join("factorial.tests.json"), None).unwrap();
+    let report = run_suite_file(&examples_dir().join("factorial.fxc"), None).unwrap();
     assert!(report.is_success(), "{report:#?}");
     assert_eq!(report.passed(), 5);
     assert_eq!(report.failed(), 0);
@@ -52,20 +50,25 @@ fn shipped_factorial_suite_passes() {
 
 #[test]
 fn shipped_quadratic_suite_passes() {
-    let report = run_suite_file(&examples_dir().join("quadratic.tests.json"), None).unwrap();
+    let report = run_suite_file(&examples_dir().join("quadratic.fxc"), None).unwrap();
     assert!(report.is_success(), "{report:#?}");
     assert_eq!(report.passed(), 3);
 }
 
-/// `fx50 test examples/factorial.fxc` discovers the sibling suite.
 #[test]
-fn a_program_path_finds_its_sibling_suite() {
-    let program = examples_dir().join("factorial.fxc");
-    let suite = sibling_suite_path(&program);
-    assert!(suite.is_file(), "{} should exist", suite.display());
-
-    let report = run_suite_file(&suite, Some(&program)).unwrap();
+fn shipped_compiletime_suite_passes() {
+    let report = run_suite_file(&examples_dir().join("compiletime.fxc"), None).unwrap();
     assert!(report.is_success(), "{report:#?}");
+    assert_eq!(report.passed(), 1);
+}
+
+/// The cases travel inside the program: `fx50 test examples/factorial.fxc`.
+#[test]
+fn a_program_carries_its_own_tests() {
+    let report = run_suite_file(&examples_dir().join("factorial.fxc"), None).unwrap();
+    assert!(report.is_success(), "{report:#?}");
+    // ...and the suite knows the program is the file it came from.
+    assert!(report.name.contains("factorial.fxc"), "{}", report.name);
 }
 
 // ---------------------------------------------------------------------------
@@ -184,10 +187,21 @@ fn the_json_report_round_trips_through_a_parser() {
     let report = run_suite_file(&suite, None).unwrap();
     let json = report.to_json_pretty();
 
-    // Structural checks rather than a full parse, so this stays dependency-free.
-    assert!(json.contains("\"passed\": true"), "{json}");
-    assert!(json.contains("\"name\": \"one\""), "{json}");
-    assert!(json.contains("\"cases\""), "{json}");
+    let value = fx_transpiler::json::parse(&json).expect("the report is valid JSON");
+    assert_eq!(
+        value
+            .get("failed")
+            .and_then(fx_transpiler::json::Json::as_f64),
+        Some(0.0)
+    );
+    assert_eq!(
+        value
+            .get("cases")
+            .and_then(|cases| cases.index(0))
+            .and_then(|case| case.get("passed"))
+            .and_then(fx_transpiler::json::Json::as_bool),
+        Some(true)
+    );
 }
 
 #[test]

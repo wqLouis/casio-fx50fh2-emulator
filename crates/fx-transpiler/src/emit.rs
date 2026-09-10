@@ -14,7 +14,10 @@ use crate::alloc::Allocator;
 use crate::ast::{BinOp, Expr, ForStmt, Program, Stmt, UnOp};
 use crate::builtins;
 use crate::constants::Constant;
+use crate::data::Data;
 use crate::error::TranspileError;
+
+use std::collections::BTreeSet;
 
 /// Operator precedence levels for the `.fxc` grammar, mirroring
 /// [`crate::parser`]. Higher binds tighter.
@@ -29,13 +32,25 @@ mod prec {
 }
 
 /// Transpile a parsed program into PRGM source.
-pub fn emit(program: &Program, source: &str, opts: Options) -> Result<String, TranspileError> {
-    let allocator = Allocator::collect(program, source)?;
+///
+/// `data` supplies the `#data` tables that data paths resolve against, and
+/// `pins` the `#reg` directives that fix a name to a memory.
+pub fn emit(
+    program: &Program,
+    source: &str,
+    opts: Options,
+    data: &Data,
+    pins: &[(String, char)],
+) -> Result<String, TranspileError> {
+    let allocator = Allocator::collect(program, source, pins, data)?;
     let mut emitter = Emitter {
         out: String::new(),
         allocator,
         opts,
         source,
+        data,
+        consts: Vec::new(),
+        all_consts: crate::alloc::const_names(program).into_iter().collect(),
     };
     emitter.stmts(program)?;
     Ok(emitter.out)
@@ -46,6 +61,14 @@ struct Emitter<'a> {
     allocator: Allocator,
     opts: Options,
     source: &'a str,
+    data: &'a Data,
+    /// `const` declarations in definition order. A `const` is inlined at every
+    /// use, so it never reaches the allocator.
+    consts: Vec<(String, Expr)>,
+    /// Every `const` name in the program, including ones not yet declared, so
+    /// a use before the declaration gets a clear message instead of being
+    /// mistaken for a variable.
+    all_consts: BTreeSet<String>,
 }
 
 impl Emitter<'_> {
@@ -79,6 +102,7 @@ impl Emitter<'_> {
             Stmt::Let { name, value, pos } | Stmt::Assign { name, value, pos } => {
                 self.assignment(name, *pos, value)?;
             }
+            Stmt::Const { name, value, pos } => self.const_declaration(name, *pos, value)?,
             Stmt::Print(expr) => {
                 let value = self.expr(expr, 0)?;
                 let display = self.display();
@@ -119,6 +143,76 @@ impl Emitter<'_> {
             Stmt::Empty => {}
         }
         Ok(())
+    }
+
+    /// Record a `const`. Nothing is emitted: the value is inlined where used.
+    fn const_declaration(
+        &mut self,
+        name: &str,
+        pos: usize,
+        value: &Expr,
+    ) -> Result<(), TranspileError> {
+        if self.const_expr(name).is_some() {
+            return Err(TranspileError::at(
+                self.source,
+                format!("`{name}` is already declared as a `const`"),
+                pos,
+            ));
+        }
+        self.check_const_expr(name, value)?;
+        self.consts.push((name.to_string(), value.clone()));
+        Ok(())
+    }
+
+    /// A `const` value must be buildable from things that are already fixed at
+    /// transpile time. Allowing a variable here would silently turn the
+    /// declaration into a second name for that variable's *current* value,
+    /// which is never what someone means by `const`.
+    fn check_const_expr(&self, owner: &str, expr: &Expr) -> Result<(), TranspileError> {
+        match expr {
+            Expr::Number(_) | Expr::Pi(_) | Expr::E(_) | Expr::Constant(..) | Expr::Data { .. } => {
+                Ok(())
+            }
+            Expr::Unary(_, inner) => self.check_const_expr(owner, inner),
+            Expr::Binary(_, left, right) => {
+                self.check_const_expr(owner, left)?;
+                self.check_const_expr(owner, right)
+            }
+            Expr::Name(name, pos) => {
+                if self.const_expr(name).is_some() {
+                    Ok(())
+                } else {
+                    Err(TranspileError::at(
+                        self.source,
+                        format!(
+                            "`{owner}` must be a constant expression, but `{name}` is only known \
+                             when the program runs; use `let` if it must be computed"
+                        ),
+                        *pos,
+                    ))
+                }
+            }
+            Expr::Input(pos) => Err(TranspileError::at(
+                self.source,
+                format!(
+                    "`{owner}` cannot use `input()`, which is only known when the program runs"
+                ),
+                *pos,
+            )),
+            Expr::Call(name, _, pos) => Err(TranspileError::at(
+                self.source,
+                format!("`{owner}` cannot call `{name}`; a `const` is fixed when transpiling"),
+                *pos,
+            )),
+        }
+    }
+
+    /// The value of a `const`, if it has been declared.
+    fn const_expr(&self, name: &str) -> Option<&Expr> {
+        self.consts
+            .iter()
+            .find(|(known, _)| known == name)
+            .map(|(_, value)| value)
     }
 
     /// `x = value` (and `let x = value`), including the `input()` special case.
@@ -252,9 +346,36 @@ impl Emitter<'_> {
     fn expr_prec(&self, expr: &Expr) -> Result<(String, u8), TranspileError> {
         match expr {
             Expr::Number(value) => Ok((format_number(*value), prec::ATOM)),
+            // A `const` or a data table is replaced by its value here; only a
+            // real variable reaches the allocator.
             Expr::Name(name, pos) => {
+                if let Some(value) = self.const_expr(name) {
+                    return self.expr_prec(value);
+                }
+                if self.all_consts.contains(name) {
+                    return Err(TranspileError::at(
+                        self.source,
+                        format!(
+                            "`{name}` is a `const` declared later; a `const` must be defined \
+                             before it is used"
+                        ),
+                        *pos,
+                    ));
+                }
+                if self.data.contains(name) {
+                    let number = self.data.resolve(name, &[], self.source, *pos)?;
+                    return Ok((format_number(number), prec::ATOM));
+                }
                 let var = self.variable(name, *pos)?;
                 Ok((var.to_string(), prec::ATOM))
+            }
+            Expr::Data {
+                name,
+                accessors,
+                pos,
+            } => {
+                let number = self.data.resolve(name, accessors, self.source, *pos)?;
+                Ok((format_number(number), prec::ATOM))
             }
             Expr::Pi(_) => Ok((
                 (if self.opts.ascii { "pi" } else { "π" }).to_string(),

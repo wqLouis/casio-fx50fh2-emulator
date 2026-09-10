@@ -13,7 +13,10 @@ pub enum Tok {
     Number(f64),
     /// The leading `#mode NAME` directive.
     Mode(Mode),
+    /// A leading `#reg NAME = L` directive: pin a variable to one memory.
+    Reg(String, char),
     Let,
+    Const,
     If,
     Else,
     While,
@@ -45,6 +48,8 @@ pub enum Tok {
     RParen,
     LBrace,
     RBrace,
+    LBracket,
+    RBracket,
     Semi,
     Comma,
     /// A standalone `.`, as in `phys.h`.
@@ -59,7 +64,9 @@ impl Tok {
             Tok::Ident(name) => format!("identifier `{name}`"),
             Tok::Number(value) => format!("number `{value}`"),
             Tok::Mode(mode) => format!("`#mode {}`", mode.name()),
+            Tok::Reg(name, letter) => format!("`#reg {name} = {letter}`"),
             Tok::Let => "`let`".into(),
+            Tok::Const => "`const`".into(),
             Tok::If => "`if`".into(),
             Tok::Else => "`else`".into(),
             Tok::While => "`while`".into(),
@@ -86,6 +93,8 @@ impl Tok {
             Tok::RParen => "`)`".into(),
             Tok::LBrace => "`{`".into(),
             Tok::RBrace => "`}`".into(),
+            Tok::LBracket => "`[`".into(),
+            Tok::RBracket => "`]`".into(),
             Tok::Semi => "`;`".into(),
             Tok::Comma => "`,`".into(),
             Tok::Dot => "`.`".into(),
@@ -173,17 +182,28 @@ impl<'a> Lexer<'a> {
                 continue;
             }
             if ch == '#' {
-                if !tokens.is_empty() {
+                // Directives form a run at the very top of the file. `#include`
+                // and data directives never reach the lexer (the preprocessor
+                // resolves them), so only `#mode` and `#reg` are left.
+                let directives_only = tokens
+                    .iter()
+                    .all(|token| matches!(token.tok, Tok::Mode(_) | Tok::Reg(..)));
+                if !directives_only {
                     return Err(self.error(
                         "a `#` directive must be the first non-comment, non-blank line",
                         pos,
                     ));
                 }
-                let mode = self.mode_directive()?;
-                tokens.push(Token {
-                    tok: Tok::Mode(mode),
-                    pos,
-                });
+                let tok = self.directive()?;
+                // A `#mode` configures the whole program, so a second one is
+                // ambiguous; only `#reg` may follow other directives.
+                if matches!(tok, Tok::Mode(_)) && !tokens.is_empty() {
+                    return Err(self.error(
+                        "a `#mode` directive must be the first non-comment, non-blank line",
+                        pos,
+                    ));
+                }
+                tokens.push(Token { tok, pos });
                 continue;
             }
             // An identifier is ASCII, except for a constant's display symbol
@@ -291,7 +311,85 @@ impl<'a> Lexer<'a> {
         self.chars[start..self.i].iter().collect()
     }
 
-    /// Read the body of a leading `#mode NAME` directive.
+    /// Read a `#` directive.
+    ///
+    /// The `#` has not been consumed. Dispatches on the directive word and
+    /// leaves the cursor just past the end of the directive's line.
+    fn directive(&mut self) -> Result<Tok, TranspileError> {
+        debug_assert_eq!(self.peek(), Some('#'));
+        let save_i = self.i;
+        let save_byte = self.byte;
+        self.advance();
+        let word_start = self.i;
+        while self.peek().is_some_and(|c| c.is_ascii_alphabetic()) {
+            self.advance();
+        }
+        let word: String = self.chars[word_start..self.i].iter().collect();
+        match word.to_ascii_lowercase().as_str() {
+            "mode" => {
+                self.i = save_i;
+                self.byte = save_byte;
+                let mode = self.mode_directive()?;
+                Ok(Tok::Mode(mode))
+            }
+            "reg" => self.reg_directive(),
+            other => Err(self.error(format!("unknown directive `#{other}`"), save_byte)),
+        }
+    }
+
+    /// Read the body of a `#reg NAME = L` directive.
+    ///
+    /// The `#reg` word has already been consumed. The memory letter is not
+    /// validated here — [`crate::alloc`] owns the list of memories, so the
+    /// check lives there and cannot drift.
+    fn reg_directive(&mut self) -> Result<Tok, TranspileError> {
+        let start = self.byte;
+        self.skip_inline_space();
+        let name_start = self.i;
+        while self
+            .peek()
+            .is_some_and(|c| c.is_ascii_alphanumeric() || c == '_')
+        {
+            self.advance();
+        }
+        let name: String = self.chars[name_start..self.i].iter().collect();
+        if name.is_empty() {
+            return Err(self.error("expected a variable name after `#reg`", self.byte));
+        }
+        self.skip_inline_space();
+        if self.peek() == Some('=') {
+            self.advance();
+            self.skip_inline_space();
+        }
+        let Some(letter) = self.peek().filter(|c| c.is_ascii_alphabetic()) else {
+            return Err(self.error(
+                format!("expected a memory letter (A B C D X Y M) after `#reg {name} =`"),
+                self.byte,
+            ));
+        };
+        self.advance();
+        self.finish_directive_line(start, "the memory letter")?;
+        Ok(Tok::Reg(name, letter.to_ascii_uppercase()))
+    }
+
+    /// Require the rest of the current line to be blank or a `//` comment.
+    fn finish_directive_line(&mut self, start: usize, what: &str) -> Result<(), TranspileError> {
+        self.skip_inline_space();
+        match self.peek() {
+            None | Some('\n') | Some('\r') => Ok(()),
+            Some('/') if self.looking_at("//") => {
+                while let Some(ch) = self.peek() {
+                    if ch == '\n' {
+                        break;
+                    }
+                    self.advance();
+                }
+                Ok(())
+            }
+            _ => Err(self.error(format!("unexpected text after {what}"), start)),
+        }
+    }
+    /// Read the body of a `#mode NAME` directive.
     ///
     /// The `#` has not been consumed yet. Accepts an optional `=` and
     /// surrounding spaces: `#mode CMPLX`, `#mode=cmplx`. The rest of the line
@@ -335,23 +433,7 @@ impl<'a> Lexer<'a> {
             ));
         };
 
-        // The directive is a whole line: only blanks or a `//` comment may
-        // follow the mode name.
-        self.skip_inline_space();
-        match self.peek() {
-            None | Some('\n') | Some('\r') => {}
-            Some('/') if self.looking_at("//") => {
-                while let Some(ch) = self.peek() {
-                    if ch == '\n' {
-                        break;
-                    }
-                    self.advance();
-                }
-            }
-            _ => {
-                return Err(self.error("unexpected text after the mode name", self.byte));
-            }
-        }
+        self.finish_directive_line(start, "the mode name")?;
         Ok(mode)
     }
 
@@ -390,6 +472,8 @@ impl<'a> Lexer<'a> {
             ')' => Tok::RParen,
             '{' => Tok::LBrace,
             '}' => Tok::RBrace,
+            '[' => Tok::LBracket,
+            ']' => Tok::RBracket,
             ';' => Tok::Semi,
             ',' => Tok::Comma,
             '.' => Tok::Dot,
@@ -403,6 +487,7 @@ impl<'a> Lexer<'a> {
 fn keyword(word: &str) -> Option<Tok> {
     Some(match word {
         "let" => Tok::Let,
+        "const" => Tok::Const,
         "if" => Tok::If,
         "else" => Tok::Else,
         "while" => Tok::While,

@@ -44,9 +44,10 @@ fn validate_stmts(stmts: &[Stmt], source: &str) -> Result<(), TranspileError> {
 
 fn validate_stmt(stmt: &Stmt, source: &str) -> Result<(), TranspileError> {
     match stmt {
-        Stmt::Let { value, .. } | Stmt::Assign { value, .. } | Stmt::ExprStmt(value) => {
-            validate_expr(value, source)
-        }
+        Stmt::Let { value, .. }
+        | Stmt::Const { value, .. }
+        | Stmt::Assign { value, .. }
+        | Stmt::ExprStmt(value) => validate_expr(value, source),
         Stmt::Print(expr) => validate_expr(expr, source),
         Stmt::If {
             cond,
@@ -101,6 +102,8 @@ fn validate_expr(expr: &Expr, source: &str) -> Result<(), TranspileError> {
             Ok(())
         }
         Expr::Number(_) | Expr::Name(..) | Expr::Input(_) => Ok(()),
+        // A data path is a number fixed at transpile time, which BASE offers.
+        Expr::Data { .. } => Ok(()),
     }
 }
 

@@ -150,11 +150,43 @@ takes precedence over any header in the source.
 
 ### Variable allocation
 
-PRGM has exactly seven memories — `A B C D X Y M`. Every distinct `.fxc` name is
-assigned one of them in **first-seen order** (the whole program is scanned
-before emitting). A name keeps its memory for the whole program, so no scope
-analysis is needed. An eighth distinct name is a compile error pointing at that
-name.
+PRGM has exactly seven memories — `A B C D X Y M`. Every distinct mutable `.fxc`
+name is assigned one of them in **first-seen order** (the whole program is
+scanned before emitting), and a name keeps its memory for the whole program.
+Twenty names do not fit; what fits is at most seven *mutable* values.
+
+Names are never given a shared memory, even when one is no longer read. A
+memory's final value is part of the program's observable result — a later
+program or the user can read it — so no name is ever provably dead. Rather than
+silently dropping a value, the transpiler reports the eighth name and names the
+memories in use.
+
+The way out is to stop needing memories:
+
+* **`const NAME = <expr>;`** declares a fixed value that is **inlined** at every
+  use and occupies no memory. The expression must be constant — numbers, `pi`,
+  `e`, `phys.` constants, `#data` values and other `const`s — so it cannot
+  depend on anything that is only known when the program runs.
+* **`#data NAME = <json>;`** resolves a JSON value at transpile time, likewise
+  producing literals. See [Compile-time data](#compile-time-data).
+* **`#reg NAME = M`** pins a variable to a specific memory, for when the
+  calculator side expects one (or `M` is reserved for the independent memory).
+  Pins must appear before the program.
+
+`fx50 regs FILE` reports the plan and the memories left over:
+
+```console
+$ fx50 regs examples/compiletime.fxc
+Memory plan for examples/compiletime.fxc
+  M  total  (pinned)
+
+  1 of 7 memories used; free: A B C D X Y
+  1 const (no memory): scale
+  2 data table(s) (no memory): config, tests
+```
+
+An eighth mutable name is a compile error pointing at it and listing the
+memories already taken.
 
 ### Translation rules
 
@@ -162,6 +194,9 @@ name.
 | ---------------------------------- | ------------------------------------------------------ |
 | `let x = input();` / `x = input();`| `?→X` / `?->X`                                         |
 | `x = e;`                           | `<e>→X` / `<e>->X`                                     |
+| `const k = 12;`                    | *(nothing; `k` is replaced by `12` at each use)*       |
+| `config.n` / `xs[0]`               | the number it resolves to                              |
+| `#reg x = M`                       | *(nothing; `x` is allocated to `M`)*                   |
 | `print(e);`                        | `<e>◢` / `<e>disp`                                     |
 | `e;`                               | `<e>`                                                  |
 | `+ - * /`                          | `+ - × ÷` / `+ - * /`                                  |
@@ -188,6 +223,42 @@ A◢
 A+2→A
 WhileEnd
 ```
+
+## Compile-time data
+
+`#data` reads a JSON value — inline or from a file — while transpiling, so the
+values become literals and use none of the seven memories:
+
+```c
+#data config = { "base": 2, "offsets": [10, 20, 30] };
+const scale = config.base;
+
+let total = config.offsets[1] * scale;
+print(total);
+```
+
+```console
+$ fx50 build offsets.fxc
+20×2→A
+A◢
+```
+
+A **top-level JSON string is a file path**, resolved relative to the file
+containing the directive:
+
+```c
+#data offsets = "offsets.json";
+```
+
+Values are reached with `.field` and `[index]`; indices must be whole-number
+literals. Only numbers and booleans can be used — a boolean is `1` or `0` — and
+anything else is a transpile error naming the path that failed. The JSON parser
+is the crate's own (`fx_transpiler::json`), so `fx-transpiler` has no
+dependencies; it is strict, and rejects duplicate object keys, comments,
+trailing commas and lone surrogates rather than guessing.
+
+`#tests` is exactly `#data tests = ...`, which is how the test runner below is
+an ordinary consumer of this facility rather than a special case.
 
 ## Sharing code with `#include`
 
@@ -260,24 +331,26 @@ the **current directory**, since a bare string carries no location.
 
 ## Testing programs with JSON
 
-A program can be regression-tested against a JSON suite that pairs inputs with
-the display lines they should produce. Put the suite next to the program as
-`<name>.tests.json`:
+A program can carry its own test cases in a `#tests` table — the same
+compile-time data facility as `#data`:
 
-```json
-{
-  "program": "factorial.fxc",
-  "cases": [
-    { "name": "5! = 120", "input": [5], "output": ["120"] },
-    { "name": "0! = 1",   "input": [0], "output": ["1"] },
-    { "name": "no input", "input": [],  "error": "Argument ERROR" }
-  ]
-}
+```c
+// factorial.fxc
+let n = input();
+let result = 1;
+for (let i = 1; i <= n; i = i + 1) { result = result * i; }
+print(result);
+
+#tests = [
+  { "name": "5! = 120", "input": [5], "output": ["120"] },
+  { "name": "0! = 1",   "input": [0], "output": ["1"] },
+  { "name": "no input", "input": [],  "error": "Argument ERROR" }
+];
 ```
 
 ```console
 $ fx50 test examples/factorial.fxc
-factorial
+factorial.fxc
   ok    5! = 120
   ok    1! = 1
   ok    0! = 1
@@ -287,11 +360,12 @@ factorial
 ```
 
 The command exits non-zero when any case fails, so it drops straight into CI.
-It also accepts a `.tests.json` path directly, and takes `--filter TEXT` (run
-only cases whose name contains `TEXT`) and `--json` (machine-readable report):
+It also accepts a standalone `.tests.json` path (loaded when the program has no
+`#tests` table), and takes `--filter TEXT` (run only cases whose name contains
+`TEXT`) and `--json` (machine-readable report):
 
 ```bash
-fx50 test examples/quadratic.tests.json
+fx50 test examples/quadratic.fxc
 fx50 test prog.fxc --filter "roots"
 fx50 test prog.fxc --json
 ```
@@ -299,7 +373,7 @@ fx50 test prog.fxc --json
 A failing case shows both sides:
 
 ```text
-prog.tests.json
+prog.fxc
   ok    doubles 21
   FAIL  deliberately wrong
         expected: 11
@@ -309,17 +383,22 @@ prog.tests.json
 
 ### Suite schema
 
+The `#tests` table is an array of cases, or an object:
+
 | Field | Required | Meaning |
 | --- | --- | --- |
 | `name` | no | Suite label shown in the report. |
-| `program` | one of | Path to a `.fxc` file, resolved relative to the JSON file. |
-| `source` | one of | Inline `.fxc` source instead of a file. |
 | `mode` | no | Operating mode override (`COMP`, `CMPLX`, `BASE`, `SD`, `REG`). |
 | `ascii` | no | Transpile with ASCII aliases. Default `false`. |
 | `cases` | yes | The list of cases. |
 
-`program` and `source` are mutually exclusive; when both are absent, the
-sibling `.fxc` of the suite file is used. Each case takes:
+A standalone `.tests.json` file additionally takes `program` (a path, resolved
+relative to the JSON file) **or** `source` (inline text); the two are mutually
+exclusive. When both are absent, the sibling `.fxc` of the suite file is used.
+Those fields are not allowed in an embedded `#tests` table, where the program is
+the file the table lives in.
+
+Each case takes:
 
 | Field | Required | Meaning |
 | --- | --- | --- |
@@ -342,7 +421,7 @@ The runner is behind the `testing` feature (on by default, and implied by
 use fx_transpiler::testing::{run_suite_file, parse_suite};
 use std::path::Path;
 
-let report = run_suite_file(Path::new("examples/factorial.tests.json"), None)?;
+let report = run_suite_file(Path::new("examples/factorial.fxc"), None)?;
 assert!(report.is_success());
 println!("{}", report.to_json_pretty());
 

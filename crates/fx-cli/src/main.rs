@@ -49,6 +49,7 @@ use casio_fx50fh2::{
                   fx50 run examples/factorial.fx\n  \
                   fx50 build program.fxc > program.fx\n  \
                   fx50 test examples/factorial.fxc\n  \
+                  fx50 regs program.fxc\n  \
                   printf '3+4' | fx50"
 )]
 struct Cli {
@@ -115,8 +116,8 @@ enum Command {
     },
     /// Run JSON test cases against a program
     Test {
-        /// A `.fxc` program (its sibling `<name>.tests.json` is used) or a
-        /// `.tests.json` suite directly
+        /// A `.fxc` program (whose embedded `#tests` table, or sibling
+        /// `<name>.tests.json`, is used) or a `.tests.json` suite directly
         #[arg(value_name = "FILE")]
         file: PathBuf,
         /// Only run cases whose name contains this text
@@ -125,6 +126,12 @@ enum Command {
         /// Print the report as JSON instead of a human summary
         #[arg(long)]
         json: bool,
+    },
+    /// Show how a program uses the calculator's seven memories
+    Regs {
+        /// A `.fxc` program
+        #[arg(value_name = "FILE")]
+        file: PathBuf,
     },
     /// List the calculator's 40 built-in scientific constants
     Constants,
@@ -210,6 +217,7 @@ fn dispatch(cli: Cli) -> Result<(), Fail> {
         Some(Command::Eval { expression }) => eval(&expression.join(" "), mode),
         Some(Command::Build { file }) => build(&file, cli.ascii, mode),
         Some(Command::Test { file, filter, json }) => test_command(&file, filter.as_deref(), json),
+        Some(Command::Regs { file }) => regs_command(&file),
         Some(Command::Run { file }) => run_file(&file, cli.ascii, mode),
         Some(Command::Constants) => list_constants(),
         Some(Command::Completions { shell }) => {
@@ -300,32 +308,16 @@ fn read_source(file: &Path) -> Result<String, Fail> {
 // ---------------------------------------------------------------------------
 // JSON test suites
 
-/// `fx50 test FILE` — run a JSON suite against a program.
+/// `fx50 test FILE` — run the cases a program carries.
 ///
-/// `FILE` may be a `.fxc` program (whose sibling `<name>.tests.json` is used)
-/// or a `.tests.json` suite directly.
+/// `FILE` may be a `.fxc` program (whose embedded `#tests` table is used, or a
+/// sibling `<name>.tests.json` if it has none) or a `.tests.json` suite.
 #[cfg(feature = "transpiler")]
 fn test_command(file: &Path, filter: Option<&str>, as_json: bool) -> Result<(), Fail> {
     use fx_transpiler::testing;
 
-    let is_json = file
-        .extension()
-        .is_some_and(|ext| ext.eq_ignore_ascii_case("json"));
-    let (suite_path, fallback) = if is_json {
-        (file.to_path_buf(), None)
-    } else {
-        let suite = testing::sibling_suite_path(file);
-        if !suite.is_file() {
-            return Err(Fail::Message(format!(
-                "no test suite at `{}`; create it, or pass a `.tests.json` file",
-                suite.display()
-            )));
-        }
-        (suite, Some(file.to_path_buf()))
-    };
-
-    let mut suite = testing::load_suite_file(&suite_path, fallback.as_deref())
-        .map_err(|e| Fail::Message(e.to_string()))?;
+    let mut suite =
+        testing::load_suite_file(file, None).map_err(|e| Fail::Message(e.to_string()))?;
 
     if let Some(filter) = filter {
         let needle = filter.to_ascii_lowercase();
@@ -357,6 +349,88 @@ fn test_command(_file: &Path, _filter: Option<&str>, _as_json: bool) -> Result<(
     Err(Fail::Message(
         "test suites are not compiled in (rebuild with `--features transpiler`)".to_string(),
     ))
+}
+
+// ---------------------------------------------------------------------------
+// Memory plan
+
+/// `fx50 regs FILE` — show how a program would use the seven memories.
+///
+/// This is the allocation report: which variable gets which memory, which
+/// memories are deliberately pinned with `#reg`, and how many are left. Values
+/// that need no memory at all (`const` and `#data`) are listed too, because
+/// they are the reason a program fits.
+#[cfg(feature = "transpiler")]
+fn regs_command(file: &Path) -> Result<(), Fail> {
+    let source = read_source(file)?;
+    let base_dir = file.parent().unwrap_or(Path::new("."));
+    let analysis = fx_transpiler::analyze(&source, base_dir)
+        .map_err(|e| Fail::Message(format!("{}: {e}", file.display())))?;
+    print_memory_plan(file, &analysis);
+    Ok(())
+}
+
+#[cfg(not(feature = "transpiler"))]
+fn regs_command(_file: &Path) -> Result<(), Fail> {
+    Err(Fail::Message(
+        "the transpiler is not compiled in (rebuild with `--features transpiler`)".to_string(),
+    ))
+}
+
+#[cfg(feature = "transpiler")]
+fn print_memory_plan(file: &Path, analysis: &fx_transpiler::Analysis) {
+    let allocation = &analysis.allocation;
+    println!("Memory plan for {}", file.display());
+
+    let width = allocation
+        .entries
+        .iter()
+        .map(|(name, _)| name.chars().count())
+        .max()
+        .unwrap_or(0);
+    for (name, memory) in &allocation.entries {
+        let note = if analysis.pins.iter().any(|(pinned, _)| pinned == name) {
+            "  (pinned)"
+        } else {
+            ""
+        };
+        println!("  {memory}  {name:<width$}{note}");
+    }
+    if allocation.entries.is_empty() {
+        println!("  (no variables)");
+    }
+
+    let free = allocation.free();
+    println!();
+    println!(
+        "  {} of 7 memories used{}",
+        allocation.used(),
+        if free.is_empty() {
+            String::new()
+        } else {
+            format!(
+                "; free: {}",
+                free.iter()
+                    .map(|c| c.to_string())
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            )
+        }
+    );
+    if !analysis.consts.is_empty() {
+        println!(
+            "  {} const (no memory): {}",
+            analysis.consts.len(),
+            analysis.consts.join(", ")
+        );
+    }
+    if !analysis.data.is_empty() {
+        println!(
+            "  {} data table(s) (no memory): {}",
+            analysis.data.len(),
+            analysis.data.join(", ")
+        );
+    }
 }
 
 #[cfg(feature = "transpiler")]

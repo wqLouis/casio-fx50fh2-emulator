@@ -338,3 +338,85 @@ check silently returns false in the sandbox. The extension detects a worktree
 build by reading Cargo's dep-info file (`target/debug/fx50.d`), and falls back
 to recognising this repository by its root `Cargo.toml` — necessary because
 `target/` is gitignored and the worktree file API cannot see ignored paths.
+
+## ADR 0014 — JSON is hand-written, and compile-time data is a language feature
+
+`#data` lets a `.fxc` program read JSON while it is transpiled, and `#tests` is
+the same mechanism under a shorter name. Since `fx-transpiler` must build with
+`--no-default-features` and **zero** dependencies (ADR 0006), and `#data` cannot
+be hidden behind a cargo feature without the language changing shape with the
+build configuration, the JSON parser is part of the crate
+(`crates/fx-transpiler/src/json.rs`).
+
+**Why not `serde_json`.** It was already an optional dependency behind
+`testing`, but keeping two JSON implementations — one for tests, one for
+`#data` — would let them disagree about what a document means. One parser is
+strictly better than two, so `serde` and `serde_json` were removed from the
+crate entirely and `testing` now uses `json` too. `cargo tree -p fx-transpiler
+--no-default-features` is now empty; even the core crate is optional.
+
+**How the parser is kept honest.** Its input is compiled into a calculator
+program, so silent coercion is worse than a clear error: duplicate object keys,
+comments, trailing commas, leading zeros, out-of-range numbers and lone `\u`
+surrogates are all rejected. Beyond its unit tests it was checked against a
+reference implementation — 3000 generated documents parsed by this crate and by
+Python's `json`, re-parsed and compared structurally. Every difference (89 of
+3000) was an `f64` representation case, e.g. `9007199254740993`, which no
+`f64` can hold; there were no structural, type, string or key-order
+disagreements. Numbers are `f64` because that is what the calculator computes
+with.
+
+**`#data` is textual, like `#include`.** Directives are extracted after
+`#include` expansion and before lexing. The directive text is blanked —
+newlines preserved — so every line number still refers to the line the user
+wrote, and the existing line map keeps diagnostics pointing at the right file.
+A **top-level JSON string means "read this file"**, which is what makes
+`#tests = "cases.json";` work; nested strings stay strings. Values are only
+usable as numbers and booleans, so nothing of the JSON reaches the calculator.
+
+**`#tests` is not special.** It is literally `#data tests = ...`, so the test
+runner is a consumer of the data facility rather than a parallel
+implementation. The cases live in the program; a standalone `.tests.json` is
+still read when a program has no `#tests` table.
+
+## ADR 0015 — `const` is inlined, not allocated
+
+`const NAME = <expr>;` declares a fixed value. It is replaced by its expression
+at every use and never reaches the allocator, so it costs none of the seven
+memories. This is the main way a `.fxc` program stays within the calculator's
+register budget without heroics.
+
+The expression must be constant: numbers, `pi`, `e`, `phys.` constants, `#data`
+values and earlier `const`s, combined with unary minus and the binary
+operators. Variables, `input()` and built-in calls are rejected with an
+explanation, because inlining a variable would silently capture its value at
+the point of the declaration, which is never what `const` means. Definitions
+must precede use, which also makes cycles impossible.
+
+**Alternatives rejected.** Folding every `const` to an `f64` at transpile time
+would turn `const c = 2 * pi;` into a long decimal, losing the symbolic `π` the
+calculator would otherwise key in — and folding in `f64` can differ in the last
+digit from the calculator's own 15-digit arithmetic. Inlining keeps the
+program's arithmetic exactly as written.
+
+## ADR 0016 — Memories are never shared between names
+
+The calculator has seven memories, and a program with more than seven mutable
+names does not fit. The first implementation of the improved allocator reused a
+memory once a name was no longer read, so `let a = 1; let b = 2;` collapsed both
+onto `A`. The golden test that assigns seven names to `A B C D X Y M` caught
+it, and it was wrong: **a memory's final value is part of the program's
+observable result.** PRGM leaves its answer in a memory; a later program or the
+user can read it. No name is ever provably dead, so no memory may be reused.
+
+What relieves the pressure instead is not sharing but *not needing* memory:
+
+* `const` values are inlined (ADR 0015);
+* `#data` values become literals;
+* `#reg NAME = M` pins a name where the calculator side needs a particular
+  memory, and `fx50 regs` reports the plan and what is left.
+
+The rejection is deliberate and recorded because "reuse dead registers" is the
+obvious optimisation, and it is unsound here for a reason that is easy to
+forget. An eighth mutable name is reported with the memories already in use and
+the two ways out.

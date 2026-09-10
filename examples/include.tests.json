@@ -1,9 +1,0 @@
-{
-  "name": "include",
-  "program": "include.fxc",
-  "cases": [
-    { "name": "5² + 1 = 26", "input": [5], "output": ["26"] },
-    { "name": "0² + 1 = 1", "input": [0], "output": ["1"] },
-    { "name": "(-3)² + 1 = 10", "input": [-3], "output": ["10"] }
-  ]
-}

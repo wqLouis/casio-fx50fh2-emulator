@@ -5,6 +5,7 @@
 //! ```text
 //! program   := stmt*
 //! stmt      := 'let' NAME '=' expr ';'
+//!            | 'const' NAME '=' expr ';'
 //!            | NAME '=' expr ';'
 //!            | 'print' '(' expr ')' ';'
 //!            | 'if' '(' expr ')' block ('else' block)?
@@ -24,10 +25,11 @@
 //! unary     := '-' unary | power
 //! power     := primary (('^' | '**') unary)?
 //! primary   := NUMBER | NAME | NAME '(' args ')' | 'pi' | 'e' | 'input()'
-//!            | 'phys' '.' NAME | '(' expr ')'
+//!            | 'phys' '.' NAME | NAME accessor+ | '(' expr ')'
+//! accessor  := '.' NAME | '[' NUMBER ']'
 //! ```
 
-use crate::ast::{BinOp, Expr, ForStmt, Program, Stmt, UnOp};
+use crate::ast::{Accessor, BinOp, Expr, ForStmt, Program, Stmt, UnOp};
 use crate::builtins;
 use crate::error::TranspileError;
 use crate::lexer::{Tok, Token};
@@ -122,9 +124,10 @@ impl<'a> Parser<'a> {
     // -- program / statements ----------------------------------------------
 
     fn program(&mut self) -> Result<Program, TranspileError> {
-        // The `#mode` directive configures the whole program; the emitter
-        // reads it from the token stream, so the parser drops it here.
-        if matches!(self.peek(), Tok::Mode(_)) {
+        // Directives (`#mode`, `#reg`) configure the whole program. The
+        // emitter reads them from the token stream, so the parser drops the
+        // whole leading run here.
+        while matches!(self.peek(), Tok::Mode(_) | Tok::Reg(..)) {
             self.advance();
         }
         let mut statements = Vec::new();
@@ -137,6 +140,7 @@ impl<'a> Parser<'a> {
     fn statement(&mut self) -> Result<Stmt, TranspileError> {
         match self.peek().clone() {
             Tok::Let => self.let_statement(),
+            Tok::Const => self.const_statement(),
             Tok::Print => self.print_statement(),
             Tok::If => self.if_statement(),
             Tok::While => self.while_statement(),
@@ -187,6 +191,15 @@ impl<'a> Parser<'a> {
         let value = self.expression()?;
         self.expect(&Tok::Semi, "`;` after `let`")?;
         Ok(Stmt::Let { name, value, pos })
+    }
+
+    fn const_statement(&mut self) -> Result<Stmt, TranspileError> {
+        self.advance();
+        let (name, pos) = self.expect_ident("a name after `const`")?;
+        self.expect(&Tok::Assign, "`=` in `const`")?;
+        let value = self.expression()?;
+        self.expect(&Tok::Semi, "`;` after `const`")?;
+        Ok(Stmt::Const { name, value, pos })
     }
 
     fn assign_or_expression(&mut self) -> Result<Stmt, TranspileError> {
@@ -400,6 +413,13 @@ impl<'a> Parser<'a> {
                 self.advance();
                 if self.check(&Tok::LParen) {
                     self.call(name, pos)
+                } else if matches!(self.peek(), Tok::Dot | Tok::LBracket) {
+                    let accessors = self.accessors()?;
+                    Ok(Expr::Data {
+                        name,
+                        accessors,
+                        pos,
+                    })
                 } else {
                     match name.as_str() {
                         "pi" => Ok(Expr::Pi(pos)),
@@ -433,6 +453,38 @@ impl<'a> Parser<'a> {
             return Err(self.error_at(format!("unknown scientific constant `{name}`"), name_pos));
         };
         Ok(Expr::Constant(constant, pos))
+    }
+
+    /// Parse one or more accessors: `.field` or `[index]`.
+    fn accessors(&mut self) -> Result<Vec<Accessor>, TranspileError> {
+        let mut accessors = Vec::new();
+        loop {
+            if self.matches(&Tok::Dot) {
+                let (name, pos) = self.expect_ident("a field name after `.`")?;
+                accessors.push(Accessor::Field { name, pos });
+            } else if self.matches(&Tok::LBracket) {
+                let pos = self.position();
+                let index = self.bracket_index()?;
+                self.expect(&Tok::RBracket, "`]` after the index")?;
+                accessors.push(Accessor::Index { index, pos });
+            } else {
+                return Ok(accessors);
+            }
+        }
+    }
+
+    /// A non-negative integer index inside `[ ]`.
+    fn bracket_index(&mut self) -> Result<usize, TranspileError> {
+        let pos = self.position();
+        match self.peek().clone() {
+            Tok::Number(value)
+                if value.fract() == 0.0 && value >= 0.0 && value <= usize::MAX as f64 =>
+            {
+                self.advance();
+                Ok(value as usize)
+            }
+            _ => Err(self.error_at("an array index must be a non-negative whole number", pos)),
+        }
     }
 
     fn call(&mut self, name: String, pos: usize) -> Result<Expr, TranspileError> {

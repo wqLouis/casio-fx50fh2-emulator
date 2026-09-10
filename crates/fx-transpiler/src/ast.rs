@@ -23,6 +23,15 @@ pub enum UnOp {
     Neg,
 }
 
+/// One step of a compile-time data path, as in `config.size` or `weights[0]`.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Accessor {
+    /// `.field`
+    Field { name: String, pos: usize },
+    /// `[index]`
+    Index { index: usize, pos: usize },
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
     Number(f64),
@@ -32,6 +41,15 @@ pub enum Expr {
     E(usize),
     /// A `phys.NAME` scientific constant, resolved at parse time.
     Constant(&'static crate::constants::Constant, usize),
+    /// A compile-time data path such as `config.size` or `weights[0]`, with at
+    /// least one accessor. A bare data name parses as [`Expr::Name`] and is
+    /// resolved the same way once the emitter knows it is data.
+    Data {
+        name: String,
+        accessors: Vec<Accessor>,
+        /// Byte offset of the name.
+        pos: usize,
+    },
     /// `input()`
     Input(usize),
     Unary(UnOp, Box<Expr>),
@@ -57,6 +75,13 @@ pub struct ForStmt {
 pub enum Stmt {
     /// `let name = value;`
     Let {
+        name: String,
+        value: Expr,
+        pos: usize,
+    },
+    /// `const name = value;` — a compile-time constant, inlined at each use
+    /// and never given a register.
+    Const {
         name: String,
         value: Expr,
         pos: usize,

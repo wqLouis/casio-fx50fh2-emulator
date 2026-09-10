@@ -336,8 +336,13 @@ fn more_than_seven_names_is_an_error() {
     let source = "let a=1; let b=1; let c=1; let d=1; let x=1; let y=1; let m=1; let z=1;";
     let err = transpile(source).unwrap_err();
     assert!(
-        err.message.contains("too many variables"),
+        err.message.contains("no free memory for `z`"),
         "unexpected message: {}",
+        err.message
+    );
+    assert!(
+        err.message.contains("Use `const`"),
+        "the message should point at the way out: {}",
         err.message
     );
     assert_eq!((err.line, err.column), (1, 68));
