@@ -201,21 +201,42 @@ transpile errors rather than surprises on the calculator:
 
 | Mistake | Example | Message |
 | --- | --- | --- |
-| Use after free | `free a; print(a);` | `` `a` was freed and cannot be used again `` |
+| Use after free | `free a; print(a);` | `` `a` is not defined here: it was freed `` |
+| Already declared | `let x = 1; let x = 2;` | `` `x` is already declared `` |
+| Own initializer | `let x = x + 1;` | `` `x` cannot be used in its own initializer `` |
 | Double free | `free a; free a;` | `` `a` was already freed (double free) `` |
+| `free` with a jump | `free a; goto 1; label 1;` | `` use `unsafe_free` `` |
 | Freeing what has no memory | `const k = 1; free k;` | `` `k` is a `const`, which uses no memory `` |
 | Freeing an unknown name | `free nope;` | `` `nope` is not a variable `` |
 | Running out | an eighth live variable | `` no free memory for `z`: … `` |
 
-Two further rules, both about keeping the allocation verifiable:
+**`let` declares.** A `let` introduces a name, so a second `let` of a name that
+is *still live* is an error rather than a silent shadow. Once the name has been
+released, declaring it again is the intended way to reuse a name, and it takes a
+fresh binding:
 
-* **A freed name cannot be revived.** `let t = 1; free t; let t = 2;` is an
-  error; use a fresh name. A name resolves to exactly one memory, and a second
-  `t` would need a second one.
-* **`free` cannot be combined with `goto`/`label`.** A jump can re-enter code
-  whose memory has since been re-used, so the walk over the program is no longer
-  sound. Programs with jumps but no `free` are unaffected, since nothing is ever
-  re-used.
+```c
+let x = input();
+free x;
+let x = input();   // a second, independent life for `x`
+```
+
+A plain assignment (`x = ...`) never declares, so assigning to a released name
+is an error. And a declaration cannot see its own name — `let x = x + 1;` is an
+error, like Rust's `let x = x;`.
+
+**Jumps: `unsafe_free`.** A jump can re-enter code whose memory has since been
+released and given to another variable, so a checked `free` in a program
+containing `goto`/`label` is an error. `unsafe_free` says "I have checked this
+myself", borrowing Rust's convention:
+
+```c
+unsafe_free x;   // no control-flow check; still checked for double free etc.
+```
+
+Like Rust's `unsafe`, it waives one guarantee, not all checking: `unsafe_free`
+still rejects double frees, unknown names and `const`s. Programs with jumps and
+no `free` are unaffected, since nothing is ever re-used.
 
 ### Translation rules
 

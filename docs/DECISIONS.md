@@ -434,16 +434,42 @@ free (including using the name again as an assignment target), double free,
 freeing a `const`/`#data`/unknown name, and running out of memories. Each message
 names the offending variable and where it was written.
 
-Two deliberate restrictions fall out of keeping the walk sound:
+**`let` declares, and a freed name can be declared again.** A `let` introduces a
+name, so a second `let` of a name that is *still live* is an error rather than a
+silent shadow — that is the mistake the user asked to be caught. But once the
+name has been released, declaring it again is exactly the intended way to reuse
+a name, and it takes a fresh binding:
 
-* **A freed name cannot be revived.** `let t = 1; free t; let t = 2;` is an
-  error. A name resolves to one memory in the emitter, and a second `t` would
-  need a second register, so allowing it would make the name→memory mapping
-  ambiguous. A fresh name is required.
-* **`free` cannot be combined with `goto`/`label`.** A jump can re-enter code
-  whose memory has since been released and re-used, so a single forward walk no
-  longer describes the program. Programs with jumps but no `free` are
-  unaffected, because nothing is ever re-used.
+```c
+let x = input();
+free x;
+let x = input();   // a second, independent life for `x`
+```
+
+For that to work the emitter cannot hold one name→memory table: `x` may have had
+two memories over the program's life. A binding is therefore recorded as a byte
+range (`from`..`to`), and a reference resolves to the binding whose range
+contains the reference's offset. That is why `Allocator::register_at` takes a
+position and the emitter passes each name's source offset.
+
+Two smaller rules keep that story coherent:
+
+* **A declaration cannot see its own name.** `let x = x + 1;` — including after a
+  `free` — is an error, because a declaration does not take effect until its
+  value is computed. This is the same rule as Rust's `let x = x;`.
+* **A declaration's name is bound before its initializer is walked**, so
+  allocation follows source order: `let a = -b * c;` gives `a` the first memory.
+
+**`free` and jumps: `unsafe_free`.** A jump can re-enter code whose memory has
+since been released and given to another variable, so a single forward walk no
+longer describes the program — the linear model would emit the wrong memory.
+Rather than ban the combination, a checked `free` in a program containing
+`goto`/`label` is an error, and `unsafe_free` is the explicit way to say "I have
+checked this myself", borrowing Rust's convention of making the unchecked
+operation visible. Like Rust's `unsafe`, it waives one guarantee, not all
+checking: `unsafe_free` still rejects double frees, unknown names and `const`s.
+A program with jumps and no `free` at all is unaffected, because then nothing is
+ever re-used.
 
 **What this replaced.** An earlier revision shipped a `#reg NAME = M` directive
 for pinning a variable to a chosen memory. It answered "how do I make my program

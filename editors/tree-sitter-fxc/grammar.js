@@ -3,8 +3,8 @@
  *
  * `.fxc` is a small C-like language that transpiles to PRGM.  The grammar
  * follows `docs/AI-AGENTS.md`: `//` and block comments, `#mode`/`#include`
- * directives, `#data`/`#tests` compile-time JSON, `let`/`const`/`free`,
- * assignment and `print` statements, `if`/`while`/`for` with optional braces,
+ * directives, `#data`/`#tests` compile-time JSON, `let`/`const`/`free`
+ * (and `unsafe_free`), assignment and `print` statements, `if`/`while`/`for` with optional braces,
  * `break`/`goto`/`label`, data paths with `.field`/`[index]`, and a
  * conventional expression grammar with `^`/`**` exponentiation.  Scientific
  * constants live under the `phys.` namespace.
@@ -121,7 +121,8 @@ module.exports = grammar({
     let_statement: $ => seq('let', $.identifier, '=', $.expression, ';'),
     const_statement: $ => seq('const', $.identifier, '=', $.expression, ';'),
     // `free name;` releases the variable's memory for a later variable to use.
-    free_statement: $ => seq('free', $.identifier, ';'),
+    // `unsafe_free name;` does the same without the jump safety check.
+    free_statement: $ => seq(choice('free', 'unsafe_free'), $.identifier, ';'),
     assignment_statement: $ => seq($.identifier, '=', $.expression, ';'),
     print_statement: $ => seq('print', $.expression, ';'),
 

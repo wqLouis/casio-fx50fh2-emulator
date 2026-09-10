@@ -93,10 +93,13 @@ pub enum Stmt {
         pos: usize,
     },
     /// `free name;` — release the memory holding `name`, so a later variable
-    /// can use it.
+    /// can use it. `unsafe_free name;` does the same without the control-flow
+    /// safety check, for programs that contain `goto`/`label`.
     Free {
         name: String,
         pos: usize,
+        /// True for `unsafe_free`, which waives the `goto`/`label` check.
+        is_unsafe: bool,
     },
     /// `print(value);`
     Print(Expr),

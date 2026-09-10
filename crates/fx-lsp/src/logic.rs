@@ -595,6 +595,10 @@ fn fxc_completion_items() -> Vec<CompletionItem> {
             "free",
             "release a variable's memory so a later variable can reuse it",
         ),
+        (
+            "unsafe_free",
+            "release a memory without the `goto`/`label` safety check",
+        ),
         ("if", "conditional execution"),
         ("else", "alternative `if` body"),
         ("while", "conditional loop"),

@@ -17,6 +17,8 @@ pub enum Tok {
     Const,
     /// `free NAME` — release the memory holding a variable.
     Free,
+    /// `unsafe_free NAME` — release it without the `goto`/`label` check.
+    UnsafeFree,
     If,
     Else,
     While,
@@ -67,6 +69,7 @@ impl Tok {
             Tok::Let => "`let`".into(),
             Tok::Const => "`const`".into(),
             Tok::Free => "`free`".into(),
+            Tok::UnsafeFree => "`unsafe_free`".into(),
             Tok::If => "`if`".into(),
             Tok::Else => "`else`".into(),
             Tok::While => "`while`".into(),
@@ -459,6 +462,7 @@ fn keyword(word: &str) -> Option<Tok> {
         "let" => Tok::Let,
         "const" => Tok::Const,
         "free" => Tok::Free,
+        "unsafe_free" => Tok::UnsafeFree,
         "if" => Tok::If,
         "else" => Tok::Else,
         "while" => Tok::While,

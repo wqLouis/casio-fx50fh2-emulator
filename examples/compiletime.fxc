@@ -1,4 +1,4 @@
-// Compile-time data, constants, and releasing a memory.
+// Compile-time data, constants, and reusing a memory.
 //
 // `#data` parses JSON while transpiling, so its values become plain literals in
 // the program and occupy none of the calculator's seven memories. `const` does
@@ -21,15 +21,15 @@
 // A fixed value, inlined wherever it is used; it needs no memory.
 const scale = config.base;
 
-// `first` takes memory A.
-let first = config.offsets[0] * scale;
-print(first);
+// `value` takes memory A.
+let value = config.offsets[0] * scale;
+print(value);
 
-// Done with `first`, so release A. `second` is then allocated to A as well,
-// and the whole program needs only one of the seven memories.
-free first;
-let second = config.offsets[2] * scale;
-print(second);
+// Done with that value, so release A. The next declaration takes it, and the
+// whole program needs only one of the seven memories.
+free value;
+let value = config.offsets[2] * scale;
+print(value);
 
 // The cases travel with the program: `fx50 test examples/compiletime.fxc`.
 #tests = [

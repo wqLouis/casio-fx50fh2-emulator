@@ -62,6 +62,7 @@ stmt       := 'let' NAME '=' expr ';'
             | 'const' NAME '=' expr ';'
             | NAME '=' expr ';'
             | 'free' NAME ';'
+            | 'unsafe_free' NAME ';'      -- `free` without the jump check
             | 'print' [ '(' expr ')' | expr ] ';'   -- parens optional
             | 'if' '(' expr ')' body ('else' body)?
             | 'while' '(' expr ')' body
@@ -344,20 +345,60 @@ never reach the calculator:
 
 | Mistake | Example | Error |
 | --- | --- | --- |
-| Use after free | `free a; print(a);` | `` `a` was freed and cannot be used again `` |
+| Use after free | `free a; print(a);` | `` `a` is not defined here: it was freed `` |
+| Already declared | `let x = 1; let x = 2;` | `` `x` is already declared `` |
+| Own initializer | `let x = x + 1;` | `` `x` cannot be used in its own initializer `` |
 | Double free | `free a; free a;` | `` `a` was already freed (double free) `` |
 | Freeing what has no memory | `const k = 1; free k;` | `` `k` is a `const`, which uses no memory `` |
 | Freeing an unknown name | `free nope;` | `` `nope` is not a variable `` |
 
-Two further rules:
+### `let` declares, so a name can have two lives
 
-* **A freed name may not be revived.** `let t = 1; free t; let t = 2;` is an
-  error — use a fresh name. A name resolves to exactly one memory, and a second
-  `t` would need a second one.
-* **`free` cannot be combined with `goto`/`label`.** A jump can re-enter code
-  whose memory has since been re-used, which the transpiler cannot verify, so
-  it refuses rather than miscompiling. Programs with jumps and no `free` are
-  unaffected.
+A `let` **introduces** a name. Declaring a name that is still live is an error,
+not a silent shadow:
+
+```c
+let x = input();
+let x = input();   // ERROR: `x` is already declared
+```
+
+Once the name has been `free`d, declaring it again is the intended way to reuse
+it, and it gets a fresh memory:
+
+```c
+let x = input();
+free x;
+let x = input();   // fine: a second, independent `x`
+```
+
+A plain assignment never declares, so after a `free` you must use `let` to bring
+the name back:
+
+```c
+free x;
+x = 1;             // ERROR: `x` is not defined here
+```
+
+And a declaration cannot see its own name — the value is computed before the
+declaration takes effect:
+
+```c
+let x = x + 1;     // ERROR: `x` cannot be used in its own initializer
+```
+
+### `free` with jumps needs `unsafe_free`
+
+A `goto` can re-enter code whose memory has since been re-used, so a checked
+`free` in a program containing `goto`/`label` is an error. `unsafe_free` says you
+have checked it yourself:
+
+```c
+unsafe_free x;
+```
+
+`unsafe_free` still rejects double frees, unknown names and `const`s — it only
+waives the control-flow check. Programs with jumps and no `free` are unaffected,
+because nothing is ever re-used.
 
 Running out of memories names the variables in the way:
 
@@ -625,8 +666,9 @@ hand when the values are already available as JSON.
       (and tables use `#data`) so they cost no memory, and `free` releases a
       variable that is finished with.
 - [ ] `#data` paths resolve to numbers or booleans; array indices are literals.
-- [ ] No use after free, no double free, and no `free` alongside
-      `goto`/`label`.
+- [ ] No use after free, no double free, no re-declaring a live name, and no
+      `free` alongside `goto`/`label` (use `unsafe_free` if you have verified
+      the jumps).
 - [ ] `input()` appears only as a complete assignment right-hand side.
 - [ ] No `%`, `&&`, `||`, `!`, `++`, `--`, `+=`, hex literals, arrays, or
       strings.

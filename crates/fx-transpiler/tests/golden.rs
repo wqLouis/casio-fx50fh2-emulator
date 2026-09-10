@@ -95,7 +95,8 @@ fn names_are_allocated_in_first_seen_order() {
         "let total = 1; let count = 2; print(total + count);",
         "1→A\n2→B\nA+B◢\n",
     );
-    // `b` is seen before `a` in the value of the first statement.
+    // The declared name is bound before its initializer is walked, so `a` is
+    // A even though `b` is the first name *read*; `b` then takes B.
     glyph("let a = b; let b = 1;", "B→A\n1→B\n");
 }
 

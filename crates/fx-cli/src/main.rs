@@ -385,9 +385,9 @@ fn print_memory_plan(file: &Path, analysis: &fx_transpiler::Analysis) {
     // One line per memory, showing what occupied it over time. A memory with
     // more than one name was released with `free` and handed on.
     let width = allocation
-        .entries
+        .bindings
         .iter()
-        .map(|(name, _)| name.chars().count())
+        .map(|binding| binding.name.chars().count())
         .max()
         .unwrap_or(0);
     for (memory, names) in &allocation.registers {
@@ -407,7 +407,7 @@ fn print_memory_plan(file: &Path, analysis: &fx_transpiler::Analysis) {
         };
         println!("  {memory}  {timeline}{note}");
     }
-    if allocation.entries.is_empty() {
+    if allocation.bindings.is_empty() {
         println!("  (no variables)");
     }
 

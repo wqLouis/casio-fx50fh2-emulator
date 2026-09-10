@@ -101,9 +101,9 @@ impl Emitter<'_> {
                 self.assignment(name, *pos, value)?;
             }
             Stmt::Const { name, value, pos } => self.const_declaration(name, *pos, value)?,
-            // `free` is a compile-time instruction: it hands the memory back to
-            // the allocator, and emits nothing. The value in the memory is left
-            // alone, exactly as the calculator would.
+            // `free`/`unsafe_free` are compile-time instructions: they hand the
+            // memory back to the allocator, and emit nothing. The value in the
+            // memory is left alone, exactly as the calculator would.
             Stmt::Free { .. } => {}
             Stmt::Print(expr) => {
                 let value = self.expr(expr, 0)?;
@@ -433,12 +433,17 @@ impl Emitter<'_> {
         Ok((format!("{left_text}{symbol}{right_text}"), level))
     }
 
-    /// Resolve a `.fxc` name to its calculator memory.
+    /// Resolve a `.fxc` name to its calculator memory *at this point* in the
+    /// program.
+    ///
+    /// A binding is position-dependent: a name released with `free` and
+    /// declared again holds a fresh binding, so its memory is looked up from
+    /// the offset of the reference rather than from a single global table.
     fn variable(&self, name: &str, pos: usize) -> Result<char, TranspileError> {
-        self.allocator.lookup(name).ok_or_else(|| {
+        self.allocator.register_at(name, pos).ok_or_else(|| {
             TranspileError::at(
                 self.source,
-                format!("internal error: variable `{name}` was not allocated"),
+                format!("internal error: `{name}` has no memory at this point"),
                 pos,
             )
         })

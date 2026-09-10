@@ -41,7 +41,9 @@ fn data_uses_no_memory() {
     let source = "#data c = { \"a\": 1, \"b\": 2 };\nlet x = c.a; print(x + c.b);\n";
     let analysis = analyze(source, std::path::Path::new(".")).unwrap();
     assert_eq!(analysis.data, vec!["c"]);
-    assert_eq!(analysis.allocation.entries, vec![("x".to_string(), 'A')]);
+    assert_eq!(analysis.allocation.bindings.len(), 1);
+    assert_eq!(analysis.allocation.bindings[0].name, "x");
+    assert_eq!(analysis.allocation.bindings[0].memory, 'A');
 }
 
 #[test]
@@ -93,6 +95,100 @@ fn duplicate_data_names_are_rejected() {
 }
 
 // ---------------------------------------------------------------------------
+// `let` declares, and may declare again after a `free`
+
+#[test]
+fn let_declares_again_after_a_free() {
+    // The same name, two lives: the memory is released and taken again.
+    let source = "let x = input();\nprint(x);\nfree x;\nlet x = input();\nprint(x);\n";
+    assert_eq!(out(source), "?→A\nA◢\n?→A\nA◢\n");
+}
+
+#[test]
+fn let_of_a_live_name_is_an_error() {
+    let e = err("let x = input();\nlet x = input();\n");
+    assert!(e.message.contains("already declared"), "{e}");
+    assert!(e.message.contains("free x"), "{e}");
+}
+
+#[test]
+fn a_freed_name_may_be_revived_by_let_only() {
+    // `let` redeclares; a bare assignment does not.
+    let e = err("let x = 1;\nfree x;\nx = 2;\n");
+    assert!(e.message.contains("not defined here"), "{e}");
+}
+
+#[test]
+fn let_matches_the_documented_lifetime_rules() {
+    // Allowed: two lives for one name, separated by a `free`.
+    assert_eq!(
+        out("let x = input();\nfree x;\nlet x = input();\nprint(x);\n"),
+        "?→A\n?→A\nA◢\n"
+    );
+
+    // Forbidden: a second declaration while the first is still live.
+    let e = err("let x = input();\nlet x = input();\n");
+    assert!(e.message.contains("already declared"), "{e}");
+
+    // Forbidden: a `const` of a live variable's name.
+    let e = err("let x = 1;\nconst x = 2;\n");
+    assert!(
+        e.message.contains("`const`") || e.message.contains("already declared"),
+        "{e}"
+    );
+
+    // Forbidden: the name is not in scope in its own initializer.
+    let e = err("let x = input();\nfree x;\nlet x = x + 1;\n");
+    assert!(e.message.contains("its own initializer"), "{e}");
+}
+
+#[test]
+fn const_of_a_live_variable_is_an_error() {
+    let e = err("let x = 1;\nconst x = 2;\nprint(x);\n");
+    assert!(
+        e.message.contains("`const`") || e.message.contains("already declared"),
+        "{e}"
+    );
+}
+
+#[test]
+fn a_declaration_cannot_use_its_own_name() {
+    let e = err("let x = 1;\nfree x;\nlet x = x + 1;\n");
+    assert!(e.message.contains("its own initializer"), "{e}");
+}
+
+// ---------------------------------------------------------------------------
+// `unsafe_free` and jumps
+
+#[test]
+fn a_checked_free_with_a_jump_is_an_error() {
+    let e = err("let a = 1;\nfree a;\ngoto 1;\nlabel 1;\n");
+    assert!(e.message.contains("`goto`/`label`"), "{e}");
+    assert!(e.message.contains("unsafe_free"), "{e}");
+}
+
+#[test]
+fn unsafe_free_is_allowed_with_a_jump() {
+    let source = "let a = 1;\nunsafe_free a;\nlet b = 2;\ngoto 1;\nlabel 1;\nprint(b);\n";
+    assert_eq!(out(source), "1→A\n2→A\nGoto 1\nLbl 1\nA◢\n");
+}
+
+#[test]
+fn unsafe_free_still_checks_the_name() {
+    let e = err("unsafe_free nope;\n");
+    assert!(e.message.contains("is not a variable"), "{e}");
+
+    let e = err("let a = 1;\nfree a;\nunsafe_free a;\n");
+    assert!(e.message.contains("double free"), "{e}");
+}
+
+#[test]
+fn a_jump_without_free_is_fine() {
+    let source = "let a = 1;\ngoto 1;\nlabel 1;\nprint(a);\n";
+    assert_eq!(out(source), "1→A\nGoto 1\nLbl 1\nA◢\n");
+}
+
+// ---------------------------------------------------------------------------
 // `const`
 
 #[test]
@@ -119,7 +215,9 @@ fn a_const_frees_a_memory_for_a_variable() {
     )
     .unwrap();
     assert_eq!(analysis.consts, vec!["k"]);
-    assert_eq!(analysis.allocation.entries, vec![("a".to_string(), 'A')]);
+    assert_eq!(analysis.allocation.bindings.len(), 1);
+    assert_eq!(analysis.allocation.bindings[0].name, "a");
+    assert_eq!(analysis.allocation.bindings[0].memory, 'A');
 }
 
 #[test]
@@ -180,8 +278,13 @@ fn free_is_tracked_by_the_allocator() {
     let analysis = analyze(source, std::path::Path::new(".")).unwrap();
     assert_eq!(analysis.allocation.freed, vec!["t"]);
     assert_eq!(
-        analysis.allocation.entries,
-        vec![("t".to_string(), 'A'), ("u".to_string(), 'A')]
+        analysis
+            .allocation
+            .bindings
+            .iter()
+            .map(|b| (b.name.as_str(), b.memory))
+            .collect::<Vec<_>>(),
+        vec![("t", 'A'), ("u", 'A')]
     );
     assert_eq!(analysis.allocation.used(), 1);
 }

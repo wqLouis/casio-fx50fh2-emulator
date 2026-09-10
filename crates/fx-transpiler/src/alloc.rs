@@ -1,42 +1,72 @@
 //! Map `.fxc` variable names onto the calculator's seven memories.
 //!
 //! PRGM has exactly seven assignable memories — `A B C D X Y M` — and no more,
-//! so this pass decides what each name uses. It keeps a **register table**
-//! (each memory, and the variable currently occupying it) while walking the
-//! program in order, which is what lets it detect `free` mistakes at transpile
-//! time rather than leaving them for the calculator.
+//! so this pass decides what each name uses. It keeps a **register table** (which
+//! variable occupies each memory) while walking the program in order, and
+//! records each variable's binding as a byte range, from where it was declared
+//! to where it was released.
 //!
 //! ## How a program fits
 //!
 //! * **`const` and `#data` use no memory at all.** Their values are inlined, so
 //!   they never reach this module.
-//! * **`free name;` releases a memory** so a later variable can use it. The
-//!   programmer states when a value stops being needed — the transpiler cannot
-//!   work it out, because a memory's final value is observable: PRGM leaves its
-//!   answer in one, a later program or the user can read it. So nothing is
-//!   released implicitly, and `let a = 1; let b = 2;` keeps two memories.
+//! * **`free name;` releases a memory** so a later variable — including the same
+//!   name declared again — can use it. Nothing is released implicitly: a
+//!   memory's final value is observable (PRGM leaves its answer in one, a later
+//!   program or the user can read it), so the transpiler cannot prove a name is
+//!   dead. Only the programmer knows.
 //!
-//! With no `free` anywhere, every name holds its memory for the whole program
-//! and a program needs at most seven names. Each `free` gives one memory back.
+//! ## `let` declares; assignment does not
 //!
-//! ## Errors
+//! A `let` (or `const`) **introduces** a name:
 //!
-//! The register table makes the classic mistakes detectable before anything is
-//! emitted:
+//! ```text
+//! let x = input();
+//! free x;
+//! let x = input();   // fine: x is declared again, into a fresh binding
+//! ```
 //!
-//! * **Double free** — `free a; free a;`
-//! * **Use after free** — `free a; print(a);`, including using the name again
-//!   as an assignment target; `free` ends the name's life, so a fresh name (or a
-//!   second `let a = ...`, which re-declares it) is required.
-//! * **Freeing something that holds no memory** — a `const`, a `#data` table,
-//!   or a name that was never declared.
-//! * **Running out of memories** — reported with the registers in use.
+//! This is `let`-as-declaration, in the Rust sense, so a second `let` of a name
+//! that is *still live* is an error rather than a silent shadow:
 //!
-//! `goto`/`label` are the one construct that makes the walk unsound: a jump can
-//! re-enter a region whose registers have since been released and re-used, so a
-//! program that contains both a jump and a `free` is rejected rather than
-//! quietly miscompiled. Programs with jumps but no `free` are unaffected, since
-//! nothing is ever re-used.
+//! ```text
+//! let x = input();
+//! let x = input();   // error: `x` is already declared
+//! ```
+//!
+//! A plain assignment (`x = ...`) refers to an existing variable and never
+//! declares: assigning to a freed name is an error.
+//!
+//! ## Errors the register table catches
+//!
+//! * **Already declared** — `let x = 1; let x = 2;` without an intervening `free`
+//! * **Use after free** — `free x; print(x);`, and `free x; let x = x + 1;`
+//!   (a declaration's own initializer cannot see the name being declared)
+//! * **Double free** — `free x; free x;`
+//! * **Freeing what holds no memory** — a `const`, a `#data` table, or an
+//!   unknown name
+//! * **Running out of memories** — reported with the registers in use
+//!
+//! ## `free` and jumps: `unsafe_free`
+//!
+//! The walk above is a single forward pass, which is sound for structured
+//! control flow but not for `goto`: a jump can re-enter a region whose memory
+//! has since been released and given to another variable. For example, jumping
+//! back to a label after a `free` re-runs code that reads a name whose memory
+//! now holds something else.
+//!
+//! So a checked `free` in a program containing `goto`/`label` is an error, and
+//! the way to say "I have checked this myself" is `unsafe_free`, borrowing
+//! Rust's convention of making the unchecked operation explicit:
+//!
+//! ```text
+//! unsafe_free x;   // no control-flow check; still checked for double free etc.
+//! ```
+//!
+//! Like Rust's `unsafe`, this waives one specific guarantee, not all checking:
+//! `unsafe_free` still rejects double frees, unknown names and `const`s. A
+//! program with jumps and no `free` at all is unaffected, because then nothing
+//! is ever re-used.
 
 use std::collections::BTreeSet;
 
@@ -47,13 +77,30 @@ use crate::error::TranspileError;
 /// The seven assignable calculator memories.
 pub const VARIABLES: [char; 7] = ['A', 'B', 'C', 'D', 'X', 'Y', 'M'];
 
-/// Where each variable ended up.
+/// One variable's occupation of one memory.
+///
+/// `from`..`to` is the byte range over which the binding is live, so a name
+/// declared twice has two bindings — and, if a `free` separated them, two
+/// different memories.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Binding {
+    pub name: String,
+    pub memory: char,
+    /// Byte offset of the declaration, or of the first use when a name is used
+    /// before it is declared.
+    pub from: usize,
+    /// Byte offset of the `free` that released it, if it was released.
+    pub to: Option<usize>,
+}
+
+/// Where every variable ended up.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Allocation {
-    /// Variable name and the memory it uses, in declaration order.
-    pub entries: Vec<(String, char)>,
-    /// Each memory's occupants over time, in calculator order. A memory that
-    /// held more than one name was released with `free` and re-used.
+    /// Every binding, in program order. A name freed and declared again appears
+    /// more than once.
+    pub bindings: Vec<Binding>,
+    /// Each memory's occupants over time, in calculator order. A memory with
+    /// more than one entry was released with `free` and handed on.
     pub registers: Vec<(char, Vec<String>)>,
     /// Names released with `free`, in source order.
     pub freed: Vec<String>,
@@ -86,8 +133,7 @@ impl Allocation {
 /// A resolved name-to-memory table.
 #[derive(Debug, Clone)]
 pub struct Allocator {
-    names: Vec<(String, char)>,
-    allocation: Allocation,
+    bindings: Vec<Binding>,
 }
 
 impl Allocator {
@@ -101,49 +147,101 @@ impl Allocator {
             data,
             consts: BTreeSet::new(),
             vars: Vec::new(),
+            bindings: Vec::new(),
             occupants: [None; VARIABLES.len()],
-            freed: Vec::new(),
-            first_release: None,
+            declaring: None,
             has_jump: false,
+            first_checked_release: None,
         };
         collect_consts(program, &mut scanner.consts);
         scanner.stmts(program)?;
         scanner.finish()
     }
 
-    /// The memory assigned to `name`, if it was seen during the scan.
-    pub fn lookup(&self, name: &str) -> Option<char> {
-        self.names
+    /// The memory for `name` at byte offset `offset`.
+    ///
+    /// This is how the emitter resolves a reference: a name can have held more
+    /// than one memory over the program's life, and the binding in force is the
+    /// one whose byte range contains the reference.
+    pub fn register_at(&self, name: &str, offset: usize) -> Option<char> {
+        self.bindings
             .iter()
-            .find(|(known, _)| known == name)
-            .map(|(_, memory)| *memory)
+            .filter(|binding| {
+                binding.name == name
+                    && binding.from <= offset
+                    && binding.to.is_none_or(|to| offset < to)
+            })
+            .max_by_key(|binding| binding.from)
+            .map(|binding| binding.memory)
     }
 
-    /// Number of distinct names assigned.
+    /// The memory of `name`'s last binding. Useful for reports and tests; the
+    /// emitter uses [`Allocator::register_at`].
+    #[allow(dead_code)] // exercised by the unit tests
+    pub fn lookup(&self, name: &str) -> Option<char> {
+        self.bindings
+            .iter()
+            .rev()
+            .find(|binding| binding.name == name)
+            .map(|binding| binding.memory)
+    }
+
+    /// Number of bindings.
     #[allow(dead_code)] // exercised by the unit tests
     pub fn len(&self) -> usize {
-        self.names.len()
+        self.bindings.len()
     }
 
-    /// True when no names have been assigned.
+    /// True when nothing was bound.
     #[allow(dead_code)] // exercised by the unit tests
     pub fn is_empty(&self) -> bool {
-        self.names.is_empty()
+        self.bindings.is_empty()
     }
 
     /// The full allocation, for reporting.
     pub fn allocation(&self) -> Allocation {
-        self.allocation.clone()
+        let registers = (0..VARIABLES.len())
+            .map(|register| {
+                let names = self
+                    .bindings
+                    .iter()
+                    .filter(|binding| binding.memory == VARIABLES[register])
+                    .map(|binding| binding.name.clone())
+                    .collect();
+                (VARIABLES[register], names)
+            })
+            .collect();
+        let freed = self
+            .bindings
+            .iter()
+            .filter(|binding| binding.to.is_some())
+            .map(|binding| binding.name.clone())
+            .collect();
+        Allocation {
+            bindings: self.bindings.clone(),
+            registers,
+            freed,
+        }
     }
 }
 
-/// One variable, and the memory it holds while it is live.
+/// A variable and its current binding.
 struct Var {
     name: String,
     /// Index into [`VARIABLES`].
     register: usize,
+    /// Index into the scanner's `bindings`.
+    binding: usize,
     /// Cleared by `free`.
     live: bool,
+    /// Whether a `let` declared it.
+    ///
+    /// A name used before it is declared is allocated on first sight — `.fxc`
+    /// has always allowed that, which is what keeps `let a = b; let b = 1;`
+    /// working. Such a variable is *implicit*, and a later `let` adopts it
+    /// rather than being a second declaration. Only two explicit declarations
+    /// of one live name conflict.
+    explicit: bool,
 }
 
 struct Scanner<'a> {
@@ -151,23 +249,36 @@ struct Scanner<'a> {
     data: &'a Data,
     /// Names declared with `const`; they consume no memory.
     consts: BTreeSet<String>,
-    /// Variables in declaration order.
+    /// Variables in declaration order. A name freed and declared again gets a
+    /// second entry.
     vars: Vec<Var>,
+    bindings: Vec<Binding>,
     /// The register table: which variable occupies each memory, if any.
     occupants: [Option<usize>; VARIABLES.len()],
-    /// Names released with `free`, in source order.
-    freed: Vec<String>,
-    /// Offset of the first `free`, used to reject it alongside jumps.
-    first_release: Option<usize>,
+    /// The name whose initializer is being walked, so `let x = x + 1` can be
+    /// rejected: a declaration does not introduce its name until after its
+    /// initializer.
+    declaring: Option<String>,
     has_jump: bool,
+    /// Offset of the first `free` that was *not* `unsafe_free`.
+    first_checked_release: Option<usize>,
 }
 
 impl Scanner<'_> {
-    fn index_of(&self, name: &str) -> Option<usize> {
-        self.vars.iter().position(|var| var.name == name)
+    // -- lookups ------------------------------------------------------------
+
+    /// The live variable called `name`, if there is one.
+    fn live_var(&self, name: &str) -> Option<usize> {
+        self.vars
+            .iter()
+            .rposition(|var| var.name == name && var.live)
     }
 
-    /// Check that `name` is not a compile-time name.
+    /// Whether `name` has ever been declared, live or released.
+    fn seen_var(&self, name: &str) -> bool {
+        self.vars.iter().any(|var| var.name == name)
+    }
+
     fn reject_compile_time(&self, name: &str, pos: usize) -> Result<(), TranspileError> {
         if self.consts.contains(name) {
             return Err(TranspileError::at(
@@ -186,56 +297,119 @@ impl Scanner<'_> {
         Ok(())
     }
 
-    /// Resolve a *read* of `name`.
-    ///
-    /// Reading a `const` or `#data` name is fine — the emitter replaces it with
-    /// its value — so only real variables reach the register table.
-    fn read(&mut self, name: &str, pos: usize) -> Result<(), TranspileError> {
-        if self.consts.contains(name) || self.data.contains(name) {
-            return Ok(());
-        }
-        self.resolve(name, pos)
-    }
+    // -- binding ------------------------------------------------------------
 
-    /// Resolve an *assignment target* (or the variable of a `for`).
-    ///
-    /// Assigning to a compile-time name is an error, because there is no
-    /// memory to assign to.
-    fn assign(&mut self, name: &str, pos: usize) -> Result<(), TranspileError> {
-        self.reject_compile_time(name, pos)?;
-        self.resolve(name, pos)
-    }
-
-    /// Find `name`'s memory, declaring it on first sight.
-    ///
-    /// A reference to a freed name is an error: `free` ends the name's life, so
-    /// there is nothing left to read or write. The name is not revived by a
-    /// later `let`, because a second `t` would need a second register while the
-    /// emitter resolves names to one — a fresh name keeps that unambiguous.
-    fn resolve(&mut self, name: &str, pos: usize) -> Result<(), TranspileError> {
-        if let Some(index) = self.index_of(name) {
-            if !self.vars[index].live {
-                return Err(use_after_free(self.source, name, pos));
-            }
-            return Ok(());
-        }
-
-        // A new name needs a memory. The lowest free one keeps the allocation
-        // deterministic and easy to read.
+    /// Give `name` a memory, starting at `pos`.
+    fn allocate(&mut self, name: &str, pos: usize, explicit: bool) -> Result<(), TranspileError> {
+        // The lowest free memory keeps the allocation deterministic and easy to
+        // read, and naturally re-uses one that was just released.
         let register = (0..VARIABLES.len())
             .find(|register| self.occupants[*register].is_none())
             .ok_or_else(|| self.out_of_memory(name, pos))?;
+        self.bindings.push(Binding {
+            name: name.to_string(),
+            memory: VARIABLES[register],
+            from: pos,
+            to: None,
+        });
         self.occupants[register] = Some(self.vars.len());
         self.vars.push(Var {
             name: name.to_string(),
             register,
+            binding: self.bindings.len() - 1,
             live: true,
+            explicit,
         });
         Ok(())
     }
 
-    /// `free name;`
-    fn free(&mut self, name: &str, pos: usize) -> Result<(), TranspileError> {
+    /// Resolve a *read* of `name`.
+    ///
+    /// Reading a `const` or `#data` name is fine — the emitter replaces it with
+    /// its value — so only real variables reach the register table. A name seen
+    /// for the very first time is declared here, which is what keeps `.fxc`
+    /// order-free for simple programs.
+    fn read(&mut self, name: &str, pos: usize) -> Result<(), TranspileError> {
+        if self.consts.contains(name) || self.data.contains(name) {
+            return Ok(());
+        }
+        if self.declaring.as_deref() == Some(name) {
+            return Err(TranspileError::at(
+                self.source,
+                format!(
+                    "`{name}` cannot be used in its own initializer; a declaration does not \
+                     take effect until after the value is computed"
+                ),
+                pos,
+            ));
+        }
+        if self.live_var(name).is_some() {
+            return Ok(());
+        }
+        if self.seen_var(name) {
+            return Err(use_after_free(self.source, name, pos));
+        }
+        self.allocate(name, pos, false)
+    }
+
+    /// Resolve an *assignment target* (`x = ...`, and a `for` variable).
+    ///
+    /// Assignment never declares: only `let`/`const` do. So assigning to a
+    /// released name is an error, while assigning to a name never seen before
+    /// declares it, as `.fxc` has always allowed.
+    fn assign(&mut self, name: &str, pos: usize) -> Result<(), TranspileError> {
+        self.reject_compile_time(name, pos)?;
+        if self.live_var(name).is_some() {
+            return Ok(());
+        }
+        if self.seen_var(name) {
+            return Err(use_after_free(self.source, name, pos));
+        }
+        self.allocate(name, pos, false)
+    }
+
+    /// Start a `let` declaration: take a memory, and check the name is free to
+    /// declare.
+    ///
+    /// The name is bound *before* its initializer is walked, so allocation
+    /// follows source order: in `let a = -b * c;` the memories go to `a`, `b`,
+    /// `c`. A name released earlier gets a fresh binding — possibly into the
+    /// very memory its previous life released.
+    ///
+    /// Only an existing *explicit* declaration is a conflict. A name that was
+    /// merely used earlier was allocated on first sight but never declared, so
+    /// this `let` is its declaration and adopts that binding.
+    fn begin_declaration(&mut self, name: &str, pos: usize) -> Result<(), TranspileError> {
+        self.reject_compile_time(name, pos)?;
+        match self.live_var(name) {
+            Some(index) => {
+                if self.vars[index].explicit {
+                    return Err(TranspileError::at(
+                        self.source,
+                        format!(
+                            "`{name}` is already declared; `free {name};` first if you mean \
+                             to reuse the name, or pick a different one"
+                        ),
+                        pos,
+                    ));
+                }
+                self.vars[index].explicit = true;
+            }
+            None => self.allocate(name, pos, true)?,
+        }
+        // Set last, so the initializer can be checked against it.
+        self.declaring = Some(name.to_string());
+        Ok(())
+    }
+
+    /// Finish a declaration, after its initializer has been walked.
+    fn end_declaration(&mut self, _name: &str, _pos: usize) -> Result<(), TranspileError> {
+        self.declaring = None;
+        Ok(())
+    }
+
+    /// `free name;` and `unsafe_free name;`.
+    fn free(&mut self, name: &str, pos: usize, is_unsafe: bool) -> Result<(), TranspileError> {
         if self.consts.contains(name) {
             return Err(TranspileError::at(
                 self.source,
@@ -253,29 +427,26 @@ impl Scanner<'_> {
             ));
         }
 
-        let Some(index) = self.index_of(name) else {
-            return Err(TranspileError::at(
-                self.source,
-                format!("`free {name}`: `{name}` is not a variable"),
-                pos,
-            ));
-        };
-        if !self.vars[index].live {
-            return Err(TranspileError::at(
-                self.source,
+        let Some(index) = self.live_var(name) else {
+            let message = if self.seen_var(name) {
                 format!(
                     "`free {name}`: `{name}` was already freed (double free); its memory has \
                      been given to another variable"
-                ),
-                pos,
-            ));
-        }
+                )
+            } else {
+                format!("`free {name}`: `{name}` is not a variable")
+            };
+            return Err(TranspileError::at(self.source, message, pos));
+        };
 
-        self.vars[index].live = false;
         let register = self.vars[index].register;
+        let binding = self.vars[index].binding;
+        self.vars[index].live = false;
         self.occupants[register] = None;
-        self.freed.push(name.to_string());
-        self.first_release.get_or_insert(pos);
+        self.bindings[binding].to = Some(pos);
+        if !is_unsafe {
+            self.first_checked_release.get_or_insert(pos);
+        }
         Ok(())
     }
 
@@ -300,6 +471,8 @@ impl Scanner<'_> {
         )
     }
 
+    // -- walking ------------------------------------------------------------
+
     fn stmts(&mut self, stmts: &[Stmt]) -> Result<(), TranspileError> {
         for stmt in stmts {
             self.stmt(stmt)?;
@@ -309,13 +482,22 @@ impl Scanner<'_> {
 
     fn stmt(&mut self, stmt: &Stmt) -> Result<(), TranspileError> {
         match stmt {
-            Stmt::Let { name, value, pos } | Stmt::Assign { name, value, pos } => {
-                self.assign(name, *pos)?;
+            Stmt::Let { name, value, pos } => {
+                self.begin_declaration(name, *pos)?;
                 self.expr(value)?;
+                self.end_declaration(name, *pos)
             }
-            Stmt::Const { value, .. } => self.expr(value)?,
-            Stmt::Free { name, pos } => self.free(name, *pos)?,
-            Stmt::Print(expr) | Stmt::ExprStmt(expr) => self.expr(expr)?,
+            Stmt::Const { value, .. } => self.expr(value),
+            Stmt::Assign { name, value, pos } => {
+                self.assign(name, *pos)?;
+                self.expr(value)
+            }
+            Stmt::Free {
+                name,
+                pos,
+                is_unsafe,
+            } => self.free(name, *pos, *is_unsafe),
+            Stmt::Print(expr) | Stmt::ExprStmt(expr) => self.expr(expr),
             Stmt::If {
                 cond,
                 then_body,
@@ -323,26 +505,34 @@ impl Scanner<'_> {
             } => {
                 self.expr(cond)?;
                 self.stmts(then_body)?;
-                self.stmts(else_body)?;
+                self.stmts(else_body)
             }
             Stmt::While { cond, body } => {
                 self.expr(cond)?;
-                self.stmts(body)?;
+                self.stmts(body)
             }
             Stmt::For(for_stmt) => {
-                self.assign(&for_stmt.init_name, for_stmt.pos)?;
-                self.expr(&for_stmt.init_value)?;
+                if for_stmt.is_decl {
+                    self.begin_declaration(&for_stmt.init_name, for_stmt.pos)?;
+                    self.expr(&for_stmt.init_value)?;
+                    self.end_declaration(&for_stmt.init_name, for_stmt.pos)?;
+                } else {
+                    self.assign(&for_stmt.init_name, for_stmt.pos)?;
+                    self.expr(&for_stmt.init_value)?;
+                }
                 self.expr(&for_stmt.cond)?;
                 self.stmts(&for_stmt.body)?;
                 self.assign(&for_stmt.update_name, for_stmt.pos)?;
-                self.expr(&for_stmt.update_value)?;
+                self.expr(&for_stmt.update_value)
             }
-            Stmt::Block(stmts) => self.stmts(stmts)?,
-            Stmt::Break => {}
-            Stmt::Goto(..) | Stmt::Label(..) => self.has_jump = true,
-            Stmt::Empty => {}
+            Stmt::Block(stmts) => self.stmts(stmts),
+            Stmt::Break => Ok(()),
+            Stmt::Goto(..) | Stmt::Label(..) => {
+                self.has_jump = true;
+                Ok(())
+            }
+            Stmt::Empty => Ok(()),
         }
-        Ok(())
     }
 
     /// Walk an expression, resolving every name it mentions.
@@ -369,43 +559,19 @@ impl Scanner<'_> {
     }
 
     fn finish(self) -> Result<Allocator, TranspileError> {
-        // A jump makes the walk unsound once anything is released: it can
-        // re-enter a region whose memory has since been re-used.
-        if let (true, Some(pos)) = (self.has_jump, self.first_release) {
+        // A jump can re-enter a region whose memory has since been released and
+        // re-used, which a single forward walk cannot describe.
+        if let (true, Some(pos)) = (self.has_jump, self.first_checked_release) {
             return Err(TranspileError::at(
                 self.source,
                 "`free` cannot be used in a program containing `goto`/`label`: a jump can \
-                 re-enter code whose memory has since been re-used, so the allocation cannot \
-                 be verified",
+                 re-enter code whose memory has since been re-used. Use `unsafe_free` if \
+                 you have checked that it cannot",
                 pos,
             ));
         }
-        let entries: Vec<(String, char)> = self
-            .vars
-            .iter()
-            .map(|var| (var.name.clone(), VARIABLES[var.register]))
-            .collect();
-
-        let registers: Vec<(char, Vec<String>)> = (0..VARIABLES.len())
-            .map(|register| {
-                let names = self
-                    .vars
-                    .iter()
-                    .filter(|var| var.register == register)
-                    .map(|var| var.name.clone())
-                    .collect();
-                (VARIABLES[register], names)
-            })
-            .collect();
-
-        let allocation = Allocation {
-            entries,
-            registers,
-            freed: self.freed,
-        };
         Ok(Allocator {
-            names: allocation.entries.clone(),
-            allocation,
+            bindings: self.bindings,
         })
     }
 }
@@ -415,8 +581,8 @@ fn use_after_free(source: &str, name: &str, pos: usize) -> TranspileError {
     TranspileError::at(
         source,
         format!(
-            "`{name}` was freed and cannot be used again; its memory may now hold another \
-             variable. Use a new name for the next value"
+            "`{name}` is not defined here: it was freed, and its memory may now hold another \
+             variable. Use `let {name} = ...` to declare it again"
         ),
         pos,
     )
@@ -492,15 +658,14 @@ mod tests {
     }
 
     #[test]
-    fn reuses_the_same_memory_for_a_repeated_name() {
+    fn assignment_to_a_live_name_reuses_it() {
         let a = alloc("let a = 1; a = a + 1; print(a);").unwrap();
-        assert_eq!(a.lookup("a"), Some('A'));
         assert_eq!(a.len(), 1);
+        assert_eq!(a.allocation().used(), 1);
     }
 
     #[test]
     fn two_names_never_share_without_a_free() {
-        // The memories' final values are observable, so `a` must keep its own.
         let a = alloc("let a = 1; let b = 2;").unwrap();
         assert_eq!(a.lookup("a"), Some('A'));
         assert_eq!(a.lookup("b"), Some('B'));
@@ -529,6 +694,70 @@ mod tests {
         assert!(err.message.contains("`free`"), "{}", err.message);
     }
 
+    // -- let declares -------------------------------------------------------
+
+    #[test]
+    fn let_declares_again_after_a_free() {
+        let a = alloc("let x = input(); free x; let x = input();").unwrap();
+        assert_eq!(a.lookup("x"), Some('A'), "the fresh binding reuses A");
+        assert_eq!(a.len(), 2, "two bindings for the same name");
+        assert_eq!(a.allocation().used(), 1);
+    }
+
+    #[test]
+    fn let_of_a_live_name_is_an_error() {
+        let err = alloc("let x = 1; let x = 2;").unwrap_err();
+        assert!(err.message.contains("already declared"), "{}", err.message);
+        assert!(err.message.contains("free x"), "{}", err.message);
+    }
+
+    #[test]
+    fn const_of_a_live_variable_name_is_an_error() {
+        let err = alloc("let x = 1; const x = 2;").unwrap_err();
+        assert!(
+            err.message.contains("`const`") || err.message.contains("already declared"),
+            "{}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn a_name_cannot_be_used_in_its_own_initializer() {
+        let err = alloc("let x = 1; free x; let x = x + 1;").unwrap_err();
+        assert!(
+            err.message.contains("its own initializer"),
+            "{}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn a_name_cannot_be_used_in_its_own_initializer_when_new() {
+        let err = alloc("let x = x + 1;").unwrap_err();
+        assert!(
+            err.message.contains("its own initializer"),
+            "{}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn a_freed_name_is_revived_by_let_and_gets_a_fresh_binding() {
+        let a = alloc("let t = 1; free t; let t = 2; print(t);").unwrap();
+        // The first `t` is closed at the free; the reference resolves to the
+        // second binding.
+        let allocation = a.allocation();
+        assert_eq!(allocation.bindings.len(), 2);
+        assert_eq!(allocation.bindings[0].from, 4);
+        // `to` is the offset of the `free` statement itself.
+        assert_eq!(allocation.bindings[0].to, Some(11), "closed by `free t`");
+        assert_eq!(allocation.bindings[1].from, 23);
+        assert_eq!(allocation.bindings[1].to, None);
+        assert_eq!(a.register_at("t", 35), Some('A'));
+    }
+
+    // -- free ---------------------------------------------------------------
+
     #[test]
     fn a_free_lets_a_later_variable_reuse_the_memory() {
         let a = alloc("let t = 1; print(t); free t; let u = 2; print(u);").unwrap();
@@ -539,14 +768,7 @@ mod tests {
         let allocation = a.allocation();
         let reuses: Vec<&(char, Vec<String>)> = allocation.reuses().collect();
         assert_eq!(reuses.len(), 1);
-        assert_eq!(reuses[0].0, 'A');
         assert_eq!(reuses[0].1, vec!["t", "u"]);
-    }
-
-    #[test]
-    fn freed_memory_is_reused_before_untouched_ones() {
-        let a = alloc("let a = 1; free a; let z = 2;").unwrap();
-        assert_eq!(a.lookup("z"), Some('A'));
     }
 
     #[test]
@@ -565,14 +787,6 @@ mod tests {
     }
 
     #[test]
-    fn a_freed_name_may_not_be_revived() {
-        // A second `t` would need a second register, but a name resolves to one
-        // memory, so reviving is refused rather than silently ambiguous.
-        let err = alloc("let t = 1; free t; let t = 2;").unwrap_err();
-        assert!(err.message.contains("was freed"), "{}", err.message);
-    }
-
-    #[test]
     fn double_free_is_an_error() {
         let err = alloc("let t = 1; free t; free t;").unwrap_err();
         assert!(err.message.contains("double free"), "{}", err.message);
@@ -581,20 +795,13 @@ mod tests {
     #[test]
     fn use_after_free_is_an_error_when_reading() {
         let err = alloc("let t = 1; free t; print(t);").unwrap_err();
-        assert!(err.message.contains("was freed"), "{}", err.message);
-        assert!(err.message.contains("Use a new name"), "{}", err.message);
+        assert!(err.message.contains("not defined here"), "{}", err.message);
     }
 
     #[test]
     fn use_after_free_is_an_error_when_assigning() {
         let err = alloc("let t = 1; free t; t = 2;").unwrap_err();
-        assert!(err.message.contains("was freed"), "{}", err.message);
-    }
-
-    #[test]
-    fn use_after_free_is_an_error_inside_a_later_expression() {
-        let err = alloc("let t = 1; free t; print(t + 1);").unwrap_err();
-        assert!(err.message.contains("was freed"), "{}", err.message);
+        assert!(err.message.contains("not defined here"), "{}", err.message);
     }
 
     #[test]
@@ -615,10 +822,40 @@ mod tests {
         assert!(err.message.contains("is not a variable"), "{}", err.message);
     }
 
+    // -- free and jumps -----------------------------------------------------
+
     #[test]
-    fn free_with_a_jump_is_rejected() {
+    fn a_checked_free_with_a_jump_is_rejected() {
         let err = alloc("let t = 1; free t; goto 1; label 1;").unwrap_err();
         assert!(err.message.contains("`goto`/`label`"), "{}", err.message);
+        assert!(err.message.contains("unsafe_free"), "{}", err.message);
+    }
+
+    #[test]
+    fn unsafe_free_is_allowed_with_a_jump() {
+        // Every release in a program with jumps must say `unsafe_free`.
+        let a =
+            alloc("let t = 1; unsafe_free t; let u = 2; unsafe_free u; goto 1; label 1;").unwrap();
+        assert_eq!(a.allocation().freed, vec!["t", "u"]);
+    }
+
+    #[test]
+    fn one_checked_free_is_enough_to_reject_a_jump_program() {
+        let err =
+            alloc("let t = 1; unsafe_free t; let u = 2; free u; goto 1; label 1;").unwrap_err();
+        assert!(err.message.contains("`goto`/`label`"), "{}", err.message);
+    }
+
+    #[test]
+    fn unsafe_free_still_checks_the_name() {
+        let err = alloc("unsafe_free nope;").unwrap_err();
+        assert!(err.message.contains("is not a variable"), "{}", err.message);
+    }
+
+    #[test]
+    fn unsafe_free_still_rejects_a_double_free() {
+        let err = alloc("let t = 1; free t; unsafe_free t;").unwrap_err();
+        assert!(err.message.contains("double free"), "{}", err.message);
     }
 
     #[test]
@@ -631,6 +868,19 @@ mod tests {
     fn free_inside_a_loop_body_is_allowed() {
         let a = alloc("while (1 < 2) { let t = 1; print(t); free t; }").unwrap();
         assert_eq!(a.lookup("t"), Some('A'));
+    }
+
+    // -- reports ------------------------------------------------------------
+
+    #[test]
+    fn register_at_picks_the_binding_in_force() {
+        // `x` is A, then released and declared again — still A, but a second
+        // binding. Uses before and after resolve through the right one.
+        let source = "let x = 1; print(x); free x; let x = 2; print(x);";
+        let a = alloc(source).unwrap();
+        assert_eq!(a.register_at("x", 10), Some('A'));
+        assert_eq!(a.register_at("x", 40), Some('A'));
+        assert_eq!(a.register_at("x", 5), Some('A'));
     }
 
     #[test]

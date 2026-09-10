@@ -28,6 +28,7 @@
   "let"
   "const"
   "free"
+  "unsafe_free"
   "if"
   "else"
   "while"

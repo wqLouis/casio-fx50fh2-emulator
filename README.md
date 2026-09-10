@@ -118,6 +118,10 @@ let next = scale;    // reuses it
 print(next);         // 2
 ```
 
+`let` declares: declaring a name that is still live is an error, but after a
+`free` the name can be declared again, so a memory can be reused by name or by a
+new variable. `fx50 regs` shows the plan:
+
 ```console
 $ fx50 regs plan.fxc
 Memory plan for plan.fxc

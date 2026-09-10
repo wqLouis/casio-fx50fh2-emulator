@@ -7,6 +7,7 @@
 //! stmt      := 'let' NAME '=' expr ';'
 //!            | 'const' NAME '=' expr ';'
 //!            | 'free' NAME ';'
+//!            | 'unsafe_free' NAME ';'
 //!            | NAME '=' expr ';'
 //!            | 'print' '(' expr ')' ';'
 //!            | 'if' '(' expr ')' block ('else' block)?
@@ -141,12 +142,17 @@ impl<'a> Parser<'a> {
         match self.peek().clone() {
             Tok::Let => self.let_statement(),
             Tok::Const => self.const_statement(),
-            Tok::Free => {
+            Tok::Free | Tok::UnsafeFree => {
+                let is_unsafe = matches!(self.peek(), Tok::UnsafeFree);
                 let pos = self.position();
                 self.advance();
                 let (name, _) = self.expect_ident("a variable name after `free`")?;
                 self.expect(&Tok::Semi, "`;` after `free`")?;
-                Ok(Stmt::Free { name, pos })
+                Ok(Stmt::Free {
+                    name,
+                    pos,
+                    is_unsafe,
+                })
             }
             Tok::Print => self.print_statement(),
             Tok::If => self.if_statement(),

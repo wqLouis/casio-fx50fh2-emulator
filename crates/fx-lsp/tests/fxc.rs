@@ -164,6 +164,43 @@ fn fxc_use_after_free_is_reported() {
 }
 
 #[test]
+fn fxc_redeclaration_of_a_live_name_is_reported() {
+    let diags = diagnostics("let x = 1;\nlet x = 2;\n", Language::Fxc, None);
+    assert_eq!(diags.len(), 1);
+    assert!(
+        diags[0].message.contains("already declared"),
+        "{}",
+        diags[0].message
+    );
+    assert_eq!(diags[0].range.start.line, 1);
+}
+
+#[test]
+fn fxc_redeclaration_after_free_is_clean() {
+    let source = "let x = input();\nfree x;\nlet x = input();\nprint(x);\n";
+    assert!(
+        diagnostics(source, Language::Fxc, None).is_empty(),
+        "{:?}",
+        diagnostics(source, Language::Fxc, None)
+    );
+}
+
+#[test]
+fn fxc_checked_free_with_a_jump_is_reported() {
+    let diags = diagnostics(
+        "let a = 1;\nfree a;\ngoto 1;\nlabel 1;\n",
+        Language::Fxc,
+        None,
+    );
+    assert_eq!(diags.len(), 1);
+    assert!(
+        diags[0].message.contains("unsafe_free"),
+        "{}",
+        diags[0].message
+    );
+}
+
+#[test]
 fn fxc_double_free_is_reported() {
     let diags = diagnostics("let a = 1;\nfree a;\nfree a;\n", Language::Fxc, None);
     assert_eq!(diags.len(), 1);
