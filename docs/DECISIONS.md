@@ -399,24 +399,59 @@ calculator would otherwise key in — and folding in `f64` can differ in the las
 digit from the calculator's own 15-digit arithmetic. Inlining keeps the
 program's arithmetic exactly as written.
 
-## ADR 0016 — Memories are never shared between names
+## ADR 0016 — `free` releases a memory; the transpiler never guesses
 
-The calculator has seven memories, and a program with more than seven mutable
-names does not fit. The first implementation of the improved allocator reused a
-memory once a name was no longer read, so `let a = 1; let b = 2;` collapsed both
-onto `A`. The golden test that assigns seven names to `A B C D X Y M` caught
-it, and it was wrong: **a memory's final value is part of the program's
-observable result.** PRGM leaves its answer in a memory; a later program or the
-user can read it. No name is ever provably dead, so no memory may be reused.
+The calculator has seven memories, and a program may need more live values than
+that. The question is who decides when a memory can be given to someone else.
 
-What relieves the pressure instead is not sharing but *not needing* memory:
+**Implicit reuse is unsound here, and a test proved it.** The first version of
+this allocator reused a memory once a name was no longer *read*, collapsing
+`let a = 1; let b = 2;` onto `A`. The golden test asserting seven names map to
+`A B C D X Y M` caught it. The reasoning is genuinely different from a normal
+compiler's: a memory's final value is **observable** — PRGM leaves its answer in
+one, a later program can read it, and so can the user — so no name is ever
+provably dead. Dropping `a` silently changes what the program did.
 
-* `const` values are inlined (ADR 0015);
-* `#data` values become literals;
-* `#reg NAME = M` pins a name where the calculator side needs a particular
-  memory, and `fx50 regs` reports the plan and what is left.
+**So the programmer says when.** `free name;` releases the memory, and the next
+new variable takes it. This is the same bargain as any explicit-free language:
+the compiler cannot prove liveness, so it does not pretend to; the human who
+knows the value is finished states it. `let a = 1; let b = 2;` therefore still
+uses two memories, and
 
-The rejection is deliberate and recorded because "reuse dead registers" is the
-obvious optimisation, and it is unsound here for a reason that is easy to
-forget. An eighth mutable name is reported with the memories already in use and
-the two ways out.
+```c
+let first = 5;
+print(first);
+free first;
+let second = 7;
+```
+
+uses one, with `second` allocated to the memory `free first` released.
+
+**The register table is the point.** Allocation keeps a table of which variable
+occupies each memory, in order, and that is what makes the classic lifetime
+mistakes *transpile* errors instead of wrong answers on the calculator: use after
+free (including using the name again as an assignment target), double free,
+freeing a `const`/`#data`/unknown name, and running out of memories. Each message
+names the offending variable and where it was written.
+
+Two deliberate restrictions fall out of keeping the walk sound:
+
+* **A freed name cannot be revived.** `let t = 1; free t; let t = 2;` is an
+  error. A name resolves to one memory in the emitter, and a second `t` would
+  need a second register, so allowing it would make the name→memory mapping
+  ambiguous. A fresh name is required.
+* **`free` cannot be combined with `goto`/`label`.** A jump can re-enter code
+  whose memory has since been released and re-used, so a single forward walk no
+  longer describes the program. Programs with jumps but no `free` are
+  unaffected, because nothing is ever re-used.
+
+**What this replaced.** An earlier revision shipped a `#reg NAME = M` directive
+for pinning a variable to a chosen memory. It answered "how do I make my program
+fit" with "pick the memory yourself", which is manual allocation the transpiler
+should be doing, and it forced the user to know the letter for every variable.
+`free` addresses the actual problem — too many *live* values — and leaves the
+letter choice to the allocator. A `#reg` in an existing program is reported with
+a message pointing at `free` rather than as an unknown directive.
+
+`const` (ADR 0015) and `#data` remain the first answers to memory pressure,
+because a value that is inlined needs no memory and therefore no `free`.

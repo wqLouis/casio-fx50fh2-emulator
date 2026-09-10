@@ -159,56 +159,35 @@ fn base_mode_rejects_a_float_const_value() {
 }
 
 // ---------------------------------------------------------------------------
-// `#reg` and the memory plan
+// `free` and the memory plan
 
 #[test]
-fn reg_pins_a_name_to_a_memory() {
-    assert_eq!(
-        out("#reg total = M\nlet total = 5;\nprint(total);\n"),
-        "5→M\nM◢\n"
-    );
+fn free_releases_a_memory_for_a_later_variable() {
+    let source = "let first = 5;\nprint(first);\nfree first;\nlet second = 7;\nprint(second);\n";
+    // `second` is allocated to the memory `free first` released, so the program
+    // needs only one of the seven.
+    assert_eq!(out(source), "5→A\nA◢\n7→A\nA◢\n");
 }
 
 #[test]
-fn reg_accepts_an_optional_equals_and_is_case_insensitive() {
-    assert_eq!(
-        out("#reg total M\nlet total = 5;\nprint(total);\n"),
-        "5→M\nM◢\n"
-    );
-    assert_eq!(
-        out("#reg total = m\nlet total = 5;\nprint(total);\n"),
-        "5→M\nM◢\n"
-    );
+fn free_emits_nothing() {
+    assert_eq!(out("let a = 1;\nfree a;\n"), "1→A\n");
 }
 
 #[test]
-fn reg_is_skipped_by_the_allocator_and_reported() {
-    let source = "#reg p = A\nlet p = 1; let q = 2; print(p + q);\n";
+fn free_is_tracked_by_the_allocator() {
+    let source = "let t = 1;\nfree t;\nlet u = 2;\nprint(u);\n";
     let analysis = analyze(source, std::path::Path::new(".")).unwrap();
-    assert_eq!(analysis.pins, vec![("p".to_string(), 'A')]);
+    assert_eq!(analysis.allocation.freed, vec!["t"]);
     assert_eq!(
         analysis.allocation.entries,
-        vec![("p".to_string(), 'A'), ("q".to_string(), 'B')]
+        vec![("t".to_string(), 'A'), ("u".to_string(), 'A')]
     );
+    assert_eq!(analysis.allocation.used(), 1);
 }
 
 #[test]
-fn reg_rejects_a_bad_memory_and_unknown_names() {
-    let e = err("#reg p = Z\nlet p = 1; print(p);\n");
-    assert!(e.message.contains("is not a memory"), "{e}");
-
-    let e = err("#reg nope = A\nlet p = 1; print(p);\n");
-    assert!(e.message.contains("never used"), "{e}");
-}
-
-#[test]
-fn reg_may_not_shadow_a_const() {
-    let e = err("#reg k = A\nconst k = 1; print(k);\n");
-    assert!(e.message.contains("uses no memory"), "{e}");
-}
-
-#[test]
-fn the_memory_plan_reports_usage_and_free_memories() {
+fn a_program_without_free_keeps_every_memory_separate() {
     let analysis = analyze(
         "let a = 1; let b = 2; print(a + b);\n",
         std::path::Path::new("."),
@@ -219,11 +198,36 @@ fn the_memory_plan_reports_usage_and_free_memories() {
 }
 
 #[test]
+fn double_free_is_a_transpile_error() {
+    let e = err("let a = 1;\nfree a;\nfree a;\n");
+    assert!(e.message.contains("double free"), "{e}");
+}
+
+#[test]
+fn use_after_free_is_a_transpile_error() {
+    let e = err("let a = 1;\nfree a;\nprint(a);\n");
+    assert!(e.message.contains("was freed"), "{e}");
+}
+
+#[test]
+fn freeing_a_compile_time_name_is_a_transpile_error() {
+    let e = err("const k = 1;\nfree k;\nprint(k);\n");
+    assert!(e.message.contains("uses no memory"), "{e}");
+}
+
+#[test]
+fn free_with_a_jump_is_a_transpile_error() {
+    let e = err("let a = 1;\nfree a;\ngoto 1;\nlabel 1;\n");
+    assert!(e.message.contains("`goto`/`label`"), "{e}");
+}
+
+#[test]
 fn eight_variables_do_not_fit_and_the_error_says_so() {
     let source = "let a=1; let b=1; let c=1; let d=1; let x=1; let y=1; let m=1; let z=1;";
     let e = err(source);
     assert!(e.message.contains("no free memory for `z`"), "{e}");
     assert!(e.message.contains("Use `const`"), "{e}");
+    assert!(e.message.contains("`free`"), "{e}");
 }
 
 #[test]

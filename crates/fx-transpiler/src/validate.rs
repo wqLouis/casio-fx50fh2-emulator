@@ -48,6 +48,8 @@ fn validate_stmt(stmt: &Stmt, source: &str) -> Result<(), TranspileError> {
         | Stmt::Const { value, .. }
         | Stmt::Assign { value, .. }
         | Stmt::ExprStmt(value) => validate_expr(value, source),
+        // `free` names a variable, not a value; the allocator checks the name.
+        Stmt::Free { .. } => Ok(()),
         Stmt::Print(expr) => validate_expr(expr, source),
         Stmt::If {
             cond,

@@ -102,18 +102,29 @@ $ printf '5\n' | fx50 run examples/factorial.fxc
 
 Values that are fixed at transpile time can avoid the seven-memory budget
 entirely: `const` is inlined at each use, and `#data` reads JSON (inline or
-from a file) into literals. `#reg` pins a name to a particular memory, and
-`fx50 regs` reports the plan.
+from a file) into literals. `free` releases a variable's memory so a later
+variable can reuse it, and `fx50 regs` reports the plan.
 
 ```c
-// `#mode`/`#reg` come first; `#data` may appear anywhere.
-#reg total = M
-
+// `#mode` comes first; `#data` may appear anywhere.
 #data config = { "base": 2, "offsets": [10, 20, 30] };
 const scale = config.base;
 
 let total = config.offsets[1] * scale;
-print(total);
+print(total);        // 40
+
+free total;          // release the memory
+let next = scale;    // reuses it
+print(next);         // 2
+```
+
+```console
+$ fx50 regs plan.fxc
+Memory plan for plan.fxc
+  A  total → next    (reused after `free total`)
+
+  1 of 7 memories used; free: B C D X Y M
+  released with `free`: total
 ```
 
 Programs can also carry their own test cases in a `#tests` table, so `fx50 test

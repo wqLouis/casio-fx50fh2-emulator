@@ -23,10 +23,6 @@
         },
         {
           "type": "SYMBOL",
-          "name": "reg_directive"
-        },
-        {
-          "type": "SYMBOL",
           "name": "data_directive"
         },
         {
@@ -99,103 +95,6 @@
         {
           "type": "SYMBOL",
           "name": "string"
-        }
-      ]
-    },
-    "reg_directive": {
-      "type": "SEQ",
-      "members": [
-        {
-          "type": "TOKEN",
-          "content": {
-            "type": "PREC",
-            "value": 3,
-            "content": {
-              "type": "PATTERN",
-              "value": "#[rR][eE][gG]"
-            }
-          }
-        },
-        {
-          "type": "SYMBOL",
-          "name": "identifier"
-        },
-        {
-          "type": "CHOICE",
-          "members": [
-            {
-              "type": "STRING",
-              "value": "="
-            },
-            {
-              "type": "BLANK"
-            }
-          ]
-        },
-        {
-          "type": "SYMBOL",
-          "name": "memory"
-        }
-      ]
-    },
-    "memory": {
-      "type": "CHOICE",
-      "members": [
-        {
-          "type": "STRING",
-          "value": "A"
-        },
-        {
-          "type": "STRING",
-          "value": "B"
-        },
-        {
-          "type": "STRING",
-          "value": "C"
-        },
-        {
-          "type": "STRING",
-          "value": "D"
-        },
-        {
-          "type": "STRING",
-          "value": "X"
-        },
-        {
-          "type": "STRING",
-          "value": "Y"
-        },
-        {
-          "type": "STRING",
-          "value": "M"
-        },
-        {
-          "type": "STRING",
-          "value": "a"
-        },
-        {
-          "type": "STRING",
-          "value": "b"
-        },
-        {
-          "type": "STRING",
-          "value": "c"
-        },
-        {
-          "type": "STRING",
-          "value": "d"
-        },
-        {
-          "type": "STRING",
-          "value": "x"
-        },
-        {
-          "type": "STRING",
-          "value": "y"
-        },
-        {
-          "type": "STRING",
-          "value": "m"
         }
       ]
     },
@@ -500,6 +399,10 @@
         },
         {
           "type": "SYMBOL",
+          "name": "free_statement"
+        },
+        {
+          "type": "SYMBOL",
           "name": "assignment_statement"
         },
         {
@@ -587,6 +490,23 @@
         {
           "type": "SYMBOL",
           "name": "expression"
+        },
+        {
+          "type": "STRING",
+          "value": ";"
+        }
+      ]
+    },
+    "free_statement": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "free"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "identifier"
         },
         {
           "type": "STRING",

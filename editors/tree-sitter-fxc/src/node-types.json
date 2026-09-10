@@ -85,6 +85,10 @@
           "named": true
         },
         {
+          "type": "free_statement",
+          "named": true
+        },
+        {
           "type": "goto_statement",
           "named": true
         },
@@ -351,6 +355,10 @@
           "named": true
         },
         {
+          "type": "free_statement",
+          "named": true
+        },
+        {
           "type": "goto_statement",
           "named": true
         },
@@ -389,6 +397,21 @@
           "type": "expression",
           "named": true
         },
+        {
+          "type": "identifier",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "free_statement",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
         {
           "type": "identifier",
           "named": true
@@ -449,6 +472,10 @@
         },
         {
           "type": "for_statement",
+          "named": true
+        },
+        {
+          "type": "free_statement",
           "named": true
         },
         {
@@ -618,11 +645,6 @@
     }
   },
   {
-    "type": "memory",
-    "named": true,
-    "fields": {}
-  },
-  {
     "type": "mode_directive",
     "named": true,
     "fields": {},
@@ -662,25 +684,6 @@
       "types": [
         {
           "type": "expression",
-          "named": true
-        }
-      ]
-    }
-  },
-  {
-    "type": "reg_directive",
-    "named": true,
-    "fields": {},
-    "children": {
-      "multiple": true,
-      "required": true,
-      "types": [
-        {
-          "type": "identifier",
-          "named": true
-        },
-        {
-          "type": "memory",
           "named": true
         }
       ]
@@ -728,6 +731,10 @@
           "named": true
         },
         {
+          "type": "free_statement",
+          "named": true
+        },
+        {
           "type": "goto_statement",
           "named": true
         },
@@ -753,10 +760,6 @@
         },
         {
           "type": "print_statement",
-          "named": true
-        },
-        {
-          "type": "reg_directive",
           "named": true
         },
         {
@@ -838,6 +841,10 @@
         },
         {
           "type": "for_statement",
+          "named": true
+        },
+        {
+          "type": "free_statement",
           "named": true
         },
         {
@@ -940,35 +947,7 @@
     "named": false
   },
   {
-    "type": "A",
-    "named": false
-  },
-  {
-    "type": "B",
-    "named": false
-  },
-  {
-    "type": "C",
-    "named": false
-  },
-  {
-    "type": "D",
-    "named": false
-  },
-  {
-    "type": "M",
-    "named": false
-  },
-  {
     "type": "R∞",
-    "named": false
-  },
-  {
-    "type": "X",
-    "named": false
-  },
-  {
-    "type": "Y",
     "named": false
   },
   {
@@ -984,19 +963,7 @@
     "named": false
   },
   {
-    "type": "a",
-    "named": false
-  },
-  {
-    "type": "b",
-    "named": false
-  },
-  {
     "type": "break",
-    "named": false
-  },
-  {
-    "type": "c",
     "named": false
   },
   {
@@ -1009,10 +976,6 @@
     "named": false
   },
   {
-    "type": "d",
-    "named": false
-  },
-  {
     "type": "else",
     "named": false
   },
@@ -1022,6 +985,10 @@
   },
   {
     "type": "for",
+    "named": false
+  },
+  {
+    "type": "free",
     "named": false
   },
   {
@@ -1054,10 +1021,6 @@
   },
   {
     "type": "let",
-    "named": false
-  },
-  {
-    "type": "m",
     "named": false
   },
   {
@@ -1094,14 +1057,6 @@
   },
   {
     "type": "while",
-    "named": false
-  },
-  {
-    "type": "x",
-    "named": false
-  },
-  {
-    "type": "y",
     "named": false
   },
   {

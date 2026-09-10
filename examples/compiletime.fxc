@@ -1,21 +1,18 @@
-// Compile-time data and constants.
+// Compile-time data, constants, and releasing a memory.
 //
 // `#data` parses JSON while transpiling, so its values become plain literals in
 // the program and occupy none of the calculator's seven memories. `const` does
-// the same for a fixed expression, and `#reg` pins a name to the memory the
-// calculator side expects.
+// the same for a fixed expression. When a variable is finished with, `free`
+// hands its memory back so the next variable can use it.
 //
 //   fx50 build examples/compiletime.fxc
 //   fx50 regs  examples/compiletime.fxc
 //   fx50 test  examples/compiletime.fxc
 //
-// `#mode` and `#reg` are whole-program directives, so they come first; `#data`
-// may sit anywhere, including between statements.
+// `#mode` is a whole-program directive, so it comes first; `#data` may sit
+// anywhere.
 
 #mode COMP
-
-// Pin the running total to the independent memory `M`.
-#reg total = M
 
 // A JSON value written straight into the program. It could equally be
 // `#data config = "config.json";` to read a file next to this one.
@@ -24,12 +21,17 @@
 // A fixed value, inlined wherever it is used; it needs no memory.
 const scale = config.base;
 
-let total = config.offsets[1] * scale;
+// `first` takes memory A.
+let first = config.offsets[0] * scale;
+print(first);
 
-print(total);
-print(scale);
+// Done with `first`, so release A. `second` is then allocated to A as well,
+// and the whole program needs only one of the seven memories.
+free first;
+let second = config.offsets[2] * scale;
+print(second);
 
 // The cases travel with the program: `fx50 test examples/compiletime.fxc`.
 #tests = [
-  { "name": "offset 1 scaled by base 2 is 40", "output": ["40", "2"] }
+  { "name": "offsets 0 and 2, scaled by base 2", "output": ["20", "60"] }
 ];

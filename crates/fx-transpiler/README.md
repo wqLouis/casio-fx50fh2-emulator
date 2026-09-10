@@ -150,43 +150,72 @@ takes precedence over any header in the source.
 
 ### Variable allocation
 
-PRGM has exactly seven memories — `A B C D X Y M`. Every distinct mutable `.fxc`
-name is assigned one of them in **first-seen order** (the whole program is
-scanned before emitting), and a name keeps its memory for the whole program.
-Twenty names do not fit; what fits is at most seven *mutable* values.
+PRGM has exactly seven memories — `A B C D X Y M`. Every distinct `.fxc` name is
+assigned one of them in **first-seen order** (the whole program is scanned before
+emitting), and a name keeps its memory until the program ends or you release it
+with `free`.
 
-Names are never given a shared memory, even when one is no longer read. A
-memory's final value is part of the program's observable result — a later
-program or the user can read it — so no name is ever provably dead. Rather than
-silently dropping a value, the transpiler reports the eighth name and names the
-memories in use.
+Names are never given a shared memory implicitly. A memory's final value is part
+of the program's observable result — PRGM leaves its answer in one, a later
+program or the user can read it — so the transpiler cannot prove a name is dead.
+Only you know when a value is finished with, and saying so is what `free` is for.
 
-The way out is to stop needing memories:
+The way to fit a program is therefore, in order of preference:
 
 * **`const NAME = <expr>;`** declares a fixed value that is **inlined** at every
   use and occupies no memory. The expression must be constant — numbers, `pi`,
-  `e`, `phys.` constants, `#data` values and other `const`s — so it cannot
-  depend on anything that is only known when the program runs.
+  `e`, `phys.` constants, `#data` values and other `const`s.
 * **`#data NAME = <json>;`** resolves a JSON value at transpile time, likewise
   producing literals. See [Compile-time data](#compile-time-data).
-* **`#reg NAME = M`** pins a variable to a specific memory, for when the
-  calculator side expects one (or `M` is reserved for the independent memory).
-  Pins must appear before the program.
+* **`free NAME;`** releases a variable's memory so the next new variable can use
+  it:
+
+  ```c
+  let first = 5;
+  print(first);
+  free first;        // release the memory
+  let second = 7;    // reuses it
+  print(second);
+  ```
+
+  `free` emits nothing; it hands the memory back to the allocator. The value
+  left in the memory is untouched, exactly as on the calculator.
 
 `fx50 regs FILE` reports the plan and the memories left over:
 
 ```console
 $ fx50 regs examples/compiletime.fxc
 Memory plan for examples/compiletime.fxc
-  M  total  (pinned)
+  A  first  → second   (reused after `free first`)
 
-  1 of 7 memories used; free: A B C D X Y
+  1 of 7 memories used; free: B C D X Y M
+  released with `free`: first
   1 const (no memory): scale
   2 data table(s) (no memory): config, tests
 ```
 
-An eighth mutable name is a compile error pointing at it and listing the
-memories already taken.
+### Errors the register table catches
+
+Allocation keeps a table of which variable occupies each memory, so these are
+transpile errors rather than surprises on the calculator:
+
+| Mistake | Example | Message |
+| --- | --- | --- |
+| Use after free | `free a; print(a);` | `` `a` was freed and cannot be used again `` |
+| Double free | `free a; free a;` | `` `a` was already freed (double free) `` |
+| Freeing what has no memory | `const k = 1; free k;` | `` `k` is a `const`, which uses no memory `` |
+| Freeing an unknown name | `free nope;` | `` `nope` is not a variable `` |
+| Running out | an eighth live variable | `` no free memory for `z`: … `` |
+
+Two further rules, both about keeping the allocation verifiable:
+
+* **A freed name cannot be revived.** `let t = 1; free t; let t = 2;` is an
+  error; use a fresh name. A name resolves to exactly one memory, and a second
+  `t` would need a second one.
+* **`free` cannot be combined with `goto`/`label`.** A jump can re-enter code
+  whose memory has since been re-used, so the walk over the program is no longer
+  sound. Programs with jumps but no `free` are unaffected, since nothing is ever
+  re-used.
 
 ### Translation rules
 
@@ -196,7 +225,7 @@ memories already taken.
 | `x = e;`                           | `<e>→X` / `<e>->X`                                     |
 | `const k = 12;`                    | *(nothing; `k` is replaced by `12` at each use)*       |
 | `config.n` / `xs[0]`               | the number it resolves to                              |
-| `#reg x = M`                       | *(nothing; `x` is allocated to `M`)*                   |
+| `free x;`                          | *(nothing; the allocator releases the memory)*         |
 | `print(e);`                        | `<e>◢` / `<e>disp`                                     |
 | `e;`                               | `<e>`                                                  |
 | `+ - * /`                          | `+ - × ÷` / `+ - * /`                                  |

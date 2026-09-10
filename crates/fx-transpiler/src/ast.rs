@@ -92,6 +92,12 @@ pub enum Stmt {
         value: Expr,
         pos: usize,
     },
+    /// `free name;` — release the memory holding `name`, so a later variable
+    /// can use it.
+    Free {
+        name: String,
+        pos: usize,
+    },
     /// `print(value);`
     Print(Expr),
     /// An expression evaluated for its side effects (or just discarded).

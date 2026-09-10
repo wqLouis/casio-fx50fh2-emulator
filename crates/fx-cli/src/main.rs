@@ -382,19 +382,30 @@ fn print_memory_plan(file: &Path, analysis: &fx_transpiler::Analysis) {
     let allocation = &analysis.allocation;
     println!("Memory plan for {}", file.display());
 
+    // One line per memory, showing what occupied it over time. A memory with
+    // more than one name was released with `free` and handed on.
     let width = allocation
         .entries
         .iter()
         .map(|(name, _)| name.chars().count())
         .max()
         .unwrap_or(0);
-    for (name, memory) in &allocation.entries {
-        let note = if analysis.pins.iter().any(|(pinned, _)| pinned == name) {
-            "  (pinned)"
+    for (memory, names) in &allocation.registers {
+        if names.is_empty() {
+            continue;
+        }
+        let timeline = names
+            .iter()
+            .map(|name| format!("{name:<width$}"))
+            .collect::<Vec<_>>()
+            .join(" → ");
+        let note = if names.len() > 1 {
+            let released = &names[..names.len() - 1];
+            format!("   (reused after `free {}`)", released.join("`, `free "))
         } else {
-            ""
+            String::new()
         };
-        println!("  {memory}  {name:<width$}{note}");
+        println!("  {memory}  {timeline}{note}");
     }
     if allocation.entries.is_empty() {
         println!("  (no variables)");
@@ -417,6 +428,9 @@ fn print_memory_plan(file: &Path, analysis: &fx_transpiler::Analysis) {
             )
         }
     );
+    if !allocation.freed.is_empty() {
+        println!("  released with `free`: {}", allocation.freed.join(", "));
+    }
     if !analysis.consts.is_empty() {
         println!(
             "  {} const (no memory): {}",

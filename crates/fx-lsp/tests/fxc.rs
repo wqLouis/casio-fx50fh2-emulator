@@ -136,15 +136,41 @@ fn fxc_phys_constant_is_valid() {
 
 #[test]
 fn fxc_compile_time_features_are_valid() {
-    let source = "#reg total = M\n\
-                  #data config = { \"n\": 3, \"xs\": [1, 2] };\n\
+    let source = "#data config = { \"n\": 3, \"xs\": [1, 2] };\n\
                   const k = config.n;\n\
                   let total = config.xs[1] * k;\n\
-                  print(total);\n";
+                  print(total);\n\
+                  free total;\n\
+                  let next = k;\n\
+                  print(next);\n";
     assert!(
         diagnostics(source, Language::Fxc, None).is_empty(),
         "{:?}",
         diagnostics(source, Language::Fxc, None)
+    );
+}
+
+#[test]
+fn fxc_use_after_free_is_reported() {
+    let diags = diagnostics("let a = 1;\nfree a;\nprint(a);\n", Language::Fxc, None);
+    assert_eq!(diags.len(), 1);
+    assert_eq!(code(&diags[0]), "Transpile ERROR");
+    assert!(
+        diags[0].message.contains("was freed"),
+        "{}",
+        diags[0].message
+    );
+    assert_eq!(diags[0].range.start.line, 2, "should point at the use");
+}
+
+#[test]
+fn fxc_double_free_is_reported() {
+    let diags = diagnostics("let a = 1;\nfree a;\nfree a;\n", Language::Fxc, None);
+    assert_eq!(diags.len(), 1);
+    assert!(
+        diags[0].message.contains("double free"),
+        "{}",
+        diags[0].message
     );
 }
 

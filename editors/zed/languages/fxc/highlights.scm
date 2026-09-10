@@ -15,15 +15,13 @@
 
 ; --- directives -----------------------------------------------------------
 ;
-; `#mode`, `#reg`, `#data` and `#tests` are whole-line directives.  Capturing
-; the node marks the directive keyword; the identifiers and JSON inside are
-; re-captured below and take precedence.
+; `#mode`, `#data` and `#tests` are whole-line directives.  Capturing the node
+; marks the directive keyword; the identifiers and JSON inside are re-captured
+; below and take precedence.
 
 (mode_directive) @keyword
 (mode_name) @constant
 (include_directive) @keyword
-(reg_directive) @keyword
-(reg_directive (identifier) @variable)
 (data_directive) @keyword
 (data_directive (identifier) @constant)
 (tests_directive) @keyword
@@ -33,6 +31,7 @@
 [
   "let"
   "const"
+  "free"
   "if"
   "else"
   "while"

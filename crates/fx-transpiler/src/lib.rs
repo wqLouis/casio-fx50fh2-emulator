@@ -149,12 +149,11 @@ fn transpile_expanded(
         lexer::Tok::Mode(mode) => Some(*mode),
         _ => None,
     });
-    let pins = collect_regs(&tokens);
     let effective = opts.mode.or(header).unwrap_or(Mode::Comp);
 
     let program = parser::parse(&tokens, &text)?;
     validate::validate(&program, effective, &text)?;
-    let body = emit::emit(&program, &text, opts, &data, &pins)?;
+    let body = emit::emit(&program, &text, opts, &data)?;
 
     if opts.mode.is_some() || header.is_some() {
         Ok(format!("#mode {}\n{body}", effective.name()))
@@ -163,28 +162,16 @@ fn transpile_expanded(
     }
 }
 
-/// The `#reg` directives in a token stream, in source order.
-fn collect_regs(tokens: &[lexer::Token]) -> Vec<(String, char)> {
-    tokens
-        .iter()
-        .filter_map(|token| match &token.tok {
-            lexer::Tok::Reg(name, letter) => Some((name.clone(), *letter)),
-            _ => None,
-        })
-        .collect()
-}
-
 /// What `fx50 regs` reports: how a program uses the calculator's memories.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Analysis {
-    /// Variables and the memory each uses, plus peak concurrency.
+    /// Variables and the memory each uses, plus each memory's occupants over
+    /// time (a memory with more than one was released with `free` and re-used).
     pub allocation: Allocation,
     /// `const` names. These are inlined and use no memory.
     pub consts: Vec<String>,
     /// `#data` table names. These are compile-time numbers and use no memory.
     pub data: Vec<String>,
-    /// The `#reg` pins, in source order.
-    pub pins: Vec<(String, char)>,
 }
 
 /// Analyse how a program would use the calculator's memories.
@@ -207,13 +194,11 @@ fn analyze_expanded(
 ) -> Result<Analysis, TranspileError> {
     let (text, data) = data::extract(expanded, base_dir)?;
     let tokens = lexer::lex(&text)?;
-    let pins = collect_regs(&tokens);
     let program = parser::parse(&tokens, &text)?;
-    let allocator = alloc::Allocator::collect(&program, &text, &pins, &data)?;
+    let allocator = alloc::Allocator::collect(&program, &text, &data)?;
     Ok(Analysis {
         allocation: allocator.allocation(),
         consts: alloc::const_names(&program),
         data: data.names().map(str::to_string).collect(),
-        pins,
     })
 }

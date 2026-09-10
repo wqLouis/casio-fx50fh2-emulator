@@ -3,11 +3,11 @@
  *
  * `.fxc` is a small C-like language that transpiles to PRGM.  The grammar
  * follows `docs/AI-AGENTS.md`: `//` and block comments, `#mode`/`#include`
- * directives, `#data`/`#tests` compile-time JSON, `#reg` memory pins,
- * `let`/`const`/assignment/`print` statements, `if`/`while`/`for` with
- * optional braces, `break`/`goto`/`label`, data paths with `.field`/`[index]`,
- * and a conventional expression grammar with `^`/`**` exponentiation.
- * Scientific constants live under the `phys.` namespace.
+ * directives, `#data`/`#tests` compile-time JSON, `let`/`const`/`free`,
+ * assignment and `print` statements, `if`/`while`/`for` with optional braces,
+ * `break`/`goto`/`label`, data paths with `.field`/`[index]`, and a
+ * conventional expression grammar with `^`/`**` exponentiation.  Scientific
+ * constants live under the `phys.` namespace.
  */
 
 module.exports = grammar({
@@ -26,7 +26,6 @@ module.exports = grammar({
     _top_level: $ => choice(
       $.mode_directive,
       $.include_directive,
-      $.reg_directive,
       $.data_directive,
       $.tests_directive,
       $._statement,
@@ -44,21 +43,6 @@ module.exports = grammar({
     include_directive: $ => seq(
       token(prec(3, /#[iI][nN][cC][lL][uU][dD][eE]/)),
       $.string,
-    ),
-
-    // #reg NAME = M  (the `=` is optional in practice).  The memories are
-    // spelled as literals rather than a one-letter regex token: a regex token
-    // here is folded into tree-sitter's keyword lexer and its leading letters
-    // (`b`, `c`, ...) then shadow `break`, `const` and the rest.
-    reg_directive: $ => seq(
-      token(prec(3, /#[rR][eE][gG]/)),
-      $.identifier,
-      optional('='),
-      $.memory,
-    ),
-    memory: $ => choice(
-      'A', 'B', 'C', 'D', 'X', 'Y', 'M',
-      'a', 'b', 'c', 'd', 'x', 'y', 'm',
     ),
 
     // #data NAME = <json>;  and  #tests = <json>;
@@ -120,6 +104,7 @@ module.exports = grammar({
     _statement: $ => choice(
       $.let_statement,
       $.const_statement,
+      $.free_statement,
       $.assignment_statement,
       $.print_statement,
       $.if_statement,
@@ -135,6 +120,8 @@ module.exports = grammar({
 
     let_statement: $ => seq('let', $.identifier, '=', $.expression, ';'),
     const_statement: $ => seq('const', $.identifier, '=', $.expression, ';'),
+    // `free name;` releases the variable's memory for a later variable to use.
+    free_statement: $ => seq('free', $.identifier, ';'),
     assignment_statement: $ => seq($.identifier, '=', $.expression, ';'),
     print_statement: $ => seq('print', $.expression, ';'),
 

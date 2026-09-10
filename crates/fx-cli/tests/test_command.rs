@@ -121,20 +121,35 @@ fn regs_reports_the_memory_plan() {
     let dir = TempDir::new("regs");
     let program = dir.write(
         "prog.fxc",
-        "#reg total = M\n#data config = { \"n\": 3 };\nconst k = config.n;\nlet total = k;\nlet i = 1;\nprint(total + i);\n",
+        "#data config = { \"n\": 3 };\nconst k = config.n;\nlet total = k;\nfree total;\nlet next = 1;\nprint(next);\n",
     );
 
     let out = fx50().arg("regs").arg(&program).output().unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(out.status.success(), "stdout: {stdout}");
     assert!(stdout.contains("Memory plan for"), "{stdout}");
-    assert!(stdout.contains("M  total  (pinned)"), "{stdout}");
+    assert!(
+        stdout.contains("A  total → next"),
+        "expected the reuse timeline: {stdout}"
+    );
     assert!(stdout.contains("of 7 memories used"), "{stdout}");
+    assert!(stdout.contains("released with `free`: total"), "{stdout}");
     assert!(stdout.contains("const (no memory): k"), "{stdout}");
     assert!(
         stdout.contains("data table(s) (no memory): config"),
         "{stdout}"
     );
+}
+
+#[test]
+fn regs_reports_a_use_after_free() {
+    let dir = TempDir::new("uaf");
+    let program = dir.write("prog.fxc", "let a = 1;\nfree a;\nprint(a);\n");
+
+    let out = fx50().arg("regs").arg(&program).output().unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success());
+    assert!(stderr.contains("was freed"), "{stderr}");
 }
 
 #[test]

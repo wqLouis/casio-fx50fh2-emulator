@@ -13,10 +13,10 @@ pub enum Tok {
     Number(f64),
     /// The leading `#mode NAME` directive.
     Mode(Mode),
-    /// A leading `#reg NAME = L` directive: pin a variable to one memory.
-    Reg(String, char),
     Let,
     Const,
+    /// `free NAME` — release the memory holding a variable.
+    Free,
     If,
     Else,
     While,
@@ -64,9 +64,9 @@ impl Tok {
             Tok::Ident(name) => format!("identifier `{name}`"),
             Tok::Number(value) => format!("number `{value}`"),
             Tok::Mode(mode) => format!("`#mode {}`", mode.name()),
-            Tok::Reg(name, letter) => format!("`#reg {name} = {letter}`"),
             Tok::Let => "`let`".into(),
             Tok::Const => "`const`".into(),
+            Tok::Free => "`free`".into(),
             Tok::If => "`if`".into(),
             Tok::Else => "`else`".into(),
             Tok::While => "`while`".into(),
@@ -182,12 +182,10 @@ impl<'a> Lexer<'a> {
                 continue;
             }
             if ch == '#' {
-                // Directives form a run at the very top of the file. `#include`
-                // and data directives never reach the lexer (the preprocessor
-                // resolves them), so only `#mode` and `#reg` are left.
-                let directives_only = tokens
-                    .iter()
-                    .all(|token| matches!(token.tok, Tok::Mode(_) | Tok::Reg(..)));
+                // Only `#mode` is left: `#include` and the data directives are
+                // resolved by the preprocessor, so neither ever reaches the
+                // lexer.
+                let directives_only = tokens.iter().all(|token| matches!(token.tok, Tok::Mode(_)));
                 if !directives_only {
                     return Err(self.error(
                         "a `#` directive must be the first non-comment, non-blank line",
@@ -196,7 +194,7 @@ impl<'a> Lexer<'a> {
                 }
                 let tok = self.directive()?;
                 // A `#mode` configures the whole program, so a second one is
-                // ambiguous; only `#reg` may follow other directives.
+                // ambiguous.
                 if matches!(tok, Tok::Mode(_)) && !tokens.is_empty() {
                     return Err(self.error(
                         "a `#mode` directive must be the first non-comment, non-blank line",
@@ -313,8 +311,8 @@ impl<'a> Lexer<'a> {
 
     /// Read a `#` directive.
     ///
-    /// The `#` has not been consumed. Dispatches on the directive word and
-    /// leaves the cursor just past the end of the directive's line.
+    /// The `#` has not been consumed. Leaves the cursor just past the end of
+    /// the directive's line.
     fn directive(&mut self) -> Result<Tok, TranspileError> {
         debug_assert_eq!(self.peek(), Some('#'));
         let save_i = self.i;
@@ -332,44 +330,16 @@ impl<'a> Lexer<'a> {
                 let mode = self.mode_directive()?;
                 Ok(Tok::Mode(mode))
             }
-            "reg" => self.reg_directive(),
+            // `#reg` used to pin a variable to a memory. Point anyone who
+            // wrote one at what replaced it rather than just saying
+            // "unknown directive".
+            "reg" => Err(self.error(
+                "`#reg` has been replaced: the transpiler allocates memories itself, and \
+                 `free name;` releases one for reuse",
+                save_byte,
+            )),
             other => Err(self.error(format!("unknown directive `#{other}`"), save_byte)),
         }
-    }
-
-    /// Read the body of a `#reg NAME = L` directive.
-    ///
-    /// The `#reg` word has already been consumed. The memory letter is not
-    /// validated here — [`crate::alloc`] owns the list of memories, so the
-    /// check lives there and cannot drift.
-    fn reg_directive(&mut self) -> Result<Tok, TranspileError> {
-        let start = self.byte;
-        self.skip_inline_space();
-        let name_start = self.i;
-        while self
-            .peek()
-            .is_some_and(|c| c.is_ascii_alphanumeric() || c == '_')
-        {
-            self.advance();
-        }
-        let name: String = self.chars[name_start..self.i].iter().collect();
-        if name.is_empty() {
-            return Err(self.error("expected a variable name after `#reg`", self.byte));
-        }
-        self.skip_inline_space();
-        if self.peek() == Some('=') {
-            self.advance();
-            self.skip_inline_space();
-        }
-        let Some(letter) = self.peek().filter(|c| c.is_ascii_alphabetic()) else {
-            return Err(self.error(
-                format!("expected a memory letter (A B C D X Y M) after `#reg {name} =`"),
-                self.byte,
-            ));
-        };
-        self.advance();
-        self.finish_directive_line(start, "the memory letter")?;
-        Ok(Tok::Reg(name, letter.to_ascii_uppercase()))
     }
 
     /// Require the rest of the current line to be blank or a `//` comment.
@@ -488,6 +458,7 @@ fn keyword(word: &str) -> Option<Tok> {
     Some(match word {
         "let" => Tok::Let,
         "const" => Tok::Const,
+        "free" => Tok::Free,
         "if" => Tok::If,
         "else" => Tok::Else,
         "while" => Tok::While,

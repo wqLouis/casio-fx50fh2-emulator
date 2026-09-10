@@ -33,16 +33,14 @@ mod prec {
 
 /// Transpile a parsed program into PRGM source.
 ///
-/// `data` supplies the `#data` tables that data paths resolve against, and
-/// `pins` the `#reg` directives that fix a name to a memory.
+/// `data` supplies the `#data` tables that data paths resolve against.
 pub fn emit(
     program: &Program,
     source: &str,
     opts: Options,
     data: &Data,
-    pins: &[(String, char)],
 ) -> Result<String, TranspileError> {
-    let allocator = Allocator::collect(program, source, pins, data)?;
+    let allocator = Allocator::collect(program, source, data)?;
     let mut emitter = Emitter {
         out: String::new(),
         allocator,
@@ -103,6 +101,10 @@ impl Emitter<'_> {
                 self.assignment(name, *pos, value)?;
             }
             Stmt::Const { name, value, pos } => self.const_declaration(name, *pos, value)?,
+            // `free` is a compile-time instruction: it hands the memory back to
+            // the allocator, and emits nothing. The value in the memory is left
+            // alone, exactly as the calculator would.
+            Stmt::Free { .. } => {}
             Stmt::Print(expr) => {
                 let value = self.expr(expr, 0)?;
                 let display = self.display();

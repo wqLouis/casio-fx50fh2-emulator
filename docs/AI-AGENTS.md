@@ -56,12 +56,12 @@ generated code fails.
 ```text
 program    := directive* stmt*
 directive  := '#mode' MODENAME             -- must be first if present
-            | '#reg' NAME '=' MEMORY       -- must precede the program
             | '#data' NAME '=' JSON ';'    -- may appear anywhere
             | '#tests' '=' JSON ';'        -- sugar for `#data tests = ...`
 stmt       := 'let' NAME '=' expr ';'
             | 'const' NAME '=' expr ';'
             | NAME '=' expr ';'
+            | 'free' NAME ';'
             | 'print' [ '(' expr ')' | expr ] ';'   -- parens optional
             | 'if' '(' expr ')' body ('else' body)?
             | 'while' '(' expr ')' body
@@ -75,7 +75,6 @@ stmt       := 'let' NAME '=' expr ';'
 body       := stmt | '{' stmt* '}'           -- braces optional for one statement
 forinit    := ['let'] NAME '=' expr
 
-MEMORY     := 'A' | 'B' | 'C' | 'D' | 'X' | 'Y' | 'M'
 JSON       := a JSON value, or a string naming a file to read
 dataref    := NAME accessor+
 accessor   := '.' NAME | '[' INTEGER ']'
@@ -287,9 +286,8 @@ A+B◢
 
 Consequences to design around:
 
-* **Budget seven names.** If a program needs more, restructure to reuse
-  variables rather than adding names. There is no scope analysis, so a name
-  that appears once at the bottom still consumes a memory.
+* **Budget seven live variables.** A name keeps its memory until the program
+  ends, or until you `free` it.
 * The order is by first *appearance in source order*, including inside
   expressions — `let a = b; let b = 1;` gives `b → A` and `a → B`.
 * Reserved letters name nothing special. Calling a variable `x` does not make
@@ -298,7 +296,9 @@ Consequences to design around:
 Naming them `a b c d x y m` in that order makes allocation obvious and
 predictable. It is a good habit for generated code.
 
-To make a program fit, in this order of preference:
+### Making a program fit
+
+In this order of preference:
 
 1. **Use `const` for fixed values.** A `const` is inlined where it is used and
    consumes no memory:
@@ -308,32 +308,63 @@ To make a program fit, in this order of preference:
    let total = 7 * scale;   // emits `7×3→A`; only `total` uses a memory
    ```
 
-2. **Use `#data` for values that come from JSON.** Those are literals too.
-3. **Use `#reg` when the calculator side needs a particular memory.**
+2. **Use `#data` for values that come from JSON.** Those become literals too.
+3. **`free` a variable when you are done with it.** The memory is handed to the
+   next new variable:
 
-```c
-#reg total = M
-let total = 1;    // total → M, deliberately
-```
+   ```c
+   let first = 5;
+   print(first);
+   free first;        // release the memory
+   let second = 7;    // reuses the same memory
+   print(second);
+   ```
+
+   Nothing is released implicitly: a memory's final value is observable (a
+   later program or the user can read it), so only you know when a value is
+   finished with.
 
 `fx50 regs program.fxc` prints the plan without running anything:
 
 ```console
 $ fx50 regs examples/compiletime.fxc
 Memory plan for examples/compiletime.fxc
-  M  total  (pinned)
+  A  first  → second   (reused after `free first`)
 
-  1 of 7 memories used; free: A B C D X Y
+  1 of 7 memories used; free: B C D X Y M
+  released with `free`: first
   1 const (no memory): scale
   2 data table(s) (no memory): config, tests
 ```
 
-An eighth mutable name fails at transpile time, naming the memories in use:
+### `free` mistakes are caught at transpile time
+
+The transpiler keeps a table of which variable occupies each memory, so these
+never reach the calculator:
+
+| Mistake | Example | Error |
+| --- | --- | --- |
+| Use after free | `free a; print(a);` | `` `a` was freed and cannot be used again `` |
+| Double free | `free a; free a;` | `` `a` was already freed (double free) `` |
+| Freeing what has no memory | `const k = 1; free k;` | `` `k` is a `const`, which uses no memory `` |
+| Freeing an unknown name | `free nope;` | `` `nope` is not a variable `` |
+
+Two further rules:
+
+* **A freed name may not be revived.** `let t = 1; free t; let t = 2;` is an
+  error — use a fresh name. A name resolves to exactly one memory, and a second
+  `t` would need a second one.
+* **`free` cannot be combined with `goto`/`label`.** A jump can re-enter code
+  whose memory has since been re-used, which the transpiler cannot verify, so
+  it refuses rather than miscompiling. Programs with jumps and no `free` are
+  unaffected.
+
+Running out of memories names the variables in the way:
 
 ```text
-fx50: no free memory for `z`: all of A B C D X Y M are taken by A (`a`), B (`b`),
+fx50: no free memory for `z`: all of A B C D X Y M are in use by A (`a`), B (`b`),
 C (`c`), D (`d`), X (`x`), Y (`y`), M (`m`). Use `const` for fixed values, or
-`#reg` to pin a memory deliberately — `fx50 regs` shows the plan
+`free` a variable you no longer need — `fx50 regs` shows the plan
 ```
 
 ---
@@ -577,7 +608,7 @@ Rules:
   single number or boolean.
 * `#data` names share the namespace with variables and `const`s, so they must
   be unique.
-* `#data` may appear anywhere; `#reg` and `#mode` must come before the program.
+* `#data` may appear anywhere; `#mode` must come first.
 
 Because the values are resolved before emission, they contribute **nothing** to
 the seven-memory budget. Prefer `#data` over writing a long list of literals by
@@ -590,11 +621,12 @@ hand when the values are already available as JSON.
 - [ ] Every statement ends with `;`.
 - [ ] `#mode` (if used) is the very first line, and the mode is spelled
       correctly.
-- [ ] At most **seven** mutable variable names in the whole program; fixed
-      values use `const` (and tables use `#data`) so they cost no memory.
+- [ ] At most **seven live** variables at any point; fixed values use `const`
+      (and tables use `#data`) so they cost no memory, and `free` releases a
+      variable that is finished with.
 - [ ] `#data` paths resolve to numbers or booleans; array indices are literals.
-- [ ] Any `#reg` pin names a real, used variable and a memory the program does
-      not otherwise use.
+- [ ] No use after free, no double free, and no `free` alongside
+      `goto`/`label`.
 - [ ] `input()` appears only as a complete assignment right-hand side.
 - [ ] No `%`, `&&`, `||`, `!`, `++`, `--`, `+=`, hex literals, arrays, or
       strings.

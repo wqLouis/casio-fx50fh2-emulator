@@ -6,6 +6,7 @@
 //! program   := stmt*
 //! stmt      := 'let' NAME '=' expr ';'
 //!            | 'const' NAME '=' expr ';'
+//!            | 'free' NAME ';'
 //!            | NAME '=' expr ';'
 //!            | 'print' '(' expr ')' ';'
 //!            | 'if' '(' expr ')' block ('else' block)?
@@ -124,10 +125,9 @@ impl<'a> Parser<'a> {
     // -- program / statements ----------------------------------------------
 
     fn program(&mut self) -> Result<Program, TranspileError> {
-        // Directives (`#mode`, `#reg`) configure the whole program. The
-        // emitter reads them from the token stream, so the parser drops the
-        // whole leading run here.
-        while matches!(self.peek(), Tok::Mode(_) | Tok::Reg(..)) {
+        // `#mode` configures the whole program. The emitter reads it from the
+        // token stream, so the parser drops any leading run here.
+        while matches!(self.peek(), Tok::Mode(_)) {
             self.advance();
         }
         let mut statements = Vec::new();
@@ -141,6 +141,13 @@ impl<'a> Parser<'a> {
         match self.peek().clone() {
             Tok::Let => self.let_statement(),
             Tok::Const => self.const_statement(),
+            Tok::Free => {
+                let pos = self.position();
+                self.advance();
+                let (name, _) = self.expect_ident("a variable name after `free`")?;
+                self.expect(&Tok::Semi, "`;` after `free`")?;
+                Ok(Stmt::Free { name, pos })
+            }
             Tok::Print => self.print_statement(),
             Tok::If => self.if_statement(),
             Tok::While => self.while_statement(),

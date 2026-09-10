@@ -591,6 +591,10 @@ fn fxc_completion_items() -> Vec<CompletionItem> {
             "const",
             "declare a compile-time constant (inlined; uses no memory)",
         ),
+        (
+            "free",
+            "release a variable's memory so a later variable can reuse it",
+        ),
         ("if", "conditional execution"),
         ("else", "alternative `if` body"),
         ("while", "conditional loop"),
@@ -621,21 +625,6 @@ fn fxc_completion_items() -> Vec<CompletionItem> {
                     .to_string(),
             )),
             insert_text: Some("#data ".to_string()),
-            ..Default::default()
-        },
-    );
-    push(
-        &mut items,
-        CompletionItem {
-            label: "#reg".to_string(),
-            kind: Some(CompletionItemKind::KEYWORD),
-            detail: Some("pin a variable to a memory".to_string()),
-            documentation: Some(Documentation::String(
-                "Fix a variable to one of A B C D X Y M, as in `#reg total = M`. \
-                 Must appear before the program; `fx50 regs` shows the plan."
-                    .to_string(),
-            )),
-            insert_text: Some("#reg ".to_string()),
             ..Default::default()
         },
     );
