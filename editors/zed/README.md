@@ -14,9 +14,22 @@ It provides:
   from the grammar checkout. They are kept byte-identical to
   `editors/tree-sitter-*/queries/highlights.scm` (which serves editors that read
   queries from the grammar), and `cargo test` asserts the copies match,
-* bracket matching and comment configuration,
+* bracket matching and auto-indentation for `.fxc`
+  (`languages/fxc/brackets.scm`, `languages/fxc/indents.scm`),
+* comment configuration for both languages,
 * the `fx50` language server, launched as **`fx50 lsp`**, attached to both
   languages.
+
+### Why `fx` has no `brackets.scm`
+
+Zed's rainbow brackets need a pattern that captures the opening and closing
+token as children of one node, e.g. `("(" @open ")" @close)`. The PRGM grammar
+models `(` and `)` as flat tokens of an `expression`, each wrapped in its own
+`expression` node, so no node has both as children and the pattern can never
+match. Parentheses are still *highlighted* (`["(" ")"] @punctuation.bracket`
+matches the tokens directly); only the pairing/rainbow colouring is missing.
+Modelling a real `parenthesized_expression` in the grammar would enable it, at
+the cost of regenerating the parser.
 
 ## Requirements
 
