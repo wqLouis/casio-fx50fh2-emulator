@@ -1,6 +1,7 @@
 //! Tokenizer for the C-like `.fxc` source language.
 
 use crate::error::TranspileError;
+use crate::mode::Mode;
 
 /// A lexical token. Keywords are their own variants so the parser can match
 /// them without string comparisons.
@@ -10,6 +11,8 @@ pub enum Tok {
     Ident(String),
     /// A numeric literal.
     Number(f64),
+    /// The leading `#mode NAME` directive.
+    Mode(Mode),
     Let,
     If,
     Else,
@@ -51,6 +54,7 @@ impl Tok {
         match self {
             Tok::Ident(name) => format!("identifier `{name}`"),
             Tok::Number(value) => format!("number `{value}`"),
+            Tok::Mode(mode) => format!("`#mode {}`", mode.name()),
             Tok::Let => "`let`".into(),
             Tok::If => "`if`".into(),
             Tok::Else => "`else`".into(),
@@ -162,6 +166,19 @@ impl<'a> Lexer<'a> {
                 });
                 continue;
             }
+            if ch == '#' {
+                if !tokens.is_empty() {
+                    return Err(
+                        self.error("`#mode` must be the first non-comment, non-blank line", pos)
+                    );
+                }
+                let mode = self.mode_directive()?;
+                tokens.push(Token {
+                    tok: Tok::Mode(mode),
+                    pos,
+                });
+                continue;
+            }
             if ch.is_ascii_alphabetic() || ch == '_' {
                 let name = self.word();
                 tokens.push(Token {
@@ -256,6 +273,77 @@ impl<'a> Lexer<'a> {
             self.advance();
         }
         self.chars[start..self.i].iter().collect()
+    }
+
+    /// Read the body of a leading `#mode NAME` directive.
+    ///
+    /// The `#` has not been consumed yet. Accepts an optional `=` and
+    /// surrounding spaces: `#mode CMPLX`, `#mode=cmplx`. The rest of the line
+    /// must be blank or a `//` comment.
+    fn mode_directive(&mut self) -> Result<Mode, TranspileError> {
+        let start = self.byte;
+        debug_assert_eq!(self.peek(), Some('#'));
+        self.advance();
+
+        let word_start = self.i;
+        while self.peek().is_some_and(|c| c.is_ascii_alphabetic()) {
+            self.advance();
+        }
+        let directive: String = self.chars[word_start..self.i].iter().collect();
+        if !directive.eq_ignore_ascii_case("mode") {
+            return Err(self.error(format!("unknown directive `#{directive}`"), start));
+        }
+
+        self.skip_inline_space();
+        if self.peek() == Some('=') {
+            self.advance();
+            self.skip_inline_space();
+        }
+
+        let name_start = self.byte;
+        let name_i = self.i;
+        while self
+            .peek()
+            .is_some_and(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+        {
+            self.advance();
+        }
+        let name: String = self.chars[name_i..self.i].iter().collect();
+        if name.is_empty() {
+            return Err(self.error("expected a mode name after `#mode`", name_start));
+        }
+        let Some(mode) = Mode::parse(&name) else {
+            return Err(self.error(
+                format!("unknown mode `{name}`; expected COMP, CMPLX, BASE, SD or REG"),
+                name_start,
+            ));
+        };
+
+        // The directive is a whole line: only blanks or a `//` comment may
+        // follow the mode name.
+        self.skip_inline_space();
+        match self.peek() {
+            None | Some('\n') | Some('\r') => {}
+            Some('/') if self.looking_at("//") => {
+                while let Some(ch) = self.peek() {
+                    if ch == '\n' {
+                        break;
+                    }
+                    self.advance();
+                }
+            }
+            _ => {
+                return Err(self.error("unexpected text after the mode name", self.byte));
+            }
+        }
+        Ok(mode)
+    }
+
+    /// Skip spaces and tabs, but not newlines.
+    fn skip_inline_space(&mut self) {
+        while matches!(self.peek(), Some(' ') | Some('\t')) {
+            self.advance();
+        }
     }
 
     fn operator(&mut self) -> Result<Tok, TranspileError> {

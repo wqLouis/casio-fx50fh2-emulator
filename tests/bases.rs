@@ -3,8 +3,12 @@
 use casio_fx50fh2::bases::Base;
 use casio_fx50fh2::{CalcError, Interpreter, MockHost, compile, evaluate};
 
+/// Base-n work must be declared, just as the hardware requires you to select
+/// the BASE mode before the base keys become available.
+const MODE: &str = "#mode BASE\n";
+
 fn run(source: &str) -> Result<Interpreter<MockHost>, CalcError> {
-    let program = compile(source)?;
+    let program = compile(&format!("{MODE}{source}"))?;
     let mut interp = Interpreter::new(program, MockHost::default());
     interp.run()?;
     Ok(interp)
@@ -12,6 +16,10 @@ fn run(source: &str) -> Result<Interpreter<MockHost>, CalcError> {
 
 fn output(source: &str) -> Vec<String> {
     run(source).unwrap().into_host().output
+}
+
+fn eval(source: &str) -> f64 {
+    evaluate(&format!("{MODE}{source}")).unwrap()
 }
 
 #[test]
@@ -25,10 +33,10 @@ fn setup_commands_select_the_base() {
 
 #[test]
 fn tagged_literals_convert_to_decimal() {
-    assert_eq!(evaluate("1Fh").unwrap(), 31.0);
-    assert_eq!(evaluate("1010b").unwrap(), 10.0);
-    assert_eq!(evaluate("17o").unwrap(), 15.0);
-    assert_eq!(evaluate("42d").unwrap(), 42.0);
+    assert_eq!(eval("1Fh"), 31.0);
+    assert_eq!(eval("1010b"), 10.0);
+    assert_eq!(eval("17o"), 15.0);
+    assert_eq!(eval("42d"), 42.0);
 }
 
 #[test]
@@ -50,8 +58,16 @@ fn arithmetic_wraps_to_the_word_size() {
 
 #[test]
 fn integer_division_truncates() {
-    assert_eq!(output("Dec: 7┘2◢"), vec!["3d"]);
-    assert_eq!(output("Dec: 0-7┘2◢"), vec!["-3d"]);
+    // BASE mode offers `÷`, not the fraction key `┘`.
+    assert_eq!(output("Dec: 7÷2◢"), vec!["3d"]);
+    assert_eq!(output("Dec: 0-7÷2◢"), vec!["-3d"]);
+}
+
+/// The fraction key is not offered in BASE mode, so using it is a mode error.
+#[test]
+fn fraction_key_is_not_available_in_base_mode() {
+    let err = run("Dec: 7┘2").unwrap_err();
+    assert!(matches!(err, CalcError::Mode { .. }), "{err:?}");
 }
 
 #[test]

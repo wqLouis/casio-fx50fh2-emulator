@@ -1,5 +1,7 @@
 //! Abstract syntax tree for fx-50FH II programs.
 
+use crate::bases::Base;
+use crate::mode::Mode;
 use crate::stats::StatVar;
 use crate::token::{BinOp, ConstName, FuncName, VarName};
 
@@ -16,6 +18,11 @@ pub enum UnaryOp {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
     Number(f64),
+    /// A base-tagged literal such as `1Fh`, `1010b`, `17o` or `42d`.
+    BaseLiteral {
+        value: f64,
+        base: Base,
+    },
     Var(VarName),
     Const(ConstName),
     /// The `?` prompt; evaluates to the value entered by the user.
@@ -138,6 +145,9 @@ pub enum Stmt {
         y: Option<Expr>,
         freq: Option<Expr>,
     },
+    /// The leading `#mode NAME` directive.  Always the first statement when
+    /// present.
+    Mode(Mode),
     /// An empty statement, e.g. from a stray `:`.
     Noop,
 }

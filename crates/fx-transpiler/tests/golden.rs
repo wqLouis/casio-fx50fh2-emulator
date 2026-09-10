@@ -15,8 +15,14 @@ fn glyph(source: &str, expected: &str) {
 /// Assert ASCII-mode output.
 #[track_caller]
 fn ascii(source: &str, expected: &str) {
-    let got = transpile_with(source, Options { ascii: true })
-        .unwrap_or_else(|e| panic!("transpile failed: {e}\n{source}"));
+    let got = transpile_with(
+        source,
+        Options {
+            ascii: true,
+            ..Default::default()
+        },
+    )
+    .unwrap_or_else(|e| panic!("transpile failed: {e}\n{source}"));
     assert_eq!(got, expected, "ASCII output for:\n{source}");
 }
 

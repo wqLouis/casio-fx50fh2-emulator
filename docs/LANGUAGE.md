@@ -24,6 +24,46 @@ The calculator is a keystroke machine: one key = one token. `sin(` is a single
 token, not `sin` + `(`. This implementation tokens trees the name and the
 parenthesis separately but the parser accepts an omitted opening parenthesis.
 
+## Operating modes
+
+The hardware forces a mode before you can compute: complex numbers only exist
+in **CMPLX**, statistics only in **SD**/**REG**, and base-n only in **BASE**.
+You cannot type an `i` in COMP mode because the key is not offered there, and
+`√(-4)` is a `Math ERROR` rather than `2i`.
+
+A program declares its mode with a header directive:
+
+```text
+#mode CMPLX
+(3+4i)×(1-2i)◢
+```
+
+The name is case-insensitive and accepts a few aliases:
+
+| Mode | Aliases | Offers |
+| --- | --- | --- |
+| `COMP` | — | general real arithmetic (the default) |
+| `CMPLX` | `CPLX`, `COMPLEX` | `i`, `∠`, complex results, `arg`, `Conjg`, `▶a+b𝑖`/`▶r∠θ` |
+| `BASE` | `BASEN`, `BASE-N` | `Dec`/`Hex`/`Bin`/`Oct`, tagged literals, bitwise, `Not`, `Neg` |
+| `SD` | `STAT`, `STATS`, `STATISTICS` | `DT`, `n Σx Σx² x̄ σx sx minX maxX`, `ClrStat`, `FreqOn` |
+| `REG` | `REGRESSION` | everything SD has, plus `y` statistics and `regA`/`regB`/`regR` |
+
+The directive must be the first statement; `#mode` may be written with an
+optional `=` (`#mode=CMPLX`). Without it a program runs in COMP.
+
+Using a construct the declared mode does not offer is reported as a
+`Mode ERROR`. As a rule of thumb:
+
+* `√`, `^`, `┘`, `!`, `%`, `nPr`/`nCr`, `π`, `e`, `Ran#`, the trigonometric and
+  logarithmic functions, and `Pol(`/`Rec(` need one of COMP, CMPLX, SD or REG —
+  they are **not** available in BASE, which works on integers only.
+* `Fix`/`Sci`/`Norm`/`Deg`/`Rad`/`Gra` are available everywhere except BASE.
+* `Pol(`/`Rec(` are available only in COMP and CMPLX.
+
+The mode can also be supplied from outside the source, which overrides any
+header. In the CLI that is `fx50 --mode CMPLX '...'`; the library entry point is
+`casio_fx50fh2::compile_with(source, Some(Mode::Cmplx))`.
+
 | Group | Tokens |
 | --- | --- |
 | Memories | `A B C D X Y M Ans` |
@@ -130,11 +170,13 @@ between decimal and scientific outside `[1e-2, 1e10)`; `Norm2` outside
 
 * The 40 physical constants and `ReP`/`ImP` are not implemented.
 * Untagged integer literals are always read as decimal; only tagged literals
-  (`1Fh`, `1010b`, …) select another base.  Hex literals must therefore start
-  with a decimal digit (`1Fh`, not `FFh`).
+  (`1Fh`, `1010b`, …) select another base.
 * `Goto` clears the `If`/loop context, so jumping *out* of a loop works but
   jumping to a label *inside* the same loop does not (the real machine's
   behaviour here is itself subtle).
 * Sexagesimal (`°′″`) output is not implemented.
 * Statistical regression supports the linear model only; the other Casio
   models are rejected rather than approximated.
+* `Mode ERROR` is a source-level diagnostic, not a real error screen: the
+  hardware makes mode violations impossible by not offering the key. Mode
+  errors therefore carry a message but usually no byte offset.

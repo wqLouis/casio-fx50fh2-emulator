@@ -7,6 +7,7 @@
 
 use crate::bases::Base;
 use crate::error::CalcError;
+use crate::mode::Mode;
 use crate::stats::StatVar as SV;
 use crate::token::{BinOp, ConstName, FuncName, Postfix, Token, TokenKind, VarName};
 use crate::value::ComplexFormat;
@@ -126,6 +127,17 @@ impl Lexer {
                 self.consume_str(text);
                 return Ok(Some(TokenKind::ComplexFormat(format)));
             }
+        }
+
+        // The leading `#mode NAME` directive.
+        if c == '#' {
+            if let Some(kind) = self.try_mode_directive()? {
+                return Ok(Some(kind));
+            }
+            return Err(CalcError::syntax(
+                "expected a `#mode COMP|CMPLX|BASE|SD|REG` directive",
+                self.byte,
+            ));
         }
 
         // Base-tagged integer literals (`1Fh`, `1010b`, `17o`, `42d`). This is
@@ -292,6 +304,53 @@ impl Lexer {
             return None;
         }
         Some(self.chars[start..end].iter().collect())
+    }
+
+    /// Read a `#mode NAME` directive.
+    ///
+    /// Returns `Ok(None)` when the input at the cursor is not a mode
+    /// directive, so the caller can report a helpful error.  Accepts an
+    /// optional `=` and surrounding spaces: `#mode CMPLX`, `#mode=CMPLX`.
+    fn try_mode_directive(&mut self) -> Result<Option<TokenKind>, CalcError> {
+        if !self.looking_at_ascii_ci("#mode") {
+            return Ok(None);
+        }
+        for _ in 0..5 {
+            self.advance();
+        }
+        while matches!(self.peek(), Some(' ') | Some('\t')) {
+            self.advance();
+        }
+        if self.peek() == Some('=') {
+            self.advance();
+            while matches!(self.peek(), Some(' ') | Some('\t')) {
+                self.advance();
+            }
+        }
+
+        let start = self.i;
+        while self
+            .peek()
+            .is_some_and(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+        {
+            self.advance();
+        }
+        let name: String = self.chars[start..self.i].iter().collect();
+        let Some(mode) = Mode::parse(&name) else {
+            return Err(CalcError::syntax(
+                format!("unknown mode `{name}`; expected COMP, CMPLX, BASE, SD or REG"),
+                self.byte,
+            ));
+        };
+        Ok(Some(TokenKind::ModeDirective(mode)))
+    }
+
+    /// Does the remaining input start with `s`, ignoring ASCII case?
+    fn looking_at_ascii_ci(&self, s: &str) -> bool {
+        s.chars().enumerate().all(|(k, c)| {
+            self.peek_at(k)
+                .is_some_and(|got| got.eq_ignore_ascii_case(&c))
+        })
     }
 
     /// Try to read a base-tagged integer literal such as `1Fh`, `1010b`,

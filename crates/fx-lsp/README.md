@@ -4,16 +4,16 @@ A stdio [Language Server Protocol](https://microsoft.github.io/language-server-p
 server for **CASIO fx-50FH II PRGM** source (`.fx`).
 
 It is a thin shell around the core interpreter crate: diagnostics come from
-`casio_fx50fh2::lexer::lex` and `casio_fx50fh2::parser::parse`, and all of the
-pure logic lives in [`src/logic.rs`](src/logic.rs) so it can be unit-tested
-without a client.
+`casio_fx50fh2::compile` (lex, parse and mode-check), and all of the pure
+logic lives in [`src/logic.rs`](src/logic.rs) so it can be unit-tested without
+a client.
 
 ## Capabilities
 
 | LSP method | Behaviour |
 | --- | --- |
-| `textDocument/publishDiagnostics` | Lex + parse on open/change. Each error is published as an ERROR diagnostic whose code is the calculator label (`Syntax ERROR`, `Math ERROR`, …) and whose range is the offending byte offset mapped to line + UTF-16 column. |
-| `textDocument/completion` | Context-free list of keywords (`If Then Else IfEnd For To Step Next While WhileEnd Break Goto Lbl ClrMemory ClrStat` …), functions (`sin( cos( tan( log( ln( √( ∛( Abs( Pol( Rec( Rnd(` …), variables (`A B C D X Y M Ans`), constants (`π e i`), operators and the ASCII aliases (`-> => disp <> <= >=`). |
+| `textDocument/publishDiagnostics` | Lex, parse and mode-check on open/change. Each error is published as an ERROR diagnostic whose code is the calculator label (`Syntax ERROR`, `Mode ERROR`, `Math ERROR`, …) and whose range is the offending byte offset mapped to line + UTF-16 column. A mode violation has no single offending byte, so it is reported at the start of the document (range 0..0). |
+| `textDocument/completion` | Context-free list of keywords (`If Then Else IfEnd For To Step Next While WhileEnd Break Goto Lbl ClrMemory ClrStat` …), the mode directives (`#mode`, `#mode COMP`, `#mode CMPLX`, `#mode BASE`, `#mode SD`, `#mode REG`), functions (`sin( cos( tan( log( ln( √( ∛( Abs( Pol( Rec( Rnd(` …), variables (`A B C D X Y M Ans`), constants (`π e i`), operators and the ASCII aliases (`-> => disp <> <= >=`). |
 | `textDocument/hover` | Markdown description of the token under the cursor. |
 | `textDocument/documentSymbol` | One `Lbl N` symbol per jump label, with the label's range. Works even if the rest of the document has a syntax error. |
 
@@ -22,9 +22,12 @@ sync; nothing else.
 
 ### Deliberately out of scope
 
-* **No semantic / runtime checking.** `Math ERROR`, `Go ERROR` (missing label)
-  and similar are runtime concerns; this server only reports lex and parse
-  errors.
+* **No runtime checking.** `Math ERROR`, `Go ERROR` (missing label) and
+  similar are runtime concerns; this server only reports lex, parse and
+  mode errors.  Mode checking *is* static: `#mode COMP|CMPLX|BASE|SD|REG`
+  selects the calculator mode (COMP is the default) and complex constructs
+  outside CMPLX, statistics outside SD/REG, or base-n outside BASE are
+  reported as `Mode ERROR`.
 * **No completion context filtering.** The keyboard vocabulary is small, so the
   whole list is always offered.
 * **No formatting, rename, definition, or code actions.**
@@ -41,8 +44,8 @@ CARGO_TARGET_DIR=/tmp/target-lsp cargo test  -p fx-lsp
 ```
 
 The unit tests cover the pure logic (offset ↔ position including UTF-16
-surrogates, diagnostics, completion, hover, symbols) and
-`tests/server.rs` boots the real binary, performs the `initialize` →
+surrogates, diagnostics including mode checking, completion, hover, symbols)
+and `tests/server.rs` boots the real binary, performs the `initialize` →
 `didOpen` → `shutdown` sequence and asserts the published `Syntax ERROR`.
 
 ## Editor setup

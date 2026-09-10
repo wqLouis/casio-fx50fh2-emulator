@@ -6,6 +6,7 @@
 
 use std::fmt;
 
+use crate::mode::Mode;
 use crate::stats::StatVar;
 use crate::value::ComplexFormat;
 
@@ -150,8 +151,11 @@ pub struct Token {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum TokenKind {
-    /// A numeric literal, raw as written (may contain an `E` exponent).
+    /// A numeric literal, raw as written (may contain an `E` exponent or a
+    /// base tag such as `1Fh`).
     Number(String),
+    /// The leading `#mode NAME` directive.
+    ModeDirective(Mode),
     Var(VarName),
     Const(ConstName),
     Func(FuncName),
@@ -223,6 +227,7 @@ impl TokenKind {
     pub fn describe(&self) -> &'static str {
         match self {
             TokenKind::Number(_) => "number",
+            TokenKind::ModeDirective(_) => "mode directive",
             TokenKind::Var(_) => "variable",
             TokenKind::Const(_) => "constant",
             TokenKind::Func(_) => "function",

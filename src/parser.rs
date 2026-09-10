@@ -16,6 +16,7 @@
 //! 11. `or`, `xor`, `xnor`
 
 use crate::ast::{Expr, MemOp, Setup, Stmt, UnaryOp};
+use crate::bases::Base;
 use crate::error::CalcError;
 use crate::token::{BinOp, FuncName, Token, TokenKind};
 use crate::value::ComplexFormat;
@@ -115,6 +116,15 @@ impl Parser {
             statements.push(self.statement()?);
             self.skip_colons();
         }
+        // The `#mode` directive configures the whole program, so it may only
+        // appear once and only at the head.
+        for (index, stmt) in statements.iter().enumerate() {
+            if matches!(stmt, Stmt::Mode(_)) && index != 0 {
+                return Err(CalcError::syntax_here(
+                    "`#mode` must be the first statement in the program",
+                ));
+            }
+        }
         Ok(statements)
     }
 
@@ -158,6 +168,12 @@ impl Parser {
     }
 
     fn simple_statement(&mut self) -> Result<Stmt, CalcError> {
+        // The mode directive is a statement so that the interpreter and the
+        // checker can see it in the flattened program.
+        if let TokenKind::ModeDirective(mode) = self.peek().kind {
+            self.advance();
+            return Ok(Stmt::Mode(mode));
+        }
         match self.peek().kind.clone() {
             TokenKind::ClrMemory => {
                 self.advance();
@@ -584,7 +600,12 @@ impl Parser {
                 let value = parse_number(&text).ok_or_else(|| {
                     CalcError::syntax(format!("invalid number `{text}`"), self.previous().pos)
                 })?;
-                Ok(Expr::Number(value))
+                // Remember a base tag (`1Fh`) so the mode checker can require
+                // BASE mode for it.
+                match Base::tag_of(&text) {
+                    Some(base) => Ok(Expr::BaseLiteral { value, base }),
+                    None => Ok(Expr::Number(value)),
+                }
             }
             TokenKind::Var(v) => {
                 self.advance();

@@ -73,7 +73,14 @@ fn read(file: &str) -> Result<String, String> {
 
 fn build(file: &str, ascii: bool) -> Result<(), String> {
     let source = read(file)?;
-    let prgm = transpile_with(&source, Options { ascii }).map_err(|e| e.to_string())?;
+    let prgm = transpile_with(
+        &source,
+        Options {
+            ascii,
+            ..Default::default()
+        },
+    )
+    .map_err(|e| e.to_string())?;
     print!("{prgm}");
     Ok(())
 }
@@ -81,7 +88,14 @@ fn build(file: &str, ascii: bool) -> Result<(), String> {
 #[cfg(feature = "execute")]
 fn run_file(file: &str, ascii: bool) -> Result<(), String> {
     let source = read(file)?;
-    let prgm = transpile_with(&source, Options { ascii }).map_err(|e| e.to_string())?;
+    let prgm = transpile_with(
+        &source,
+        Options {
+            ascii,
+            ..Default::default()
+        },
+    )
+    .map_err(|e| e.to_string())?;
     let program = casio_fx50fh2::compile(&prgm).map_err(|e| e.to_string())?;
     let mut interp = casio_fx50fh2::Interpreter::new(program, StdHost);
     interp.run().map_err(|e| e.to_string())

@@ -106,3 +106,60 @@ process would require wrapping stdin in a framing-aware `AsyncRead` that
 synthesises EOF, which risks introducing subtle bugs into the transport for a
 case real clients do not hit. The deviation is documented in
 `crates/fx-lsp/README.md`.
+
+## ADR 0008 — Operating modes are declared in the source with `#mode`
+
+**Context.** The fx-50FH II has five compute modes: COMP, CMPLX, BASE, SD and
+REG. The mode is not a runtime concept you can set from a program — you pick it
+with the MODE key before you start, and it decides which keys exist. In
+particular there is no `i` key in COMP mode, and `√(-4)` is a `Math ERROR`
+rather than `2i`.
+
+An interpreter that lets every feature be used everywhere is therefore *wrong*
+about the machine in an important way: it silently answers questions the
+calculator cannot be asked.
+
+**Decision.** A program declares its mode in a header directive, defaulting to
+COMP:
+
+```text
+#mode CMPLX
+(3+4i)×(1-2i)◢
+```
+
+The directive is lexed as its own token and parsed into `Stmt::Mode(Mode)`,
+which (a) keeps `parser::parse -> Vec<Stmt>` unchanged, (b) lets the interpreter
+apply the mode before anything runs, and (c) lets a static checker walk the
+flattened program. The checker lives in `src/check.rs` and reports violations
+as `CalcError::Mode`, labelled `Mode ERROR`. The mode can also be supplied from
+outside via `compile_with(source, Some(mode))`, which is what the CLI's
+`--mode/-m` flag uses.
+
+Modes are modelled as a small capability table rather than a list of allowed
+statements:
+
+| Predicate | True for |
+| --- | --- |
+| `allows_complex` | CMPLX |
+| `allows_stats` | SD, REG |
+| `allows_regression` | REG |
+| `allows_base` | BASE |
+| `allows_float_math` | everything except BASE |
+| `allows_setup` | everything except BASE |
+
+**Why a header rather than a runtime command?** Because the real mode is fixed
+for the life of a program. A mid-program `#mode` would model something the
+hardware cannot do, so the parser rejects a directive that is not first.
+
+**Why a new error label?** The hardware has no `Mode ERROR` screen; it prevents
+these situations by not offering the key. When reading source, though, the
+mistake is real and worth a precise message, so it gets its own label rather
+than being disguised as a `Syntax ERROR`. It is documented as a source-level
+diagnostic in `docs/LANGUAGE.md`.
+
+**Consequence for `.fxc`.** The transpiler accepts the same header and emits it
+into the generated PRGM, so the round trip preserves the mode. Because the
+C-like language is real-only, its checker mostly matters for BASE, where
+floating-point built-ins and `pi`/`e` are rejected. The transpiler keeps its own
+copy of the `Mode` enum so it still builds with `--no-default-features` (no core
+dependency).

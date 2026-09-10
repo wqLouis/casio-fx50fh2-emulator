@@ -49,6 +49,13 @@ impl Value {
         matches!(self, Value::Real(_))
     }
 
+    /// A value is complex when it carries an imaginary component.  A
+    /// `Complex` with a zero imaginary part still counts, because the machine
+    /// only ever creates one in CMPLX mode.
+    pub fn is_complex(&self) -> bool {
+        matches!(self, Value::Complex(_, _))
+    }
+
     pub fn is_zero(&self) -> bool {
         match self {
             Value::Real(x) => *x == 0.0,

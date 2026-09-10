@@ -12,6 +12,7 @@ use crate::ast::{Expr, MemOp, Setup, Stmt, UnaryOp};
 use crate::bases::Base;
 use crate::error::CalcError;
 use crate::format::format_number;
+use crate::mode::Mode;
 use crate::precision::normalize;
 use crate::stats::{StatVar, Stats};
 use crate::token::{BinOp, ConstName, FuncName, VarName};
@@ -47,6 +48,8 @@ pub struct Environment {
     pub base: Option<Base>,
     /// How complex results are rendered.
     pub complex_format: ComplexFormat,
+    /// The operating mode the program declared with `#mode` (default COMP).
+    pub mode: Mode,
 }
 
 impl Default for Environment {
@@ -59,6 +62,7 @@ impl Default for Environment {
             display: DisplayMode::Norm(1),
             base: None,
             complex_format: ComplexFormat::Cartesian,
+            mode: Mode::default(),
         }
     }
 }
@@ -206,6 +210,9 @@ pub struct Interpreter<H: Host> {
     if_stack: Vec<bool>,
     loop_stack: Vec<LoopFrame>,
     last_displayed: bool,
+    /// Whether any statement has produced a value yet.  A program that only
+    /// sets up state (for example a lone `#mode CMPLX`) has nothing to show.
+    produced_value: bool,
 }
 
 impl<H: Host> Interpreter<H> {
@@ -224,6 +231,7 @@ impl<H: Host> Interpreter<H> {
             if_stack: Vec::new(),
             loop_stack: Vec::new(),
             last_displayed: false,
+            produced_value: false,
         }
     }
 
@@ -336,13 +344,20 @@ impl<H: Host> Interpreter<H> {
 
         let mut pc = 0usize;
         self.last_displayed = false;
+        self.produced_value = false;
         while pc < self.program.len() {
             let stmt = self.program[pc].clone();
             let mut next = pc + 1;
             match stmt {
                 Stmt::Noop | Stmt::Then | Stmt::Label(_) => {}
+                Stmt::Mode(mode) => {
+                    // The parser guarantees this is the first statement; the
+                    // interpreter applies it before anything else runs.
+                    self.env.mode = mode;
+                }
                 Stmt::Expr { expr, display } => {
                     let value = self.eval(&expr)?;
+                    self.produced_value = true;
                     self.env.ans = value;
                     self.env.hidden = value;
                     if display {
@@ -357,6 +372,7 @@ impl<H: Host> Interpreter<H> {
                     display,
                 } => {
                     let v = self.eval(&value)?;
+                    self.produced_value = true;
                     self.env.set_value(target, v);
                     self.env.ans = v;
                     self.env.hidden = v;
@@ -368,6 +384,7 @@ impl<H: Host> Interpreter<H> {
                 }
                 Stmt::Memory { expr, op, display } => {
                     let v = self.eval(&expr)?;
+                    self.produced_value = true;
                     let m = self.env.get_value(VarName::M);
                     let updated = match op {
                         MemOp::Plus => m.add(v),
@@ -384,6 +401,7 @@ impl<H: Host> Interpreter<H> {
                 }
                 Stmt::DataEntry { x, y, freq } => {
                     let xv = require_real(self.eval(&x)?, "DT")?;
+                    self.produced_value = true;
                     let yv = match &y {
                         Some(e) => require_real(self.eval(e)?, "DT")?,
                         None => 0.0,
@@ -543,7 +561,7 @@ impl<H: Host> Interpreter<H> {
         }
         // The machine shows the last computed value when the program ends
         // without an explicit `◢`.
-        if !self.last_displayed && !self.program.is_empty() {
+        if self.produced_value && !self.last_displayed {
             let value = self.env.hidden;
             self.show_value(value);
         }
@@ -691,11 +709,15 @@ impl<H: Host> Interpreter<H> {
     pub fn eval(&mut self, expr: &Expr) -> Result<Value, CalcError> {
         let value = match expr {
             Expr::Number(v) => Value::Real(*v),
+            Expr::BaseLiteral { value, .. } => Value::Real(*value),
             Expr::Var(v) => self.env.get_value(*v),
             Expr::Const(c) => match c {
                 ConstName::Pi => Value::Real(std::f64::consts::PI),
                 ConstName::E => Value::Real(std::f64::consts::E),
-                ConstName::I => Value::Complex(0.0, 1.0),
+                ConstName::I => {
+                    self.require_complex_mode("the imaginary unit `i`")?;
+                    Value::Complex(0.0, 1.0)
+                }
             },
             Expr::Ran => Value::Real(self.next_rand()),
             Expr::StatVar(var) => self.stat_value(*var)?,
@@ -762,7 +784,25 @@ impl<H: Host> Interpreter<H> {
                 self.call(*func, &values)?
             }
         };
+        // Outside CMPLX mode the machine can never produce a complex value;
+        // `√(-4)` is a `Math ERROR` rather than `2i`.
+        if value.is_complex() {
+            self.require_complex_mode("a complex result")?;
+        }
         Ok(value)
+    }
+
+    /// Reject complex-valued constructs outside CMPLX mode.
+    fn require_complex_mode(&self, what: &str) -> Result<(), CalcError> {
+        if self.env.mode.allows_complex() {
+            Ok(())
+        } else {
+            Err(CalcError::mode(
+                self.env.mode,
+                format!("{what} needs CMPLX mode"),
+                None,
+            ))
+        }
     }
 
     /// Apply base-n word wrapping to a real result when a base is selected.
@@ -992,6 +1032,14 @@ impl<H: Host> Interpreter<H> {
     }
 
     fn stat_value(&self, var: StatVar) -> Result<Value, CalcError> {
+        // Statistical variables only exist in SD and REG mode.
+        if !self.env.mode.allows_stats() {
+            return Err(CalcError::mode(
+                self.env.mode,
+                "statistical variables need SD or REG mode",
+                None,
+            ));
+        }
         let n = self.stats.n();
         let needs_data = matches!(
             var,

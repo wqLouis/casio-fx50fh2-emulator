@@ -10,8 +10,8 @@
 #![allow(unreachable_patterns)]
 
 use casio_fx50fh2::CalcError;
+use casio_fx50fh2::compile;
 use casio_fx50fh2::lexer::lex;
-use casio_fx50fh2::parser::parse;
 use casio_fx50fh2::token::{BinOp, ConstName, FuncName, Postfix, Token, TokenKind, VarName};
 use tower_lsp::lsp_types::{
     CompletionItem, CompletionItemKind, Diagnostic, DiagnosticSeverity, DocumentSymbol,
@@ -111,19 +111,22 @@ pub fn token_range(source: &str, token: &Token) -> Range {
 
 /// The byte offset a [`CalcError`] points at, when it has one.
 ///
-/// The wildcard arm keeps this compiling if the core adds new error variants.
+/// Both `Syntax` and `Mode` errors carry a position; errors without one (for
+/// example a mode violation produced by the checker, which has no single
+/// offending byte) fall back to the start of the document.
 pub fn error_position(err: &CalcError) -> Option<usize> {
-    match err {
-        CalcError::Syntax { pos, .. } => *pos,
-        _ => None,
-    }
+    err.pos()
 }
 
 /// Build an LSP diagnostic from a core error.
 pub fn diagnostic(source: &str, err: &CalcError) -> Diagnostic {
-    let offset = error_position(err).unwrap_or(0);
+    let range = match error_position(err) {
+        Some(offset) => range_for_offset(source, offset),
+        // No position: point at the start of the document (0..0).
+        None => Range::new(Position::new(0, 0), Position::new(0, 0)),
+    };
     Diagnostic {
-        range: range_for_offset(source, offset),
+        range,
         severity: Some(DiagnosticSeverity::ERROR),
         code: Some(NumberOrString::String(err.label().to_string())),
         code_description: None,
@@ -135,18 +138,18 @@ pub fn diagnostic(source: &str, err: &CalcError) -> Diagnostic {
     }
 }
 
-/// Lex and parse `source`, returning any diagnostics.
+/// Lex, parse and mode-check `source`, returning any diagnostics.
 ///
-/// A lex error short-circuits parsing.  A successful parse yields no
-/// diagnostics; semantic errors (Math ERROR etc.) are runtime concerns and
-/// are not reported by the language server.
+/// This delegates to [`casio_fx50fh2::compile`], so a `#mode` header is
+/// honoured and using complex constructs outside CMPLX, statistics outside
+/// SD/REG, or base-n outside BASE is reported as a `Mode ERROR` alongside
+/// lexical and syntactic errors.  A lex error short-circuits before parsing
+/// (inside `compile`).  Purely runtime errors (Math ERROR etc.) are not
+/// reported by the language server.
 pub fn diagnostics(source: &str) -> Vec<Diagnostic> {
-    match lex(source) {
+    match compile(source) {
+        Ok(_) => Vec::new(),
         Err(err) => vec![diagnostic(source, &err)],
-        Ok(tokens) => match parse(tokens) {
-            Ok(_) => Vec::new(),
-            Err(err) => vec![diagnostic(source, &err)],
-        },
     }
 }
 
@@ -222,6 +225,33 @@ pub fn completion_items() -> Vec<CompletionItem> {
         push(
             &mut items,
             simple(label, CompletionItemKind::KEYWORD, detail),
+        );
+    }
+
+    // -- mode directives ----------------------------------------------------
+    // A bare `#mode` inserts the directive and a trailing space; the five
+    // concrete items complete it to a valid mode name.
+    push(
+        &mut items,
+        CompletionItem {
+            label: "#mode".to_string(),
+            kind: Some(CompletionItemKind::KEYWORD),
+            detail: Some("operating mode directive".to_string()),
+            documentation: Some(Documentation::String(
+                "Declare the calculator operating mode: COMP, CMPLX, BASE, SD or REG".to_string(),
+            )),
+            insert_text: Some("#mode ".to_string()),
+            ..Default::default()
+        },
+    );
+    for mode in ["COMP", "CMPLX", "BASE", "SD", "REG"] {
+        push(
+            &mut items,
+            simple(
+                &format!("#mode {mode}"),
+                CompletionItemKind::KEYWORD,
+                "operating mode",
+            ),
         );
     }
 
@@ -458,6 +488,17 @@ fn postfix_description(p: &Postfix) -> &'static str {
 fn describe_token(kind: &TokenKind) -> Option<String> {
     let text = match kind {
         TokenKind::Number(_) => "**Number**\n\nA numeric literal.".to_string(),
+        TokenKind::ModeDirective(mode) => format!(
+            "**`#mode`** — operating mode directive\n\n\
+             Declares the calculator mode for the program (current: `{mode}`).\n\n\
+             - `COMP` — general computation, real numbers only (the default)\n\
+             - `CMPLX` — complex numbers (`i`, `∠`, `arg`, `Conjg`)\n\
+             - `BASE` — base-n integers (`Dec`/`Hex`/`Bin`/`Oct`, bitwise operators)\n\
+             - `SD` — single-variable statistics\n\
+             - `REG` — paired-variable statistics and regression\n\n\
+             Complex constructs need `CMPLX`, statistics need `SD` or `REG`, and \
+             base-n needs `BASE`; a program with no directive runs in `COMP`."
+        ),
         TokenKind::Var(v) => {
             format!("**`{}`** — variable\n\n{}", v.name(), var_description(v))
         }
@@ -772,5 +813,68 @@ mod tests {
     #[test]
     fn document_symbols_empty_for_bad_source() {
         assert!(document_symbols("@@@").is_empty());
+    }
+
+    fn diagnostic_codes(source: &str) -> Vec<String> {
+        diagnostics(source)
+            .into_iter()
+            .map(|diag| match diag.code {
+                Some(NumberOrString::String(code)) => code,
+                other => panic!("unexpected diagnostic code: {other:?}"),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn complex_without_mode_header_is_mode_error() {
+        let diags = diagnostics("3+4i");
+        assert_eq!(diagnostic_codes("3+4i"), vec!["Mode ERROR".to_string()]);
+        // The checker's mode errors carry no byte offset, so the diagnostic
+        // falls back to the start of the document (0..0).
+        assert_eq!(diags[0].range.start, Position::new(0, 0));
+        assert_eq!(diags[0].range.end, Position::new(0, 0));
+    }
+
+    #[test]
+    fn complex_with_mode_header_is_accepted() {
+        assert!(diagnostics("#mode CMPLX\n3+4i").is_empty());
+    }
+
+    #[test]
+    fn base_literal_needs_base_mode() {
+        assert_eq!(diagnostic_codes("Hex: FFh"), vec!["Mode ERROR".to_string()]);
+        assert!(diagnostics("#mode BASE\nHex: FFh").is_empty());
+    }
+
+    #[test]
+    fn completion_contains_mode_directives() {
+        let labels = labels();
+        for expected in [
+            "#mode",
+            "#mode COMP",
+            "#mode CMPLX",
+            "#mode BASE",
+            "#mode SD",
+            "#mode REG",
+        ] {
+            assert!(labels.contains(&expected.to_string()), "missing {expected}");
+        }
+    }
+
+    #[test]
+    fn hover_on_mode_directive() {
+        let src = "#mode CMPLX\n3+4i";
+        let hover = hover(src, Position::new(0, 3)).expect("hover");
+        match hover.contents {
+            HoverContents::Markup(markup) => {
+                assert!(markup.value.contains("operating mode"), "{}", markup.value);
+                assert!(markup.value.contains("COMP"), "{}", markup.value);
+                assert!(markup.value.contains("CMPLX"), "{}", markup.value);
+                assert!(markup.value.contains("BASE"), "{}", markup.value);
+                assert!(markup.value.contains("SD"), "{}", markup.value);
+                assert!(markup.value.contains("REG"), "{}", markup.value);
+            }
+            other => panic!("unexpected hover contents: {other:?}"),
+        }
     }
 }

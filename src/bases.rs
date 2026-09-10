@@ -125,6 +125,22 @@ impl Base {
             }
         }
     }
+
+    /// Which base does a tagged literal select?
+    ///
+    /// Unlike [`Base::parse`] this does not validate the digits; the caller
+    /// should confirm the literal parses first.  Returns `None` for an
+    /// untagged decimal number, so `2B` (meaning `2 × B`) is not mistaken for
+    /// a binary literal.
+    pub fn tag_of(text: &str) -> Option<Base> {
+        match text.chars().last()? {
+            'd' | 'D' => Some(Base::Dec),
+            'h' | 'H' => Some(Base::Hex),
+            'b' => Some(Base::Bin),
+            'o' => Some(Base::Oct),
+            _ => None,
+        }
+    }
 }
 
 #[cfg(test)]

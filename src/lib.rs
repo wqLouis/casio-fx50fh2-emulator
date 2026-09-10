@@ -11,9 +11,11 @@
 
 pub mod ast;
 pub mod bases;
+pub mod check;
 pub mod error;
 pub mod format;
 pub mod lexer;
+pub mod mode;
 pub mod parser;
 pub mod precision;
 pub mod runtime;
@@ -22,14 +24,40 @@ pub mod token;
 pub mod value;
 
 pub use error::CalcError;
+pub use mode::Mode;
 pub use runtime::{AngleMode, DisplayMode, Environment, Host, Interpreter, MockHost};
 pub use stats::{RegType, StatVar, Stats};
 pub use value::{ComplexFormat, Value};
 
-/// Lex and parse a program into a flat list of statements.
+/// Lex, parse and mode-check a program into a flat list of statements.
+///
+/// A program may begin with a `#mode COMP|CMPLX|BASE|SD|REG` directive;
+/// without one it runs in COMP.  Any construct the declared mode does not
+/// offer is reported as [`CalcError::Mode`].
+///
+/// Use [`compile_with`] to supply the mode from outside instead of a header.
 pub fn compile(source: &str) -> Result<Vec<ast::Stmt>, CalcError> {
+    compile_with(source, None)
+}
+
+/// Like [`compile`], but an explicit `mode` overrides any `#mode` header.
+///
+/// This is what the CLI's `--mode` flag uses, and it is how a caller runs a
+/// single CMPLX expression that has no header at all.
+pub fn compile_with(source: &str, mode: Option<Mode>) -> Result<Vec<ast::Stmt>, CalcError> {
     let tokens = lexer::lex(source)?;
-    parser::parse(tokens)
+    let mut program = parser::parse(tokens)?;
+    if let Some(mode) = mode {
+        match program
+            .iter_mut()
+            .find(|stmt| matches!(stmt, ast::Stmt::Mode(_)))
+        {
+            Some(slot) => *slot = ast::Stmt::Mode(mode),
+            None => program.insert(0, ast::Stmt::Mode(mode)),
+        }
+    }
+    check::check(&program)?;
+    Ok(program)
 }
 
 /// Run a program with the given host and return the interpreter (so callers can

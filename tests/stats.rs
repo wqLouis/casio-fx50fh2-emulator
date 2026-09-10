@@ -2,11 +2,20 @@
 
 use casio_fx50fh2::{CalcError, Interpreter, MockHost, compile, evaluate};
 
-fn run(source: &str) -> Result<Interpreter<MockHost>, CalcError> {
-    let program = compile(source)?;
+/// Statistics require SD or REG mode.  Most tests here use REG, which is a
+/// superset of SD; the SD-specific behaviour is covered separately below.
+const REG: &str = "#mode REG\n";
+const SD: &str = "#mode SD\n";
+
+fn run_with(mode: &str, source: &str) -> Result<Interpreter<MockHost>, CalcError> {
+    let program = compile(&format!("{mode}{source}"))?;
     let mut interp = Interpreter::new(program, MockHost::default());
     interp.run()?;
     Ok(interp)
+}
+
+fn run(source: &str) -> Result<Interpreter<MockHost>, CalcError> {
+    run_with(REG, source)
 }
 
 fn output(source: &str) -> Vec<String> {
@@ -14,7 +23,7 @@ fn output(source: &str) -> Vec<String> {
 }
 
 fn value(source: &str) -> f64 {
-    evaluate(source).unwrap()
+    evaluate(&format!("{REG}{source}")).unwrap()
 }
 
 fn assert_close(actual: f64, expected: f64) {
@@ -74,8 +83,36 @@ fn clrstat_clears_data() {
 
 #[test]
 fn complex_data_is_rejected() {
+    // Complex values do not exist in a statistics mode, so this is caught
+    // statically as a mode violation.
     let err = run("1+i DT").unwrap_err();
-    assert!(matches!(err, CalcError::Math(_)), "{err:?}");
+    assert!(matches!(err, CalcError::Mode { .. }), "{err:?}");
+}
+
+#[test]
+fn sd_mode_allows_single_variable_stats() {
+    let interp = run_with(SD, "ClrStat: 1 DT: 2 DT: 3 DT").unwrap();
+    assert_eq!(interp.stats().n(), 3.0);
+    assert_eq!(
+        evaluate(&format!("{SD}ClrStat: 1 DT: 2 DT: 3 DT: sumx")).unwrap(),
+        6.0
+    );
+}
+
+#[test]
+fn sd_mode_rejects_regression_variables() {
+    let err = evaluate(&format!("{SD}1,2 DT: rega")).unwrap_err();
+    assert!(matches!(err, CalcError::Mode { .. }), "{err:?}");
+    // ...but the x-statistics are fine.
+    assert_eq!(evaluate(&format!("{SD}1 DT: 2 DT: meanx")).unwrap(), 1.5);
+}
+
+#[test]
+fn statistics_need_a_statistics_mode() {
+    let err = compile("1 DT").unwrap_err();
+    assert!(matches!(err, CalcError::Mode { .. }), "{err:?}");
+    let err = compile("ClrStat: 1 DT: n").unwrap_err();
+    assert!(matches!(err, CalcError::Mode { .. }), "{err:?}");
 }
 
 #[test]

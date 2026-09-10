@@ -125,3 +125,49 @@ print(log(2, 8));
 ";
     assert_eq!(run(source, &[100.0]), vec!["10", "90", "2", "3"]);
 }
+
+#[test]
+fn mode_header_runs_on_the_interpreter() {
+    // The `#mode` first line we emit is accepted by the interpreter's compiler,
+    // and ordinary real arithmetic still runs in the declared mode.
+    let source = "#mode CMPLX\nlet a = 2; let b = 3; print(a + b);\n";
+    assert_eq!(run(source, &[]), vec!["5"]);
+
+    let source = "#mode SD\nlet a = 7; print(a * 2);\n";
+    assert_eq!(run(source, &[]), vec!["14"]);
+}
+
+/// The transpiler's mode checker and the interpreter's must agree.
+///
+/// If the transpiler accepts a program, the PRGM it emits must compile and run
+/// for the *same* mode. A hardcoded subset once let `abs`/`cbrt` pass `build`
+/// in BASE and then fail `run`, which is exactly what this guards against.
+#[test]
+fn transpiler_mode_acceptance_implies_interpreter_acceptance() {
+    use fx_transpiler::builtins::BUILTINS;
+    use fx_transpiler::{Mode, Options, transpile_with};
+
+    let modes = [Mode::Comp, Mode::Cmplx, Mode::Base, Mode::Sd, Mode::Reg];
+
+    for mode in modes {
+        for builtin in BUILTINS {
+            let source = format!("print({}(a));\n", builtin.name);
+            let options = Options {
+                ascii: false,
+                mode: Some(mode),
+            };
+            // Only the accepted cases matter: a rejection in both places is
+            // also consistent, and is covered by the transpiler's own tests.
+            let Ok(prgm) = transpile_with(&source, options) else {
+                continue;
+            };
+            casio_fx50fh2::compile(&prgm).unwrap_or_else(|e| {
+                panic!(
+                    "transpiler accepted {}(...) in {mode} but the interpreter rejected the \
+                     emitted PRGM: {e}\n---\n{prgm}",
+                    builtin.name
+                )
+            });
+        }
+    }
+}

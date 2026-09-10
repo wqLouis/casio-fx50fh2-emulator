@@ -122,6 +122,11 @@ impl<'a> Parser<'a> {
     // -- program / statements ----------------------------------------------
 
     fn program(&mut self) -> Result<Program, TranspileError> {
+        // The `#mode` directive configures the whole program; the emitter
+        // reads it from the token stream, so the parser drops it here.
+        if matches!(self.peek(), Tok::Mode(_)) {
+            self.advance();
+        }
         let mut statements = Vec::new();
         while !self.at_eof() {
             statements.push(self.statement()?);

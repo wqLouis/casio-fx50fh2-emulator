@@ -140,6 +140,37 @@ The reference works used to reconstruct the language are listed in
 [`docs/LANGUAGE.md`](docs/LANGUAGE.md); design decisions in
 [`docs/DECISIONS.md`](docs/DECISIONS.md).
 
+## Operating modes
+
+The calculator forces a mode, and so does this interpreter. Complex numbers,
+statistics and base-n are only offered in their own mode, so a program can
+declare one in a header:
+
+```text
+#mode CMPLX
+(3+4i)×(1-2i)◢
+```
+
+```console
+$ fx50 eval --mode CMPLX "(3+4i)×(1-2i)"
+11-2𝑖
+```
+
+The five modes are `COMP` (the default), `CMPLX`, `BASE`, `SD` and `REG`.
+Using a construct outside its mode is a `Mode ERROR` rather than a wrong
+answer — `√(-4)` fails in COMP and gives `2𝑖` in CMPLX, exactly as the
+hardware behaves:
+
+```console
+$ fx50 eval "3+4i"
+error: Mode ERROR
+  = the imaginary unit `i` is only available in CMPLX mode; add `#mode CMPLX` at the head of the program
+```
+
+`--mode/-m` overrides the header. The `.fxc` front end takes the same
+`#mode` header. See [`docs/LANGUAGE.md`](docs/LANGUAGE.md) for the capability
+table.
+
 ## Supported today
 
 | Area | Status |
@@ -152,9 +183,10 @@ The reference works used to reconstruct the language are listed in
 | `?`, `→`, `:`, `◢` | ✅ |
 | `Goto`/`Lbl`, `⇒`, `If/Then/Else/IfEnd`, `For/To/Step/Next`, `While/WhileEnd`, `Break` | ✅ |
 | `Deg`/`Rad`/`Gra`, `Fix`/`Sci`/`Norm` | ✅ |
-| Complex numbers (`i`, `∠`, `a+b𝒾`, `arg`, `Conjg`, `▶a+b𝒾`/`▶r∠θ`) | ✅ |
-| Statistics (`DT`, `Σx`, `x̄`, `σx`, `regA`…, `ClrStat`, `FreqOn`) | ✅ |
-| Base-n (`Dec`/`Hex`/`Bin`/`Oct`, `1Fh`, bitwise ops) | ✅ |
+| Complex numbers (`i`, `∠`, `a+b𝒾`, `arg`, `Conjg`, `▶a+b𝒾`/`▶r∠θ`) | ✅ (CMPLX mode) |
+| Statistics (`DT`, `Σx`, `x̄`, `σx`, `regA`…, `ClrStat`, `FreqOn`) | ✅ (SD/REG mode) |
+| Base-n (`Dec`/`Hex`/`Bin`/`Oct`, `FFh`, bitwise ops) | ✅ (BASE mode) |
+| Forced modes with a `#mode` header, CLI `--mode` and static checks | ✅ |
 | 15-digit rounding + autocorrection | ✅ (f64-based — see note) |
 | C-like front end (`fx50 run x.fxc`) | ✅ |
 | Language server (`fx50 lsp`) | ✅ |

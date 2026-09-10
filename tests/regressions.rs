@@ -41,12 +41,14 @@ fn euler_power() {
 }
 
 /// Hex literals may start with a letter (`FFh`), not just a digit.
+///
+/// Tagged literals are a BASE-mode feature, so these declare it.
 #[test]
 fn hex_literal_may_start_with_a_letter() {
-    assert_eq!(run("Hex: FFh").environment().ans(), 255.0);
-    assert_eq!(run("Hex: 1Fh").environment().ans(), 31.0);
+    assert_eq!(run("#mode BASE: Hex: FFh").environment().ans(), 255.0);
+    assert_eq!(run("#mode BASE: Hex: 1Fh").environment().ans(), 31.0);
     // Results are shown in the selected base.
-    assert_eq!(display("Hex: FFh◢"), vec!["FFh"]);
+    assert_eq!(display("#mode BASE: Hex: FFh◢"), vec!["FFh"]);
 }
 
 /// Adding base-literal lexing must not swallow keywords or variables that also
@@ -78,7 +80,7 @@ fn disp_alias_matches_display_glyph() {
     // A number immediately before `disp` must not lex as a decimal literal
     // (`4d`), which used to break ASCII-mode `print(4)` output.
     assert_eq!(display("4disp"), vec!["4"]);
-    // ...while genuine decimal-tagged literals still work.
-    assert_eq!(run("42d").environment().ans(), 42.0);
-    assert_eq!(run("1Fh+1").environment().ans(), 32.0);
+    // ...while genuine decimal-tagged literals still work (in BASE mode).
+    assert_eq!(run("#mode BASE: 42d").environment().ans(), 42.0);
+    assert_eq!(run("#mode BASE: 1Fh+1").environment().ans(), 32.0);
 }

@@ -3,8 +3,12 @@
 use casio_fx50fh2::value::ComplexFormat;
 use casio_fx50fh2::{CalcError, Interpreter, MockHost, Value, compile, evaluate_value};
 
+/// Complex numbers only exist in CMPLX mode, so every test declares it, just
+/// as the hardware makes you select CMPLX before the `i` key appears.
+const MODE: &str = "#mode CMPLX\n";
+
 fn run(source: &str) -> Result<Interpreter<MockHost>, CalcError> {
-    let program = compile(source)?;
+    let program = compile(&format!("{MODE}{source}"))?;
     let mut interp = Interpreter::new(program, MockHost::default());
     interp.run()?;
     Ok(interp)
@@ -15,7 +19,12 @@ fn output(source: &str) -> Vec<String> {
 }
 
 fn value(source: &str) -> Value {
-    evaluate_value(source).unwrap()
+    evaluate_value(&format!("{MODE}{source}")).unwrap()
+}
+
+/// The error from an expression that is expected to fail.
+fn value_err(source: &str) -> CalcError {
+    evaluate_value(&format!("{MODE}{source}")).unwrap_err()
 }
 
 #[test]
@@ -62,15 +71,15 @@ fn polar_literal_follows_angle_mode() {
 fn comparisons_equality_only() {
     assert_eq!(value("(1+i)=(1+i)"), Value::Real(1.0));
     assert_eq!(value("(1+i)≠(1+2i)"), Value::Real(1.0));
-    let err = evaluate_value("(1+i)<(2+2i)").unwrap_err();
+    let err = value_err("(1+i)<(2+2i)");
     assert!(matches!(err, CalcError::Math(_)), "{err:?}");
 }
 
 #[test]
 fn real_only_functions_reject_complex() {
-    let err = evaluate_value("sin(i)").unwrap_err();
+    let err = value_err("sin(i)");
     assert!(matches!(err, CalcError::Math(_)), "{err:?}");
-    let err = evaluate_value("(3+4i)!").unwrap_err();
+    let err = value_err("(3+4i)!");
     assert!(matches!(err, CalcError::Math(_)), "{err:?}");
 }
 

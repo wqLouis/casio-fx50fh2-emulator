@@ -75,6 +75,35 @@ Expressions support `+ - * /`, `^` / `**` (power), unary `-`, comparisons
 `sqrt cbrt abs sin cos tan asin acos atan sinh cosh tanh asinh acosh atanh
 log ln rnd` (`log` accepts one or two arguments). Values are real numbers.
 
+## Modes
+
+The calculator forces an operating mode before it will compute. A program may
+declare its mode with a leading `#mode` directive, which must be the first
+non-comment, non-blank line:
+
+```c
+#mode CMPLX
+let a = input();
+print(a + 1);
+```
+
+The valid names are `COMP`, `CMPLX`, `BASE`, `SD` and `REG` (case-insensitive;
+`STAT` is an alias for `SD`). `COMP` is the default, so a program without a
+directive emits no header. When a header is present it is re-emitted as the
+first line of the PRGM, and the program is checked against the mode's
+capabilities. `.fxc` is real-number-only, so the only restriction is `BASE`,
+which rejects the floating-point built-ins `sqrt sin cos tan asin acos atan log
+ln rnd` and the constants `pi`/`e` (`/` maps to `÷`, which is fine):
+
+```c
+#mode BASE
+print(a / b);   // ok
+print(sqrt(a)); // error: `sqrt` is not available in BASE mode
+```
+
+The mode can also be forced from Rust with [`Options::mode`](#library), which
+takes precedence over any header in the source.
+
 ### Variable allocation
 
 PRGM has exactly seven memories — `A B C D X Y M`. Every distinct `.fxc` name is
@@ -119,16 +148,20 @@ WhileEnd
 ## Library
 
 ```rust
-use fx_transpiler::{transpile, transpile_with, Options};
+use fx_transpiler::{transpile, transpile_with, Mode, Options};
 
 // Calculator glyphs (default).
 let prgm = transpile("let a = input(); print(a * 2);")?;
 assert_eq!(prgm, "?→A\nA×2◢\n");
 
 // ASCII aliases.
-let prgm = transpile_with("print(a <= b);", Options { ascii: true })?;
+let prgm = transpile_with("print(a <= b);", Options { ascii: true, ..Default::default() })?;
 assert_eq!(prgm, "A<=Bdisp\n");
-# Ok::<(), fx_transpiler::TranspileError>(())
+
+// Force BASE mode (overrides any `#mode` header).
+let prgm = transpile_with("print(a / b);", Options { mode: Some(Mode::Base), ..Default::default() })?;
+assert_eq!(prgm, "#mode BASE\nA÷B◢\n");
+# Ok::<(), fx_transpiler::error::TranspileError>(())
 ```
 
 `TranspileError` carries a message plus the byte offset, 1-based line and

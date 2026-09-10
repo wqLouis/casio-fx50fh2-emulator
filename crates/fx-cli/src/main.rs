@@ -25,7 +25,8 @@ use std::process::ExitCode;
 use clap::{CommandFactory, Parser, Subcommand};
 use clap_complete::Shell;
 
-use casio_fx50fh2::{CalcError, Environment, Host, Interpreter, MockHost, compile};
+use casio_fx50fh2::token::TokenKind;
+use casio_fx50fh2::{CalcError, Environment, Host, Interpreter, MockHost, Mode, compile_with};
 
 // ---------------------------------------------------------------------------
 // Command-line surface
@@ -39,6 +40,7 @@ use casio_fx50fh2::{CalcError, Environment, Host, Interpreter, MockHost, compile
                   interactive REPL when stdin is a terminal, or runs whatever is piped in.",
     after_help = "EXAMPLES:\n  \
                   fx50 eval \"2+3×4\"\n  \
+                  fx50 eval --mode CMPLX \"(3+4i)×(1-2i)\"\n  \
                   fx50 run examples/factorial.fx\n  \
                   fx50 build program.fxc > program.fx\n  \
                   printf '3+4' | fx50"
@@ -51,6 +53,13 @@ struct Cli {
     /// Evaluate an expression (flag form of `eval`)
     #[arg(short = 'e', long = "eval", value_name = "EXPR")]
     eval: Option<String>,
+
+    /// Operating mode: COMP, CMPLX, BASE, SD or REG.
+    ///
+    /// Overrides any `#mode` header in the program.  Without either, programs
+    /// run in COMP, which has no complex numbers, statistics or base-n.
+    #[arg(short = 'm', long = "mode", value_name = "MODE", global = true)]
+    mode: Option<String>,
 
     /// Transpile C-like source to PRGM (flag form of `build`)
     #[arg(short = 'b', long = "build", value_name = "FILE")]
@@ -145,30 +154,39 @@ fn main() -> ExitCode {
 }
 
 fn dispatch(cli: Cli) -> Result<(), Fail> {
+    let mode = match &cli.mode {
+        Some(name) => Some(Mode::parse(name).ok_or_else(|| {
+            Fail::Message(format!(
+                "unknown mode `{name}`; expected COMP, CMPLX, BASE, SD or REG"
+            ))
+        })?),
+        None => None,
+    };
+
     // Flag forms take priority over subcommands so both spellings work.
     if cli.lsp {
         return start_lsp();
     }
     if let Some(expr) = cli.eval {
-        return eval(&expr);
+        return eval(&expr, mode);
     }
     if let Some(file) = cli.build {
-        return build(&file, cli.ascii);
+        return build(&file, cli.ascii, mode);
     }
 
     match cli.command {
         Some(Command::Lsp) => start_lsp(),
-        Some(Command::Eval { expression }) => eval(&expression.join(" ")),
-        Some(Command::Build { file }) => build(&file, cli.ascii),
-        Some(Command::Run { file }) => run_file(&file, cli.ascii),
+        Some(Command::Eval { expression }) => eval(&expression.join(" "), mode),
+        Some(Command::Build { file }) => build(&file, cli.ascii, mode),
+        Some(Command::Run { file }) => run_file(&file, cli.ascii, mode),
         Some(Command::Completions { shell }) => {
             write_completions(shell);
             Ok(())
         }
         None => match cli.file {
-            Some(file) => run_file(&file, cli.ascii),
+            Some(file) => run_file(&file, cli.ascii, mode),
             None if io::stdin().is_terminal() => repl(),
-            None => run_stdin(),
+            None => run_stdin(mode),
         },
     }
 }
@@ -178,8 +196,8 @@ fn dispatch(cli: Cli) -> Result<(), Fail> {
 
 /// Evaluate one expression through the interpreter's own display path, so
 /// complex values, base-n output and `Fix`/`Sci`/`Norm` settings are honoured.
-fn eval(source: &str) -> Result<(), Fail> {
-    let program = compile(source).map_err(|e| calc_fail(source, "<eval>", e))?;
+fn eval(source: &str, mode: Option<Mode>) -> Result<(), Fail> {
+    let program = compile_with(source, mode).map_err(|e| calc_fail(source, "<eval>", e))?;
     let mut interp = Interpreter::new(program, MockHost::default());
     interp.run().map_err(|e| calc_fail(source, "<eval>", e))?;
     for line in &interp.host().output {
@@ -188,38 +206,38 @@ fn eval(source: &str) -> Result<(), Fail> {
     Ok(())
 }
 
-fn build(file: &Path, ascii: bool) -> Result<(), Fail> {
+fn build(file: &Path, ascii: bool, mode: Option<Mode>) -> Result<(), Fail> {
     let source = read_source(file)?;
-    let prgm = transpile_source(&source, ascii)?;
+    let prgm = transpile_source(&source, ascii, mode)?;
     print!("{prgm}");
     Ok(())
 }
 
-fn run_file(file: &Path, ascii: bool) -> Result<(), Fail> {
+fn run_file(file: &Path, ascii: bool, mode: Option<Mode>) -> Result<(), Fail> {
     let source = read_source(file)?;
     let name = file.display().to_string();
     let is_c_like = file
         .extension()
         .is_some_and(|ext| ext.eq_ignore_ascii_case("fxc"));
     let prgm = if is_c_like {
-        transpile_source(&source, ascii)?
+        transpile_source(&source, ascii, mode)?
     } else {
         source
     };
-    execute(&prgm, &name)
+    execute(&prgm, &name, mode)
 }
 
-fn run_stdin() -> Result<(), Fail> {
+fn run_stdin(mode: Option<Mode>) -> Result<(), Fail> {
     let mut source = String::new();
     io::stdin()
         .read_to_string(&mut source)
         .map_err(|e| Fail::Message(e.to_string()))?;
-    execute(&source, "<stdin>")
+    execute(&source, "<stdin>", mode)
 }
 
 /// Compile and run PRGM source, showing a caret diagnostic on failure.
-fn execute(source: &str, name: &str) -> Result<(), Fail> {
-    let program = compile(source).map_err(|e| calc_fail(source, name, e))?;
+fn execute(source: &str, name: &str, mode: Option<Mode>) -> Result<(), Fail> {
+    let program = compile_with(source, mode).map_err(|e| calc_fail(source, name, e))?;
     let mut interp = Interpreter::new(program, StdHost { prompt: true });
     interp.run().map_err(|e| calc_fail(source, name, e))
 }
@@ -272,7 +290,14 @@ fn repl() -> Result<(), Fail> {
 
 /// Run one REPL line, persisting memory between lines.
 fn run_repl_line(line: &str, env: &mut Environment) {
-    match compile(line) {
+    // A line without its own `#mode` header inherits the mode established by
+    // an earlier line, so `#mode CMPLX` followed by `3+4i` works interactively.
+    let inherited = if declares_mode(line) {
+        None
+    } else {
+        Some(env.mode)
+    };
+    match compile_with(line, inherited) {
         Ok(program) => {
             let mut interp = Interpreter::new(program, StdHost { prompt: true });
             *interp.environment_mut() = env.clone();
@@ -283,6 +308,17 @@ fn run_repl_line(line: &str, env: &mut Environment) {
         }
         Err(e) => render_calc_error(line, "<repl>", &e),
     }
+}
+
+/// Does the line carry its own `#mode` directive?
+fn declares_mode(line: &str) -> bool {
+    casio_fx50fh2::lexer::lex(line)
+        .map(|tokens| {
+            tokens
+                .iter()
+                .any(|token| matches!(token.kind, TokenKind::ModeDirective(_)))
+        })
+        .unwrap_or(false)
 }
 
 fn history_path() -> Option<PathBuf> {
@@ -303,19 +339,34 @@ fn write_completions(shell: Shell) {
 // ---------------------------------------------------------------------------
 // Optional integrations (compiled in with the `transpiler` / `lsp` features)
 
-fn transpile_source(source: &str, ascii: bool) -> Result<String, Fail> {
+fn transpile_source(source: &str, ascii: bool, mode: Option<Mode>) -> Result<String, Fail> {
     #[cfg(feature = "transpiler")]
     {
-        fx_transpiler::transpile_with(source, fx_transpiler::Options { ascii })
-            .map_err(|e| Fail::Message(e.to_string()))
+        let options = fx_transpiler::Options {
+            ascii,
+            mode: mode.map(to_transpiler_mode),
+        };
+        fx_transpiler::transpile_with(source, options).map_err(|e| Fail::Message(e.to_string()))
     }
     #[cfg(not(feature = "transpiler"))]
     {
-        let _ = (source, ascii);
+        let _ = (source, ascii, mode);
         Err(Fail::Message(
             "transpiler support is not compiled in (rebuild with `--features transpiler`)"
                 .to_string(),
         ))
+    }
+}
+
+/// The transpiler keeps its own `Mode` so it can build without the core crate.
+#[cfg(feature = "transpiler")]
+fn to_transpiler_mode(mode: Mode) -> fx_transpiler::Mode {
+    match mode {
+        Mode::Comp => fx_transpiler::Mode::Comp,
+        Mode::Cmplx => fx_transpiler::Mode::Cmplx,
+        Mode::Base => fx_transpiler::Mode::Base,
+        Mode::Sd => fx_transpiler::Mode::Sd,
+        Mode::Reg => fx_transpiler::Mode::Reg,
     }
 }
 
@@ -378,11 +429,11 @@ fn render_calc_error(source: &str, name: &str, error: &CalcError) {
             let start = offset.min(len - 1);
             let end = (start + 1).min(len);
             diagnostic = diagnostic.with_labels(vec![
-                Label::primary((), start..end).with_message(error.to_string()),
+                Label::primary((), start..end).with_message(error.detail()),
             ]);
         }
         None => {
-            diagnostic = diagnostic.with_notes(vec![error.to_string()]);
+            diagnostic = diagnostic.with_notes(vec![error.detail()]);
         }
     }
 
@@ -392,8 +443,5 @@ fn render_calc_error(source: &str, name: &str, error: &CalcError) {
 
 /// The byte offset a `CalcError` points at, if it carries one.
 fn error_offset(error: &CalcError) -> Option<usize> {
-    match error {
-        CalcError::Syntax { pos, .. } => *pos,
-        _ => None,
-    }
+    error.pos()
 }
