@@ -16,4 +16,8 @@ path = "src/lib.rs"
 
 [workspace]
 members = ["crates/fx-transpiler", "crates/fx-lsp", "crates/fx-cli"]
+# `cargo build`, `cargo run` and `cargo test` at the root act on the whole
+# workspace. Without this, bare `cargo build` would only build the root library
+# and never produce the `fx50` binary.
+default-members = [".", "crates/fx-transpiler", "crates/fx-lsp", "crates/fx-cli"]
 resolver = "3"

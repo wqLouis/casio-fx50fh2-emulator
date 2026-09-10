@@ -11,8 +11,8 @@ live in libraries.
 
 **Decision.** The user-facing binary is `crates/fx-cli`, published as the
 single command `fx50`. The core interpreter is the library `casio-fx50fh2`;
-the transpiler and LSP are also libraries (`fx_transpiler`, `fx_lsp`) with
-optional thin binaries.
+the transpiler and LSP are also libraries (`fx_transpiler`, `fx_lsp`) driven
+by `fx50 build`/`run` and `fx50 lsp`.
 
 **Why not put `fx50` in the core crate?** `fx-transpiler` and `fx-lsp` both
 depend on the core library. If the binary lived in the core package it would
@@ -22,6 +22,19 @@ the cycle cleanly. The core package therefore sets `autobins = false`.
 
 **Consequences.** `fx50` is a thin dispatcher; every capability is a library
 call. The transpiler and LSP can each still be built and tested on their own.
+
+**One binary, and `default-members` so `cargo build` finds it.** The
+transpiler and LSP first carried thin `fxc`/`fx-lsp` shim binaries for their
+own testing. Those were removed: the project ships exactly one binary, so
+`cargo build` produces `fx50` and nothing else, and `cargo run` is
+unambiguous. Their end-to-end tests moved to where they can exercise the real
+tool: the LSP stdio test now lives in `crates/fx-cli/tests/lsp_server.rs` and
+launches `fx50 lsp`.
+
+Because the workspace root is a package, a bare `cargo build` would otherwise
+select only the root library and never produce the binary; `[workspace]
+default-members` lists every package so that `cargo build`, `cargo run` and
+`cargo test` act on the whole workspace.
 
 ## ADR 0002 — Adopt `clap` instead of a hand-rolled argument parser
 

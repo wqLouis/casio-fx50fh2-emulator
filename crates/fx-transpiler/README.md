@@ -1,8 +1,14 @@
 # fx-transpiler
 
 `fx-transpiler` translates a small C-like language (`.fxc`) into CASIO
-fx-50FH II **PRGM** source. It ships as a library (`fx_transpiler`) and a thin
-command-line tool (`fxc`).
+fx-50FH II **PRGM** source. It is a library (`fx_transpiler`); the user-facing
+commands are subcommands of the unified `fx50` binary:
+
+```bash
+fx50 build program.fxc          # print PRGM (calculator glyphs) to stdout
+fx50 build --ascii program.fxc  # print ASCII aliases instead
+fx50 run   program.fxc          # transpile, then execute (? reads from stdin)
+```
 
 The crate is independent of the interpreter: with
 
@@ -10,15 +16,16 @@ The crate is independent of the interpreter: with
 cargo build -p fx-transpiler --no-default-features
 ```
 
-it has **no** dependency on `casio-fx50fh2`. The default `execute` feature adds
-`fxc run`, which pipes the generated PRGM through the interpreter.
+it has **no** dependency on `casio-fx50fh2`. The `execute` feature (on by
+default) is what lets the interpreter-backed tests in `tests/execute.rs`
+compile and run; it is also what the `fx50` binary uses for `fx50 run`.
 
 ## CLI
 
 ```bash
-fxc build program.fxc          # print PRGM (calculator glyphs) to stdout
-fxc build --ascii program.fxc  # print ASCII aliases instead
-fxc run   program.fxc          # transpile, then execute (? reads from stdin)
+fx50 build program.fxc          # print PRGM (calculator glyphs) to stdout
+fx50 build --ascii program.fxc  # print ASCII aliases instead
+fx50 run   program.fxc          # transpile, then execute (? reads from stdin)
 ```
 
 Example:
@@ -30,7 +37,7 @@ let result = 1;
 for (let i = 1; i <= n; i = i + 1) { result = result * i; }
 print(result);
 
-$ fxc build factorial.fxc
+$ fx50 build factorial.fxc
 ?→A
 1→B
 For 1→C To A Step 1
@@ -38,7 +45,7 @@ B×C→B
 Next
 B◢
 
-$ echo 5 | fxc run factorial.fxc
+$ echo 5 | fx50 run factorial.fxc
 ? 120
 ```
 

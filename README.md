@@ -25,7 +25,11 @@ The whole toolkit is one binary, `fx50`. With no arguments it behaves like
 piped in" otherwise.
 
 ```bash
+# Builds the `fx50` binary (the workspace's only binary) in one step.
 cargo build --release
+
+# ...or during development, which also builds and runs it directly:
+cargo run -- eval "2+3×4"
 
 # interactive REPL (state persists between lines, with history)
 ./target/release/fx50
@@ -108,7 +112,13 @@ examples/  docs/  tests/
 
 The binary lives in its own crate because both `fx-transpiler` and `fx-lsp`
 depend on the core library; putting `fx50` in the core crate would create a
-dependency cycle.
+dependency cycle. It is the **only** binary the workspace produces — the
+transpiler and language server are libraries that `fx50` drives through its
+`build`/`run` and `lsp` subcommands.
+
+`Cargo.toml` lists every package in `default-members`, so a bare `cargo build`
+at the root builds the whole workspace (and therefore `fx50`), `cargo run`
+runs it, and `cargo test` runs every crate's tests.
 
 ```text
 source ──► lexer ──► parser ──► flat Vec<Stmt> ──► tree-walking interpreter

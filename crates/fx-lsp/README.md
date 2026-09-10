@@ -37,16 +37,16 @@ sync; nothing else.
 ## Building and testing
 
 ```bash
-# From the repository root. Use a private target dir to avoid clashing with
-# the other workstreams.
-CARGO_TARGET_DIR=/tmp/target-lsp cargo build -p fx-lsp
-CARGO_TARGET_DIR=/tmp/target-lsp cargo test  -p fx-lsp
+# From the repository root. `cargo build` produces the unified `fx50` binary.
+cargo build
+cargo test -p fx-lsp        # the crate's own unit tests
 ```
 
 The unit tests cover the pure logic (offset ↔ position including UTF-16
-surrogates, diagnostics including mode checking, completion, hover, symbols)
-and `tests/server.rs` boots the real binary, performs the `initialize` →
-`didOpen` → `shutdown` sequence and asserts the published `Syntax ERROR`.
+surrogates, diagnostics including mode checking, completion, hover, symbols).
+The end-to-end stdio test lives with the binary in
+`crates/fx-cli/tests/lsp_server.rs`, because it drives the real `fx50 lsp`
+process rather than an internal entry point.
 
 ## Editor setup
 
@@ -63,7 +63,8 @@ vim.filetype.add({ extension = { fx = "fx" } })
 -- ~/.config/nvim/after/ftplugin/fx.lua
 vim.lsp.start({
   name = "fx-lsp",
-  cmd = { "/absolute/path/to/fx-lsp" }, -- or "fx-lsp" if it is on $PATH
+  -- `fx50` is the single binary; `lsp` selects language-server mode.
+  cmd = { "/absolute/path/to/fx50", "lsp" }, -- or "fx50" if it is on $PATH
   root_dir = vim.fn.getcwd(),
 })
 ```
@@ -76,7 +77,7 @@ local configs = require("lspconfig.configs")
 if not configs.fx_lsp then
   configs.fx_lsp = {
     default_config = {
-      cmd = { "/absolute/path/to/fx-lsp" },
+      cmd = { "/absolute/path/to/fx50", "lsp" },
       filetypes = { "fx" },
       root_dir = lspconfig.util.root_pattern(".git"),
     },
@@ -114,7 +115,7 @@ function activate() {
   client = new LanguageClient(
     "fx-lsp",
     "fx-50FH II",
-    { command: "/absolute/path/to/fx-lsp" },
+    { command: "/absolute/path/to/fx50", args: ["lsp"] },
     { documentSelector: [{ scheme: "file", language: "fx" }] }
   );
   client.start();
@@ -133,8 +134,8 @@ complete conversation (`initialize` → `didOpen` with the invalid program
 
 ```bash
 cd /path/to/casio-fx50fh2-emulator
-CARGO_TARGET_DIR=/tmp/target-lsp cargo build -p fx-lsp
-python3 crates/fx-lsp/scripts/smoke.py /tmp/target-lsp/debug/fx-lsp
+cargo build
+python3 crates/fx-lsp/scripts/smoke.py target/debug/fx50
 ```
 
 Expected output:
@@ -145,8 +146,8 @@ diagnostic: Syntax ERROR {'end': {'character': 2, 'line': 0}, 'start': {'charact
 server exited with 0
 ```
 
-> The same conversation is asserted by `tests/server.rs`, so `cargo test -p
-> fx-lsp` covers it without needing Python.
+> The same conversation is asserted by `crates/fx-cli/tests/lsp_server.rs`, so
+> `cargo test` covers it without needing Python.
 
 ## Layout
 
@@ -155,22 +156,20 @@ crates/fx-lsp/
 ├── src/lib.rs        crate root; re-exports `run_server`
 ├── src/logic.rs      all pure logic + unit tests
 ├── src/server.rs     tower-lsp stdio server (`run_server`)
-├── src/main.rs        thin `fx-lsp` binary shim
-├── tests/server.rs   end-to-end stdio smoke test
 ├── scripts/smoke.py  manual stdio check (standard library only)
 └── README.md
 ```
 
+This crate has no binary of its own: it is a library, and the `fx50` binary
+calls `fx_lsp::run_server()` for its `lsp` subcommand.
+
 ## Launching
 
-The server is normally started through the unified CLI:
+The server is started through the unified CLI:
 
 ```bash
 fx50 lsp          # or: fx50 --lsp
 ```
-
-The standalone `fx-lsp` binary remains available and simply calls
-`fx_lsp::run_server()`; both use the same code path.
 
 ## Known deviation: shutdown relies on the client closing stdin
 

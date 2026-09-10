@@ -9,10 +9,6 @@ description = "Transpile a small C-like language into CASIO fx-50FH II PRGM sour
 name = "fx_transpiler"
 path = "src/lib.rs"
 
-[[bin]]
-name = "fxc"
-path = "src/main.rs"
-
 [features]
 default = ["execute"]
 # `fxc run` executes the transpiled program, which needs the interpreter.

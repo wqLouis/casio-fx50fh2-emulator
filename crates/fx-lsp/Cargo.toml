@@ -9,10 +9,6 @@ description = "Language server for CASIO fx-50FH II PRGM source"
 name = "fx_lsp"
 path = "src/lib.rs"
 
-[[bin]]
-name = "fx-lsp"
-path = "src/main.rs"
-
 [dependencies]
 casio-fx50fh2 = { path = "../.." }
 tower-lsp = "0.20"

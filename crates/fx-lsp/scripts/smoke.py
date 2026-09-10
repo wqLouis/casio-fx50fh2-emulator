@@ -7,7 +7,7 @@ shuts the server down.  Standard library only.
 
 Usage::
 
-    python3 scripts/smoke.py [path/to/fx-lsp]
+    python3 scripts/smoke.py [path/to/fx50]
 """
 
 import json
@@ -47,9 +47,10 @@ def read_until(stream, method):
 
 
 def main():
-    binary = sys.argv[1] if len(sys.argv) > 1 else "target/debug/fx-lsp"
+    # The language server is a mode of the unified binary: `fx50 lsp`.
+    binary = sys.argv[1] if len(sys.argv) > 1 else "target/debug/fx50"
     proc = subprocess.Popen(
-        [binary], stdin=subprocess.PIPE, stdout=subprocess.PIPE
+        [binary, "lsp"], stdin=subprocess.PIPE, stdout=subprocess.PIPE
     )
 
     def send(message):

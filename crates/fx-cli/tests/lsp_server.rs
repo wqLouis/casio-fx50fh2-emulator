@@ -1,6 +1,10 @@
-//! End-to-end smoke test: boot the real `fx-lsp` binary and speak a little
-//! JSON-RPC over its stdio pipes.  The framing helpers are deliberately
-//! minimal (no serde) so the test only depends on the standard library.
+//! End-to-end test for `fx50 lsp`: boot the real unified binary in language
+//! server mode and speak a little JSON-RPC over its stdio pipes.
+//!
+//! This lives in the CLI crate because `fx50` is the only binary the project
+//! ships; the framing helpers are deliberately minimal (no serde) so the test
+//! depends on the standard library only.
+#![cfg(feature = "lsp")]
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
@@ -48,12 +52,13 @@ fn recv_until(stdout: &mut BufReader<ChildStdout>, needle: &str, limit: usize) -
 }
 
 fn spawn() -> (Child, ChildStdin, BufReader<ChildStdout>) {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_fx-lsp"))
+    let mut child = Command::new(env!("CARGO_BIN_EXE_fx50"))
+        .arg("lsp")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
-        .expect("spawn fx-lsp");
+        .expect("spawn `fx50 lsp`");
     let stdin = child.stdin.take().unwrap();
     let stdout = BufReader::new(child.stdout.take().unwrap());
     (child, stdin, stdout)
@@ -68,18 +73,16 @@ fn server_initializes_reports_diagnostics_and_shuts_down() {
         r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":null,"capabilities":{}}}"#,
     );
     let init = recv_until(&mut stdout, "\"id\":1", 5);
-    assert!(
-        init.contains("documentSymbolProvider"),
-        "initialize response missing documentSymbolProvider: {init}"
-    );
-    assert!(
-        init.contains("completionProvider"),
-        "initialize response missing completionProvider: {init}"
-    );
-    assert!(
-        init.contains("hoverProvider"),
-        "initialize response missing hoverProvider: {init}"
-    );
+    for capability in [
+        "documentSymbolProvider",
+        "completionProvider",
+        "hoverProvider",
+    ] {
+        assert!(
+            init.contains(capability),
+            "initialize response missing {capability}: {init}"
+        );
+    }
 
     send(
         &mut stdin,
@@ -106,6 +109,45 @@ fn server_initializes_reports_diagnostics_and_shuts_down() {
         r#"{"jsonrpc":"2.0","method":"exit","params":null}"#,
     );
     drop(stdin);
-    let status = child.wait().expect("wait for fx-lsp");
+    let status = child.wait().expect("wait for fx50 lsp");
     assert!(status.success(), "server exited with {status}");
+}
+
+/// A mode violation must surface over the wire as a `Mode ERROR` diagnostic.
+#[test]
+fn mode_errors_are_published() {
+    let (mut child, mut stdin, mut stdout) = spawn();
+
+    send(
+        &mut stdin,
+        r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":null,"capabilities":{}}}"#,
+    );
+    let _ = recv_until(&mut stdout, "\"id\":1", 5);
+    send(
+        &mut stdin,
+        r#"{"jsonrpc":"2.0","method":"initialized","params":{}}"#,
+    );
+
+    // `3+4i` needs CMPLX; without a header this is a mode error.
+    send(
+        &mut stdin,
+        r#"{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"file:///cmplx.fx","languageId":"fx","version":1,"text":"3+4i"}}}"#,
+    );
+    let published = recv_until(&mut stdout, "publishDiagnostics", 5);
+    assert!(
+        published.contains("Mode ERROR"),
+        "diagnostic missing Mode ERROR: {published}"
+    );
+
+    send(
+        &mut stdin,
+        r#"{"jsonrpc":"2.0","id":2,"method":"shutdown","params":null}"#,
+    );
+    let _ = recv_until(&mut stdout, "\"id\":2", 5);
+    send(
+        &mut stdin,
+        r#"{"jsonrpc":"2.0","method":"exit","params":null}"#,
+    );
+    drop(stdin);
+    let _ = child.wait();
 }
