@@ -30,6 +30,8 @@ pub enum Expr {
     Name(String, usize),
     Pi(usize),
     E(usize),
+    /// A `phys.NAME` scientific constant, resolved at parse time.
+    Constant(&'static crate::constants::Constant, usize),
     /// `input()`
     Input(usize),
     Unary(UnOp, Box<Expr>),

@@ -176,3 +176,49 @@ C-like language is real-only, its checker mostly matters for BASE, where
 floating-point built-ins and `pi`/`e` are rejected. The transpiler keeps its own
 copy of the `Mode` enum so it still builds with `--no-default-features` (no core
 dependency).
+
+## ADR 0009 — The 40 scientific constants live in one table
+
+The calculator has 40 built-in scientific constants, reached on the real unit
+with `CONST` and a two-digit number. They are modelled as a single table:
+
+```rust
+pub struct PhysicalConstant {
+    pub code: u8,               // menu number, 1..=40
+    pub name: &'static str,     // ASCII spelling in source, e.g. "hbar"
+    pub symbol: &'static str,   // what the display shows, e.g. "ħ"
+    pub value: f64,
+    pub unit: &'static str,
+    pub description: &'static str,
+}
+pub const CONSTANTS: [PhysicalConstant; 40] = [ /* … */ ];
+```
+
+`ConstName` grows exactly one variant, `Physical(u8)`, holding the menu number;
+the value is resolved through `constants::by_code`. **Why a table rather than
+forty variants?** Forty variants (or forty `pub const`s) would spread the data
+across the token namespace and make a value correction a fifty-line diff. The
+menu number is also the most faithful key: it is what the user's guide prints
+next to each constant.
+
+**Spellings.** A constant is written with its ASCII `name` or its display
+`symbol`, matched by `constants::lookup`. The elementary charge is the one
+exception: the calculator shows it as `e`, but source text already uses `e` for
+Euler's number, so it is only reachable as `eq`. The symbol is still reported
+for display purposes.
+
+**Values** are the 2010 CODATA revision, the one this calculator shipped with.
+Two of them differ from an older manual revision still found in the wild — the
+proton gyromagnetic ratio is `2.675222005×10⁸` (not `10⁻⁸`) and the muon
+magnetic moment is `−4.49044807×10⁻²⁶` (not the neutron's value). Because they
+are real numbers they are available in COMP, CMPLX, SD and REG, and rejected in
+BASE by the same `allows_float_math` predicate that covers `π` and `e`.
+
+**Consequence for `.fxc`.** The transpiler cannot read the core table (it must
+build with `--no-default-features`), so it keeps its own copy of the forty
+names and symbols. Drift is prevented by a test that compares the two tables
+entry by entry and, for every constant, transpiles `phys.<name>` and checks the
+result against the interpreter. In `.fxc` the constants are reached through a
+`phys.` namespace — `phys.h`, `phys.C0` — so that forty global names do not
+collide with the user's variables; `phys` is a reserved word. Bare names are
+deliberately *not* recognised.

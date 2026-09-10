@@ -13,6 +13,7 @@ use crate::Options;
 use crate::alloc::Allocator;
 use crate::ast::{BinOp, Expr, ForStmt, Program, Stmt, UnOp};
 use crate::builtins;
+use crate::constants::Constant;
 use crate::error::TranspileError;
 
 /// Operator precedence levels for the `.fxc` grammar, mirroring
@@ -260,6 +261,10 @@ impl Emitter<'_> {
                 prec::ATOM,
             )),
             Expr::E(_) => Ok(("e".to_string(), prec::ATOM)),
+            Expr::Constant(constant, _) => Ok((
+                constant_spelling(constant, self.opts.ascii).to_string(),
+                prec::ATOM,
+            )),
             Expr::Input(pos) => Err(TranspileError::at(
                 self.source,
                 "`input()` can only be used directly as the right-hand side of an assignment",
@@ -381,6 +386,20 @@ fn format_number(value: f64) -> String {
         return "0".to_string();
     }
     format!("{value}")
+}
+
+/// The PRGM spelling of a scientific constant.
+///
+/// ASCII mode uses the ASCII `name`. Glyph mode uses the display `symbol`,
+/// *except* for the elementary charge: its symbol is `e`, which the emitted
+/// PRGM would re-lex as Euler's number, so it is written as its ASCII name
+/// `eq` in both modes.
+fn constant_spelling(constant: &Constant, ascii: bool) -> &'static str {
+    if ascii || constant.symbol == "e" {
+        constant.name
+    } else {
+        constant.symbol
+    }
 }
 
 #[cfg(test)]

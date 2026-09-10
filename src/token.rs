@@ -60,12 +60,29 @@ impl fmt::Display for VarName {
     }
 }
 
-/// Built-in mathematical constants.
+/// Built-in mathematical constants, plus the calculator's 40 scientific
+/// constants.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ConstName {
     Pi,
     E,
     I,
+    /// A scientific constant, identified by its menu number `1..=40`.
+    ///
+    /// The values live in [`crate::constants::CONSTANTS`] rather than in one
+    /// enum variant per constant, so that adding or correcting a constant
+    /// touches a single table.
+    Physical(u8),
+}
+
+impl ConstName {
+    /// The table entry behind a [`ConstName::Physical`], if there is one.
+    pub fn physical(&self) -> Option<&'static crate::constants::PhysicalConstant> {
+        match self {
+            ConstName::Physical(code) => crate::constants::by_code(*code),
+            _ => None,
+        }
+    }
 }
 
 /// Parenthetical functions (`sin(`, `log(`, …).

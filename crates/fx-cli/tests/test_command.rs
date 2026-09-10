@@ -152,7 +152,7 @@ fn filter_selects_a_subset_of_cases() {
 #[test]
 fn the_shipped_examples_pass_through_the_cli() {
     let examples = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples");
-    for name in ["factorial", "quadratic", "include"] {
+    for name in ["factorial", "quadratic", "include", "constants"] {
         let out = fx50()
             .arg("test")
             .arg(examples.join(format!("{name}.fxc")))
@@ -226,4 +226,18 @@ fn a_missing_include_is_reported_with_its_location() {
     assert!(stderr.contains("cannot include"), "{stderr}");
     assert!(stderr.contains("nope.fxc"), "{stderr}");
     assert!(stderr.contains(":2:1"), "{stderr}");
+}
+
+/// `fx50 constants` lists every entry, formatted like the calculator's display.
+#[test]
+fn constants_lists_all_forty() {
+    let out = fx50().arg("constants").output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(out.status.success(), "{stdout}");
+    assert_eq!(stdout.lines().count(), 40, "{stdout}");
+    assert!(stdout.contains("Planck constant"), "{stdout}");
+    assert!(stdout.contains("6.62606957e-34"), "{stdout}");
+    // The elementary charge is shown under its own ASCII name.
+    assert!(stdout.contains("eq"), "{stdout}");
+    assert!(stdout.contains("elementary charge"), "{stdout}");
 }

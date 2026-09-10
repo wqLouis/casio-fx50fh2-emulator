@@ -24,7 +24,7 @@
 //! unary     := '-' unary | power
 //! power     := primary (('^' | '**') unary)?
 //! primary   := NUMBER | NAME | NAME '(' args ')' | 'pi' | 'e' | 'input()'
-//!            | '(' expr ')'
+//!            | 'phys' '.' NAME | '(' expr ')'
 //! ```
 
 use crate::ast::{BinOp, Expr, ForStmt, Program, Stmt, UnOp};
@@ -408,11 +408,31 @@ impl<'a> Parser<'a> {
                     }
                 }
             }
+            Tok::Phys => self.constant(pos),
             other => Err(self.error_at(
                 format!("expected an expression, found {}", other.describe()),
                 pos,
             )),
         }
+    }
+
+    /// Resolve `phys.NAME` to a scientific constant.
+    ///
+    /// The `phys` token has not been consumed yet. `NAME` may be the constant's
+    /// ASCII name (`h`, `hbar`, `C0`) or its display symbol (`ħ`, `R∞`).
+    fn constant(&mut self, pos: usize) -> Result<Expr, TranspileError> {
+        self.expect(&Tok::Phys, "`phys`")?;
+        if !self.matches(&Tok::Dot) {
+            return Err(self.error_at(
+                "`phys` must be followed by `.` and a constant name, as in `phys.h`",
+                pos,
+            ));
+        }
+        let (name, name_pos) = self.expect_ident("a constant name after `phys.`")?;
+        let Some(constant) = crate::constants::lookup(&name) else {
+            return Err(self.error_at(format!("unknown scientific constant `{name}`"), name_pos));
+        };
+        Ok(Expr::Constant(constant, pos))
     }
 
     fn call(&mut self, name: String, pos: usize) -> Result<Expr, TranspileError> {

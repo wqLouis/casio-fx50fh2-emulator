@@ -718,6 +718,9 @@ impl<H: Host> Interpreter<H> {
                     self.require_complex_mode("the imaginary unit `i`")?;
                     Value::Complex(0.0, 1.0)
                 }
+                ConstName::Physical(code) => {
+                    Value::Real(crate::constants::by_code(*code).map_or(f64::NAN, |c| c.value))
+                }
             },
             Expr::Ran => Value::Real(self.next_rand()),
             Expr::StatVar(var) => self.stat_value(*var)?,

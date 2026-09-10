@@ -207,7 +207,7 @@ table.
 | `#include` for sharing fragments (transpile-time, C-style) | ✅ |
 | JSON test suites (`fx50 test x.fxc`) | ✅ |
 | Language server (`fx50 lsp`) | ✅ |
-| 40 physical constants | ⛔ not yet |
+| 40 scientific constants (2010 CODATA) | ✅ |
 | Exact decimal-arithmetic chains from the reference notes | ⚠️ approximate |
 
 ## Tests
@@ -216,9 +216,10 @@ table.
 cargo test --workspace
 ```
 
-138 tests: interpreter end-to-end tests, plus per-feature suites for complex
-numbers, statistics, base-n and numeric precision, 36 golden transpiler tests
-with execution tests, and LSP logic + server tests.
+301 tests: interpreter end-to-end tests, plus per-feature suites for complex
+numbers, statistics, base-n, scientific constants and numeric precision, 36
+golden transpiler tests with execution tests, JSON test-suite tests, and LSP
+logic + server tests.
 
 ## Examples
 

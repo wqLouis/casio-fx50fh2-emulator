@@ -1,0 +1,12 @@
+// The calculator's 40 scientific constants are reached through `phys.`.
+//
+// This computes the energy of a single photon from its wavelength:
+//
+//     E = h c / λ
+//
+// `phys.h` is the Planck constant and `phys.C0` the speed of light. The `phys.`
+// namespace keeps the constant names from colliding with program variables —
+// see `fx50 test examples/constants.fxc`.
+
+let wavelength = input();
+print(phys.h * phys.C0 / wavelength);

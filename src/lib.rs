@@ -12,6 +12,7 @@
 pub mod ast;
 pub mod bases;
 pub mod check;
+pub mod constants;
 pub mod error;
 pub mod format;
 pub mod lexer;
@@ -23,6 +24,7 @@ pub mod stats;
 pub mod token;
 pub mod value;
 
+pub use constants::{CONSTANTS, PhysicalConstant};
 pub use error::CalcError;
 pub use mode::Mode;
 pub use runtime::{AngleMode, DisplayMode, Environment, Host, Interpreter, MockHost};

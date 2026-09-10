@@ -317,6 +317,21 @@ pub fn completion_items() -> Vec<CompletionItem> {
             simple(label, CompletionItemKind::CONSTANT, detail),
         );
     }
+    // The 40 scientific constants, offered under the ASCII name so that what
+    // is inserted is always typeable.
+    for c in &casio_fx50fh2::CONSTANTS {
+        push(
+            &mut items,
+            simple(
+                c.name,
+                CompletionItemKind::CONSTANT,
+                &format!(
+                    "{} (CONST {:02}, displays as `{}`)",
+                    c.description, c.code, c.symbol
+                ),
+            ),
+        );
+    }
 
     // -- operators ----------------------------------------------------------
     let operators = [
@@ -413,7 +428,8 @@ fn const_description(c: &ConstName) -> &'static str {
         ConstName::Pi => "The constant pi (3.14159…)",
         ConstName::E => "Euler's number (2.71828…)",
         ConstName::I => "The imaginary unit i",
-        _ => "Mathematical constant",
+        ConstName::Physical(code) => casio_fx50fh2::constants::by_code(*code)
+            .map_or("Scientific constant", |p| p.description),
     }
 }
 
@@ -502,15 +518,25 @@ fn describe_token(kind: &TokenKind) -> Option<String> {
         TokenKind::Var(v) => {
             format!("**`{}`** — variable\n\n{}", v.name(), var_description(v))
         }
-        TokenKind::Const(c) => {
-            let name = match c {
-                ConstName::Pi => "π".to_string(),
-                ConstName::E => "e".to_string(),
-                ConstName::I => "i".to_string(),
-                _ => "?".to_string(),
-            };
-            format!("**`{name}`** — constant\n\n{}", const_description(c))
-        }
+        TokenKind::Const(c) => match c {
+            ConstName::Physical(code) => match casio_fx50fh2::constants::by_code(*code) {
+                Some(p) => format!(
+                    "**`{}`** — scientific constant\n\n{} (`{}`, CONST {:02})\n\n\
+                     Value: {:e} {}",
+                    p.symbol, p.description, p.name, p.code, p.value, p.unit
+                ),
+                None => "**?** — scientific constant".to_string(),
+            },
+            _ => {
+                let name = match c {
+                    ConstName::Pi => "π",
+                    ConstName::E => "e",
+                    ConstName::I => "i",
+                    ConstName::Physical(_) => unreachable!(),
+                };
+                format!("**`{name}`** — constant\n\n{}", const_description(c))
+            }
+        },
         TokenKind::Func(f) => format!("**Function**\n\n{}", func_description(f)),
         TokenKind::Postfix(p) => {
             format!("**Postfix operator**\n\n{}", postfix_description(p))
@@ -762,6 +788,52 @@ mod tests {
         sorted.sort();
         sorted.dedup();
         assert_eq!(sorted.len(), labels.len(), "duplicate completion labels");
+    }
+
+    #[test]
+    fn completion_offers_the_scientific_constants() {
+        let labels = labels();
+        for expected in ["h", "hbar", "mp", "Rinf", "eq", "atm", "C0"] {
+            assert!(
+                labels.iter().any(|l| l == expected),
+                "`{expected}` missing from completions"
+            );
+        }
+        // All 40 are offered, and `h` is the Planck constant's own entry
+        // rather than a variable.
+        let constant = completion_items()
+            .into_iter()
+            .find(|item| item.label == "h")
+            .expect("h");
+        assert_eq!(constant.kind, Some(CompletionItemKind::CONSTANT));
+        assert!(
+            constant.detail.unwrap_or_default().contains("Planck"),
+            "detail should name the constant"
+        );
+    }
+
+    #[test]
+    fn hover_on_a_scientific_constant() {
+        // `h` is at byte 0, `hbar` at byte 4.
+        let src = "h+hbar";
+        match hover(src, Position::new(0, 0)).expect("hover").contents {
+            HoverContents::Markup(markup) => {
+                assert!(markup.value.contains("Planck constant"), "{}", markup.value);
+                assert!(markup.value.contains("CONST 06"), "{}", markup.value);
+            }
+            other => panic!("unexpected hover contents: {other:?}"),
+        }
+        match hover(src, Position::new(0, 4)).expect("hover").contents {
+            HoverContents::Markup(markup) => {
+                assert!(
+                    markup.value.contains("reduced Planck constant"),
+                    "{}",
+                    markup.value
+                );
+                assert!(markup.value.contains("CONST 09"), "{}", markup.value);
+            }
+            other => panic!("unexpected hover contents: {other:?}"),
+        }
     }
 
     #[test]

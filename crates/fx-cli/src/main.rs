@@ -10,6 +10,8 @@
 //! fx50 run program.fxc       transpile C-like source, then run it
 //! fx50 eval "2+3×4"          evaluate one expression
 //! fx50 build program.fxc     transpile to PRGM on stdout
+//! fx50 test program.fxc      run its JSON test suite
+//! fx50 constants             list the 40 scientific constants
 //! fx50 lsp                   language server over stdio
 //! fx50 completions bash      emit a shell completion script
 //! ```
@@ -26,7 +28,10 @@ use clap::{CommandFactory, Parser, Subcommand};
 use clap_complete::Shell;
 
 use casio_fx50fh2::token::TokenKind;
-use casio_fx50fh2::{CalcError, Environment, Host, Interpreter, MockHost, Mode, compile_with};
+use casio_fx50fh2::{
+    CalcError, DisplayMode, Environment, Host, Interpreter, MockHost, Mode, compile_with,
+    format::format_number,
+};
 
 // ---------------------------------------------------------------------------
 // Command-line surface
@@ -115,6 +120,8 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// List the calculator's 40 built-in scientific constants
+    Constants,
 }
 
 // ---------------------------------------------------------------------------
@@ -198,6 +205,7 @@ fn dispatch(cli: Cli) -> Result<(), Fail> {
         Some(Command::Build { file }) => build(&file, cli.ascii, mode),
         Some(Command::Test { file, filter, json }) => test_command(&file, filter.as_deref(), json),
         Some(Command::Run { file }) => run_file(&file, cli.ascii, mode),
+        Some(Command::Constants) => list_constants(),
         Some(Command::Completions { shell }) => {
             write_completions(shell);
             Ok(())
@@ -212,6 +220,25 @@ fn dispatch(cli: Cli) -> Result<(), Fail> {
 
 // ---------------------------------------------------------------------------
 // Subcommand implementations
+
+/// Print the 40 built-in scientific constants as an aligned table.
+///
+/// Values are rendered with the interpreter's own display formatter, so what is
+/// printed matches what the calculator would show.
+fn list_constants() -> Result<(), Fail> {
+    for c in &casio_fx50fh2::CONSTANTS {
+        println!(
+            "{:02}  {:<6} {:<4} {:>16}  {:<14} {}",
+            c.code,
+            c.name,
+            c.symbol,
+            format_number(c.value, DisplayMode::Norm(1)),
+            c.unit,
+            c.description,
+        );
+    }
+    Ok(())
+}
 
 /// Evaluate one expression through the interpreter's own display path, so
 /// complex values, base-n output and `Fix`/`Sci`/`Norm` settings are honoured.

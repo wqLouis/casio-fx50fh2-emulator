@@ -22,6 +22,7 @@
 
 pub mod ast;
 pub mod builtins;
+pub mod constants;
 pub mod error;
 pub mod include;
 pub mod lexer;

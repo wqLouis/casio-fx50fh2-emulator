@@ -133,7 +133,7 @@ impl Allocator {
                     self.scan_expr(arg, source)?;
                 }
             }
-            Expr::Number(_) | Expr::Pi(_) | Expr::E(_) | Expr::Input(_) => {}
+            Expr::Number(_) | Expr::Pi(_) | Expr::E(_) | Expr::Constant(..) | Expr::Input(_) => {}
         }
         Ok(())
     }

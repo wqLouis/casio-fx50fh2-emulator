@@ -532,6 +532,9 @@ fn word_kind(word: &str) -> Option<TokenKind> {
         "Norm" => Norm,
         "DT" => DT,
         "Ran" => Ran,
-        _ => return None,
+        // Anything else that is not a keyword may be one of the calculator's
+        // scientific constants, which are matched by ASCII name or by the
+        // symbol on the display.
+        _ => Const(ConstName::Physical(crate::constants::lookup(word)?.code)),
     })
 }

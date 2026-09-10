@@ -195,11 +195,49 @@ PRGM.
 | `ln(x)` | `ln(x)` | natural log |
 | `rnd(x)` | `Rnd(x)` | round to 10 significant digits |
 
-Constants: `pi` → `π` (or `pi` with `--ascii`), `e` → `e`.
+Constants: `pi` → `π` (or `pi` with `--ascii`), `e` → `e`, and the 40
+scientific constants under the `phys.` namespace (below).
 
 The only exponentiation operators are `^` and its alias `**`. There is no
 `min`/`max`, and no integer division or modulo. Unknown function names are a
 parse error, so do not invent built-ins.
+
+### Scientific constants
+
+The calculator has 40 built-in scientific constants. They are reached through
+a `phys.` namespace, which keeps their names from colliding with your
+variables:
+
+```c
+// Planck's relation: E = h f, with the constant as `phys.h`.
+let f = input();
+let energy = phys.h * f;
+print(energy);
+```
+
+```text
+?→A
+h×A→B
+B◢
+```
+
+Use the ASCII name after the dot — `phys.h`, `phys.hbar`, `phys.mp`,
+`phys.C0`, `phys.atm`, `phys.NA`. The display symbol also works when you can
+type it (`phys.ħ`, `phys.μμ`, `phys.R∞`). `phys` alone is a reserved word and
+is never a variable.
+
+Two spellings are easy to get wrong:
+
+* The elementary charge is `phys.eq`, **not** `phys.e` — bare `e` is Euler's
+  number. (`phys.e` does work, but spell it `phys.eq` to keep the intent
+  obvious.)
+* `phys.h` is the Planck constant and `phys.hbar` the reduced one; `phys.g` is
+  the standard acceleration of gravity and `phys.G` the gravitational
+  constant.
+
+Do not use a bare constant name (`h`, `mp`) — those are ordinary variable
+names in `.fxc` and would be allocated to one of the seven memories. The
+constants are real numbers, so BASE mode rejects them.
 
 ### Worked example: factorial
 
@@ -485,7 +523,9 @@ Use `fx50 test prog.fxc --json` for a machine-readable report, and
       optional for a single statement and it is easy to lose the rest.
 - [ ] Every `goto` has a matching `label`, and `break` only appears inside a
       loop.
-- [ ] In `#mode BASE`, no built-ins, no `pi`, no `e`.
+- [ ] In `#mode BASE`, no built-ins, no `pi`, no `e`, no `phys.` constant.
+- [ ] Scientific constants are written `phys.<name>` with the namespace — never
+      as a bare name, which would become a variable.
 - [ ] `#include` paths exist, start the line, and contain no `#mode`; the
       seven-memory budget is respected *after* expansion.
 - [ ] If you can run commands, a `.tests.json` suite covers the happy path

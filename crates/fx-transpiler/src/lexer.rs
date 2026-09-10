@@ -22,6 +22,8 @@ pub enum Tok {
     Goto,
     Label,
     Print,
+    /// The `phys` namespace keyword (scientific constants).
+    Phys,
     Plus,
     Minus,
     Star,
@@ -45,6 +47,8 @@ pub enum Tok {
     RBrace,
     Semi,
     Comma,
+    /// A standalone `.`, as in `phys.h`.
+    Dot,
     Eof,
 }
 
@@ -64,6 +68,7 @@ impl Tok {
             Tok::Goto => "`goto`".into(),
             Tok::Label => "`label`".into(),
             Tok::Print => "`print`".into(),
+            Tok::Phys => "`phys`".into(),
             Tok::Plus => "`+`".into(),
             Tok::Minus => "`-`".into(),
             Tok::Star => "`*`".into(),
@@ -83,6 +88,7 @@ impl Tok {
             Tok::RBrace => "`}`".into(),
             Tok::Semi => "`;`".into(),
             Tok::Comma => "`,`".into(),
+            Tok::Dot => "`.`".into(),
             Tok::Eof => "end of input".into(),
         }
     }
@@ -180,7 +186,13 @@ impl<'a> Lexer<'a> {
                 });
                 continue;
             }
-            if ch.is_ascii_alphabetic() || ch == '_' {
+            // An identifier is ASCII, except for a constant's display symbol
+            // (`ħ`, `μμ`, `R∞`) directly after the `phys.` namespace. Allowing
+            // Unicode everywhere would silently turn a misplaced glyph into a
+            // variable: `π` alone would allocate a memory instead of being
+            // rejected.
+            let after_phys_dot = matches!(tokens.last().map(|t| &t.tok), Some(Tok::Dot));
+            if ch.is_ascii_alphabetic() || ch == '_' || (after_phys_dot && ch.is_alphabetic()) {
                 let name = self.word();
                 tokens.push(Token {
                     tok: keyword(&name).unwrap_or(Tok::Ident(name)),
@@ -267,9 +279,12 @@ impl<'a> Lexer<'a> {
 
     fn word(&mut self) -> String {
         let start = self.i;
+        // Unicode letters are identifiers so that a constant's display symbol
+        // (`ħ`, `μμ`, `R∞`, …) can follow `phys.`. `∞` is the one symbol
+        // character that is not itself a letter.
         while self
             .peek()
-            .is_some_and(|c| c.is_ascii_alphanumeric() || c == '_')
+            .is_some_and(|c| c.is_alphanumeric() || c == '_' || c == '∞')
         {
             self.advance();
         }
@@ -377,6 +392,7 @@ impl<'a> Lexer<'a> {
             '}' => Tok::RBrace,
             ';' => Tok::Semi,
             ',' => Tok::Comma,
+            '.' => Tok::Dot,
             _ => return Err(self.error(format!("unexpected character `{ch}`"), pos)),
         };
         self.advance();
@@ -395,6 +411,7 @@ fn keyword(word: &str) -> Option<Tok> {
         "goto" => Tok::Goto,
         "label" => Tok::Label,
         "print" => Tok::Print,
+        "phys" => Tok::Phys,
         _ => return None,
     })
 }

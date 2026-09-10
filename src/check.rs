@@ -166,6 +166,13 @@ impl Checker {
             }
             Expr::Const(ConstName::I) => self.complex("the imaginary unit `i`"),
             Expr::Const(ConstName::Pi | ConstName::E) => self.float_math("`π`/`e`"),
+            Expr::Const(ConstName::Physical(code)) => {
+                // Scientific constants are real numbers, so BASE mode has no
+                // way to enter them.
+                let what = crate::constants::by_code(*code)
+                    .map_or("a scientific constant", |c| c.description);
+                self.float_math(what)
+            }
             Expr::StatVar(var) => self.check_stat_var(*var),
 
             Expr::Unary { op, expr } => {

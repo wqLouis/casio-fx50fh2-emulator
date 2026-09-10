@@ -1,0 +1,9 @@
+{
+  "name": "constants",
+  "program": "constants.fxc",
+  "cases": [
+    { "name": "500 nm photon", "input": [500e-9], "output": ["3.972891367e-19"] },
+    { "name": "1000 nm photon", "input": [1000e-9], "output": ["1.986445683e-19"] },
+    { "name": "1 m radio wave", "input": [1], "output": ["1.986445683e-25"] }
+  ]
+}

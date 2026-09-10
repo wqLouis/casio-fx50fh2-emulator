@@ -67,7 +67,7 @@ header. In the CLI that is `fx50 --mode CMPLX '...'`; the library entry point is
 | Group | Tokens |
 | --- | --- |
 | Memories | `A B C D X Y M Ans` |
-| Constants | `π` (`pi`), `e`, `i` |
+| Constants | `π` (`pi`), `e`, `i`, plus the 40 scientific constants below |
 | Prefix functions | `sin cos tan sin⁻¹ cos⁻¹ tan⁻¹ sinh cosh tanh sinh⁻¹ cosh⁻¹ tanh⁻¹ log ln √ ∛ 10^ e^ Abs Pol Rec Rnd arg Conjg Not Neg` |
 | Postfix | `x² x³ x⁻¹ ! %` |
 | Infix | `+ - × ÷ ┘ ∠ nPr nCr = ≠ > < ≥ ≤ and or xor xnor` |
@@ -140,6 +140,69 @@ and `1┘2+1┘3` groups the fractions first.
 * Data is always real; a complex operand raises `Math ERROR`.  At most 40 data
   points are kept, after which `Data Full` is raised.
 
+### Scientific constants
+
+The calculator has 40 built-in scientific constants, inserted on the real unit
+with the `CONST` key and a two-digit number.  In program source each one is
+written either with its ASCII name or with the symbol the display shows:
+
+```text
+h◢              : Planck constant (CONST 06)
+hbar × 2◢       : reduced Planck constant (CONST 09), as `ħ` too
+C0◢             : speed of light in vacuum (CONST 28)
+```
+
+The **elementary charge** is the one exception: its display symbol is `e`,
+which is already Euler's number, so it is written `eq` (CONST 23).  Its
+symbol is still shown as `e` in the table below.
+
+| # | Name | Symbol | Constant |
+| --- | --- | --- | --- |
+| 01 | `mp` | `mp` | proton mass |
+| 02 | `mn` | `mn` | neutron mass |
+| 03 | `me` | `me` | electron mass |
+| 04 | `mmu` | `mμ` | muon mass |
+| 05 | `a0` | `a0` | Bohr radius |
+| 06 | `h` | `h` | Planck constant |
+| 07 | `muN` | `μN` | nuclear magneton |
+| 08 | `muB` | `μB` | Bohr magneton |
+| 09 | `hbar` | `ħ` | reduced Planck constant |
+| 10 | `alpha` | `α` | fine-structure constant |
+| 11 | `re` | `re` | classical electron radius |
+| 12 | `lc` | `λc` | Compton wavelength |
+| 13 | `gp` | `γp` | proton gyromagnetic ratio |
+| 14 | `lcp` | `λcp` | proton Compton wavelength |
+| 15 | `lcn` | `λcn` | neutron Compton wavelength |
+| 16 | `Rinf` | `R∞` | Rydberg constant |
+| 17 | `u` | `u` | atomic mass unit |
+| 18 | `mup` | `μp` | proton magnetic moment |
+| 19 | `mue` | `μe` | electron magnetic moment |
+| 20 | `mun` | `μn` | neutron magnetic moment |
+| 21 | `mumu` | `μμ` | muon magnetic moment |
+| 22 | `F` | `F` | Faraday constant |
+| 23 | `eq` | `e` | elementary charge |
+| 24 | `NA` | `NA` | Avogadro constant |
+| 25 | `k` | `k` | Boltzmann constant |
+| 26 | `Vm` | `Vm` | molar volume of ideal gas |
+| 27 | `R` | `R` | molar gas constant |
+| 28 | `C0` | `C0` | speed of light in vacuum |
+| 29 | `C1` | `C1` | first radiation constant |
+| 30 | `C2` | `C2` | second radiation constant |
+| 31 | `sigma` | `σ` | Stefan-Boltzmann constant |
+| 32 | `eps0` | `ε0` | electric constant |
+| 33 | `mu0` | `μ0` | magnetic constant |
+| 34 | `phi0` | `φ0` | magnetic flux quantum |
+| 35 | `g` | `g` | standard acceleration of gravity |
+| 36 | `G0` | `G0` | conductance quantum |
+| 37 | `Z0` | `Z0` | characteristic impedance of vacuum |
+| 38 | `tK` | `t` | Celsius temperature |
+| 39 | `G` | `G` | Newtonian constant of gravitation |
+| 40 | `atm` | `atm` | standard atmosphere |
+
+Values are the 2010 CODATA revision, the one this calculator shipped with.
+They are real numbers, so they are available in COMP, CMPLX, SD and REG but
+not in BASE.
+
 ### Base-n
 
 * `Dec`, `Hex`, `Bin` and `Oct` select a number base (`Environment.base`).
@@ -168,7 +231,7 @@ between decimal and scientific outside `[1e-2, 1e10)`; `Norm2` outside
 
 ## Known deviations / TODO
 
-* The 40 physical constants and `ReP`/`ImP` are not implemented.
+* `ReP`/`ImP` are not implemented; the 40 scientific constants are (above).
 * Untagged integer literals are always read as decimal; only tagged literals
   (`1Fh`, `1010b`, …) select another base.
 * `Goto` clears the `If`/loop context, so jumping *out* of a loop works but

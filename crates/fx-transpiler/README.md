@@ -87,6 +87,36 @@ log ln rnd` (`log` accepts one or two arguments). Values are real numbers.
 guide covering the grammar, the seven-variable limit, the modes, and the
 gotchas that most often make generated programs fail to transpile.
 
+## Scientific constants
+
+The calculator's 40 built-in scientific constants are reached through the
+`phys` namespace: `phys.NAME`, where `NAME` is the constant's ASCII name or the
+symbol the display shows. `phys` is a reserved word, and a bare `h` or `hbar`
+is an ordinary variable, so the namespace never pollutes the seven memories.
+
+```c
+print(phys.h);      // Planck constant
+print(phys.ħ);      // the same constant, by its display symbol
+print(phys.C0);     // speed of light in vacuum
+print(phys.e);      // elementary charge (namespaced, so not Euler's e)
+```
+
+```
+h◢
+ħ◢
+C0◢
+eq◢
+```
+
+Glyph output uses the display symbol (`ħ`, `R∞`, `μμ`); `--ascii` uses the
+ASCII name (`hbar`, `Rinf`, `mumu`). The elementary charge is the exception:
+its display symbol `e` would re-lex as Euler's number, so it is emitted as `eq`
+in both styles. `phys.e` and `phys.eq` are the elementary charge; Euler's number
+remains just `e`.
+
+The full table (menu number, ASCII name, display symbol) is available as
+`fx_transpiler::constants::CONSTANTS`.
+
 ## Modes
 
 The calculator forces an operating mode before it will compute. A program may
@@ -105,12 +135,14 @@ directive emits no header. When a header is present it is re-emitted as the
 first line of the PRGM, and the program is checked against the mode's
 capabilities. `.fxc` is real-number-only, so the only restriction is `BASE`,
 which rejects the floating-point built-ins `sqrt sin cos tan asin acos atan log
-ln rnd` and the constants `pi`/`e` (`/` maps to `÷`, which is fine):
+ln rnd` and the constants `pi`/`e` as well as every `phys.` scientific constant
+(`/` maps to `÷`, which is fine):
 
 ```c
 #mode BASE
 print(a / b);   // ok
 print(sqrt(a)); // error: `sqrt` is not available in BASE mode
+print(phys.h);  // error: `h` (Planck constant) is not available in BASE mode
 ```
 
 The mode can also be forced from Rust with [`Options::mode`](#library), which

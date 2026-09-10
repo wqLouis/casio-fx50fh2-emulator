@@ -76,6 +76,12 @@ fn validate_expr(expr: &Expr, source: &str) -> Result<(), TranspileError> {
     match expr {
         Expr::Pi(pos) => Err(forbidden(source, "`pi`", *pos)),
         Expr::E(pos) => Err(forbidden(source, "`e`", *pos)),
+        // A scientific constant is a real number the BASE keypad cannot enter.
+        Expr::Constant(constant, pos) => Err(forbidden(
+            source,
+            &format!("`{}` ({})", constant.name, constant.description),
+            *pos,
+        )),
         // The call's name precedes its arguments in source order, so a
         // forbidden built-in is reported before anything nested inside it.
         Expr::Call(name, _, pos) if is_float_builtin(name) => {
