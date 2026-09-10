@@ -135,6 +135,56 @@ fn fxc_phys_constant_is_valid() {
 }
 
 #[test]
+fn fxc_compile_time_features_are_valid() {
+    let source = "#reg total = M\n\
+                  #data config = { \"n\": 3, \"xs\": [1, 2] };\n\
+                  const k = config.n;\n\
+                  let total = config.xs[1] * k;\n\
+                  print(total);\n";
+    assert!(
+        diagnostics(source, Language::Fxc, None).is_empty(),
+        "{:?}",
+        diagnostics(source, Language::Fxc, None)
+    );
+}
+
+#[test]
+fn fxc_const_of_a_variable_is_reported() {
+    let diags = diagnostics("let a = 1;\nconst k = a;\n", Language::Fxc, None);
+    assert_eq!(diags.len(), 1);
+    assert_eq!(code(&diags[0]), "Transpile ERROR");
+    assert!(
+        diags[0].message.contains("constant expression"),
+        "{}",
+        diags[0].message
+    );
+}
+
+#[test]
+fn fxc_missing_data_file_is_reported() {
+    let diags = diagnostics(
+        "#data v = \"definitely-missing.json\";\nprint(v);\n",
+        Language::Fxc,
+        None,
+    );
+    assert_eq!(diags.len(), 1);
+    assert_eq!(code(&diags[0]), "Transpile ERROR");
+    assert!(
+        diags[0].message.contains("cannot read data file"),
+        "{}",
+        diags[0].message
+    );
+}
+
+#[test]
+fn fxc_data_file_resolves_against_the_document_directory() {
+    let dir = TempDir::new("data");
+    dir.write("values.json", r#"{ "scale": 10 }"#);
+    let source = "#data v = \"values.json\";\nprint(v.scale);\n";
+    assert!(diagnostics(source, Language::Fxc, Some(dir.path())).is_empty());
+}
+
+#[test]
 fn missing_include_is_an_include_error_naming_the_path() {
     let dir = TempDir::new("missing-include");
     let diags = diagnostics(
