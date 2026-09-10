@@ -4,6 +4,10 @@ This is a working reference for the calculator's PRGM language as implemented
 here. It is reconstructed from the sources below; where the machine and this
 implementation differ it is noted.
 
+> **See also:** the C-like front end has its own manual in [FXC.md](FXC.md),
+> the authoring guide for it in [AI-AGENTS.md](AI-AGENTS.md), and the project's
+> internals in [ARCHITECTURE.md](ARCHITECTURE.md).
+
 ## Sources
 
 * CASIO fx-50FH II user's guide (priority sequence, command list).

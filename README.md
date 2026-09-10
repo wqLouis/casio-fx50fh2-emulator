@@ -1,293 +1,220 @@
 # casio-fx50fh2
 
-A clean-room toolkit for the **CASIO fx-50FH II** programmable scientific
-calculator, in Rust: an interpreter for the calculator's own PRGM language, a
-transpiler from a friendly C-like language (`fx50 run program.fxc`), and a
-language server for editor support.
+An interpreter, a C-like transpiler and a language server for the **CASIO
+fx-50FH II** programmable calculator.
 
-The interpreter covers expression evaluation, variables, `?` input, `◢`
-display, complex numbers, statistics, base-n, `Goto`/`Lbl`, `⇒`,
-`If`/`Then`/`Else`/`IfEnd`, `For`/`Next`, `While`/`WhileEnd`, `Break`, memory
-arithmetic and the setup commands.
+It runs the calculator's own **PRGM** keystroke language, compiles a friendlier
+**C-like language** (`.fxc`) down to it, and serves both through one language
+server — so you can write, check and run calculator programs in your editor or
+from the command line.
 
-Programs can be typed with the calculator's glyphs or with readable ASCII
-aliases, so both of these are the same program:
-
-```text
-5→A: A+1◢
-5->A: A+1disp
+```console
+$ fx50 eval --mode CMPLX "(3+4i)×(1-2i)"
+11-2𝑖
+$ echo 5 | fx50 run examples/factorial.fxc
+120
 ```
+
+## Build
+
+Requires a Rust toolchain new enough for edition 2024 (**Rust 1.85+**).
+
+```bash
+git clone https://github.com/wqLouis/casio-fx50fh2-emulator
+cd casio-fx50fh2-emulator
+
+cargo build --release     # -> target/release/fx50
+```
+
+`cargo build` at the repository root builds everything; the workspace produces
+exactly one binary.
+
+To put it on your `PATH`:
+
+```bash
+cargo install --path crates/fx-cli     # -> ~/.cargo/bin/fx50
+```
+
+During development `cargo run -- <args>` runs it without installing, and
+`cargo test` runs the whole test suite. If `fx50` is not on `PATH`, the editor
+extensions also look for `target/debug/fx50` or `target/release/fx50` inside the
+workspace folder you open.
 
 ## Usage
 
-The whole toolkit is one binary, `fx50`. With no arguments it behaves like
-`python`: an interactive REPL when stdin is a terminal, or "run whatever is
-piped in" otherwise.
-
 ```bash
-# Builds the `fx50` binary (the workspace's only binary) in one step.
-cargo build --release
-
-# ...or during development, which also builds and runs it directly:
-cargo run -- eval "2+3×4"
-
 # interactive REPL (state persists between lines, with history)
-./target/release/fx50
+fx50
 
-# run a program file — inputs for `?` are read from stdin
-printf '5\n' | ./target/release/fx50 run examples/factorial.fx
+# run a program — inputs for `?` are read from stdin
+fx50 run examples/factorial.fx
+fx50 run examples/factorial.fxc      # C-like source is transpiled first
 
 # evaluate a single expression
-./target/release/fx50 eval "2+3×4^2"
-
-# write a program in C-like syntax and run it directly
-./target/release/fx50 run examples/factorial.fxc
+fx50 eval "2+3×4"
+fx50 eval --mode CMPLX "(3+4i)×(1-2i)"
 
 # transpile C-like source to PRGM
-./target/release/fx50 build program.fxc > program.fx
-./target/release/fx50 build --ascii program.fxc
+fx50 build program.fxc > program.fx
+fx50 build --ascii program.fxc       # keyboard-typable output
 
-# run test cases the program carries (or a standalone .tests.json)
-./target/release/fx50 test examples/factorial.fxc
+# run the test cases a program carries
+fx50 test examples/factorial.fxc
 
 # show how a program uses the seven memories (A B C D X Y M)
-./target/release/fx50 regs examples/compiletime.fxc
+fx50 regs examples/compiletime.fxc
 
 # language server over stdio, and shell completions
-./target/release/fx50 lsp
-./target/release/fx50 completions bash
+fx50 lsp
+fx50 completions bash
 ```
 
 Every command also has a flag form (`--eval/-e`, `--build/-b`, `--lsp/-l`).
 Errors are rendered with a caret at the offending source position.
 
-As a library:
+> Put options **before** the expression: `fx50 eval --mode CMPLX "…"`. Because
+> `eval` accepts expressions that begin with `-` (as in `fx50 eval -5+3`), it
+> treats everything after the subcommand as the expression, so a trailing
+> `--mode` would be read as part of it.
 
-```rust
-use casio_fx50fh2::{Interpreter, MockHost, compile};
+## Editor support
 
-let program = compile("?→A: A×2◢").unwrap();
-let mut interp = Interpreter::new(program, MockHost::with_inputs([21.0]));
-interp.run().unwrap();
-assert_eq!(interp.host().output, vec!["42"]);
+`fx50 lsp` is a language server for **both** languages. It provides diagnostics
+(including mode violations and `.fxc` `#include`/`#data` resolution),
+completion, hover and document symbols.
+
+The two languages use fixed ids, which every integration below relies on:
+
+| Language | Editor language id | Files |
+| --- | --- | --- |
+| PRGM (what the calculator runs) | `fx` | `.fx` |
+| C-like source for the transpiler | `fxc` | `.fxc` |
+
+### VS Code
+
+A client extension plus TextMate grammars live in
+[`editors/vscode/`](editors/vscode). It auto-discovers the `fx50` binary (or you
+can pin one with the `fx50.serverPath` setting).
+
+```bash
+# 1. build the server
+cargo build
+
+# 2. build the extension
+cd editors/vscode
+npm install
+npm run compile
+
+# 3. package and install it
+npx @vscode/vsce package        # -> fx50-vscode-<version>.vsix
+code --install-extension fx50-vscode-*.vsix
 ```
 
-## The C-like language (`fx50 run x.fxc`)
+Then open any `.fx` or `.fxc` file. To iterate instead, open the
+`editors/vscode` folder in VS Code and press **F5** ("Run Extension").
 
-Real numbers only, with `let`, `const`, assignment, `print`, `input`,
-`if`/`else`, `while`, `for`, `break`, `goto`/`label`, and
-`sqrt/abs/sin/cos/tan/log/ln/rnd` built-ins. The transpiler maps your names onto
-the seven real memories `A B C D X Y M` and emits PRGM.
+Full details: [`editors/vscode/README.md`](editors/vscode/README.md).
 
-```c
-let n = input();
-let result = 1;
-for (let i = 1; i <= n; i = i + 1) {
-  result = result * i;
-}
-print(result);
-```
+### Zed
 
-```console
-$ fx50 build examples/factorial.fxc
+A Zed extension with tree-sitter grammars for both languages lives in
+[`editors/zed/`](editors/zed). It is installed as a **dev extension**:
+
+1. Build the server so `target/debug/fx50` (or `target/release/fx50`) exists in
+   this repository, or put `fx50` on `PATH`:
+
+   ```bash
+   cargo build
+   ```
+
+2. In Zed, run the `zed: extensions` action.
+3. Click **Install Dev Extension** and choose the `editors/zed` directory.
+4. Open a `.fx` or `.fxc` file — the status bar should read
+   `fx-50FH II PRGM` / `fx-50FH II C-like`.
+
+If the server does not start, check `zed: open log` while launching Zed from a
+terminal (`zed --foreground`). After changing the extension itself, run
+`zed: reload extensions`.
+
+Full details: [`editors/zed/README.md`](editors/zed/README.md).
+
+### Neovim and other clients
+
+Any LSP client works — point it at the command `fx50 lsp` with the filetypes
+`fx` and `fxc`. Neovim 0.10+ needs no plugin; the exact config, plus notes for
+using the tree-sitter grammars with `nvim-treesitter`, is in
+[`editors/README.md`](editors/README.md).
+
+## The two languages
+
+**PRGM** is the calculator's native language: one key = one token, `→` to store,
+`◢` to display.
+
+```text
 ?→A
 1→B
 For 1→C To A Step 1
 B×C→B
 Next
 B◢
-$ printf '5\n' | fx50 run examples/factorial.fxc
-120
 ```
 
-Values that are fixed at transpile time can avoid the seven-memory budget
-entirely: `const` is inlined at each use, and `#data` reads JSON (inline or
-from a file) into literals. `free` releases a variable's memory so a later
-variable can reuse it, and `fx50 regs` reports the plan.
+**`.fxc`** is a C-like source language that transpiles to the above. It adds
+`const` for compile-time values, `#data` for reading JSON while transpiling,
+`free` for releasing one of the seven memories, and `#tests` for cases that
+travel with the program.
 
 ```c
-// `#mode` comes first; `#data` may appear anywhere.
-#data config = { "base": 2, "offsets": [10, 20, 30] };
-const scale = config.base;
+const max_input = 12;              // compile-time value: costs no memory
+let n = input();
+if (n > max_input) { n = max_input; }
+let result = 1;
+for (let i = 1; i <= n; i = i + 1) { result = result * i; }
+print(result);
 
-let total = config.offsets[1] * scale;
-print(total);        // 40
-
-free total;          // release the memory
-let next = scale;    // reuses it
-print(next);         // 2
+#tests = [
+  { "name": "5! = 120", "input": [5], "output": ["120"] }
+];
 ```
 
-`let` declares: declaring a name that is still live is an error, but after a
-`free` the name can be declared again, so a memory can be reused by name or by a
-new variable. `fx50 regs` shows the plan:
+## Documentation
 
-```console
-$ fx50 regs plan.fxc
-Memory plan for plan.fxc
-  A  total → next    (reused after `free total`)
-
-  1 of 7 memories used; free: B C D X Y M
-  released with `free`: total
-```
-
-Programs can also carry their own test cases in a `#tests` table, so `fx50 test
-prog.fxc` needs no separate file. See
-[`crates/fx-transpiler/README.md`](crates/fx-transpiler/README.md) for the full
-language and [`docs/AI-AGENTS.md`](docs/AI-AGENTS.md) for a rule-oriented
-authoring guide (intended for AI agents generating `.fxc` source).
-
-## Editor support
-
-`fx50 lsp` is a language server for **both** languages. It serves:
-
-| Language ID | Files | Language |
-| --- | --- | --- |
-| `fx` | `.fx` | PRGM (what the calculator actually runs) |
-| `fxc` | `.fxc` | the C-like front end |
-
-The client sends the language ID, so one server process covers both. For each
-language it provides diagnostics (including `#mode` violations and `#include`
-resolution for `.fxc`), completion, hover and document symbols.
-
-Ready-made integrations live in [`editors/`](editors/):
-
-| Editor | Where | Notes |
-| --- | --- | --- |
-| VS Code | [`editors/vscode`](editors/vscode) | TypeScript client extension; finds the `fx50` binary automatically |
-| Zed | [`editors/zed`](editors/zed) | Zed extension, with tree-sitter grammars in [`editors/tree-sitter-fx`](editors/tree-sitter-fx) and [`editors/tree-sitter-fxc`](editors/tree-sitter-fxc) |
-| Neovim, Helix, … | [`crates/fx-lsp/README.md`](crates/fx-lsp/README.md) | point your client at `fx50 lsp` |
-
-Every client launches the same command:
-
-```console
-$ fx50 lsp
-```
-
-`--stdio` is accepted and ignored, because many clients append it by default.
-
-## Design
-
-The repository is a Cargo workspace:
-
-```
-src/                        the interpreter library (casio-fx50fh2)
-crates/fx-transpiler/       C-like language -> PRGM (library `fx_transpiler`)
-crates/fx-lsp/              language server (library `fx_lsp`)
-crates/fx-cli/              the single `fx50` binary, dispatching on subcommands
-examples/  docs/  tests/
-```
-
-The binary lives in its own crate because both `fx-transpiler` and `fx-lsp`
-depend on the core library; putting `fx50` in the core crate would create a
-dependency cycle. It is the **only** binary the workspace produces — the
-transpiler and language server are libraries that `fx50` drives through its
-`build`/`run` and `lsp` subcommands.
-
-`Cargo.toml` lists every package in `default-members`, so a bare `cargo build`
-at the root builds the whole workspace (and therefore `fx50`), `cargo run`
-runs it, and `cargo test` runs every crate's tests.
-
-```text
-source ──► lexer ──► parser ──► flat Vec<Stmt> ──► tree-walking interpreter
-          src/lexer  src/parser      src/ast           src/runtime
-```
-
-* **`src/token.rs`** — the key vocabulary (`VarName`, `BinOp`, `FuncName`, …)
-  and `TokenKind`.
-* **`src/lexer.rs`** — hand-written scanner. Accepts both Casio glyphs
-  (`→ ◢ ⇒ ┘ ≠ ≥ ≤ π √`) and ASCII aliases (`-> disp => /`). Uses
-  *longest-keyword matching*, which is why `4AC` lexes as `4 × A × C` while
-  `Abs` and `Ans` stay single keys. Newlines are treated as `:`.
-* **`src/parser.rs`** — recursive descent following the user's guide priority
-  order (1 = tightest): atoms and parenthetical functions → postfix/`^(`/`x√(`
-  → fractions → prefix `-` → `nPr`/`nCr` → `×`/`÷`/implicit `×` → `+`/`-` →
-  relational → `and` → `or`/`xor`/`xnor`.
-* **`src/runtime.rs`** — flattens the program to a `Vec<Stmt>` with an explicit
-  program counter. `Lbl`/`Goto` are an index table; `If`/`While`/`For` are
-  marker statements matched up into jump tables before execution.
-* **`src/value.rs`** — `Value::{Real, Complex}` and complex arithmetic.
-* **`src/precision.rs`** — 15-significant-digit rounding and the machine's
-  autocorrection, applied after every arithmetic operation.
-* **`src/stats.rs`** — the SD/REG data set and the S-SUM/S-VAR accessors.
-* **`src/bases.rs`** — `Dec`/`Hex`/`Bin`/`Oct` word sizes and formatting.
-* **`src/format.rs`** — approximates the two-line display (`Norm1`/`Norm2`,
-  `Fix n`, `Sci n`).
-
-The reference works used to reconstruct the language are listed in
-[`docs/LANGUAGE.md`](docs/LANGUAGE.md); design decisions in
-[`docs/DECISIONS.md`](docs/DECISIONS.md).
-
-## Operating modes
-
-The calculator forces a mode, and so does this interpreter. Complex numbers,
-statistics and base-n are only offered in their own mode, so a program can
-declare one in a header:
-
-```text
-#mode CMPLX
-(3+4i)×(1-2i)◢
-```
-
-```console
-$ fx50 eval --mode CMPLX "(3+4i)×(1-2i)"
-11-2𝑖
-```
-
-The five modes are `COMP` (the default), `CMPLX`, `BASE`, `SD` and `REG`.
-Using a construct outside its mode is a `Mode ERROR` rather than a wrong
-answer — `√(-4)` fails in COMP and gives `2𝑖` in CMPLX, exactly as the
-hardware behaves:
-
-```console
-$ fx50 eval "3+4i"
-error: Mode ERROR
-  = the imaginary unit `i` is only available in CMPLX mode; add `#mode CMPLX` at the head of the program
-```
-
-`--mode/-m` overrides the header. The `.fxc` front end takes the same
-`#mode` header. See [`docs/LANGUAGE.md`](docs/LANGUAGE.md) for the capability
-table.
-
-## Supported today
-
-| Area | Status |
+| Document | What it covers |
 | --- | --- |
-| Arithmetic, implicit multiplication, fractions | ✅ |
-| Trig / inverse trig / hyperbolic, `log`, `ln`, `√`, `∛`, `10^`, `e^`, `Abs`, `Pol`, `Rec`, `Rnd` | ✅ |
-| Postfix `x² x³ x⁻¹ ! %` | ✅ |
-| `nPr`, `nCr`, comparisons, `and`/`or`/`xor`/`xnor` | ✅ |
-| Variables `A B C D X Y M Ans`, `M+`/`M-`, `ClrMemory` | ✅ |
-| `?`, `→`, `:`, `◢` | ✅ |
-| `Goto`/`Lbl`, `⇒`, `If/Then/Else/IfEnd`, `For/To/Step/Next`, `While/WhileEnd`, `Break` | ✅ |
-| `Deg`/`Rad`/`Gra`, `Fix`/`Sci`/`Norm` | ✅ |
-| Complex numbers (`i`, `∠`, `a+b𝒾`, `arg`, `Conjg`, `▶a+b𝒾`/`▶r∠θ`) | ✅ (CMPLX mode) |
-| Statistics (`DT`, `Σx`, `x̄`, `σx`, `regA`…, `ClrStat`, `FreqOn`) | ✅ (SD/REG mode) |
-| Base-n (`Dec`/`Hex`/`Bin`/`Oct`, `FFh`, bitwise ops) | ✅ (BASE mode) |
-| Forced modes with a `#mode` header, CLI `--mode` and static checks | ✅ |
-| 15-digit rounding + autocorrection | ✅ (f64-based — see note) |
-| C-like front end (`fx50 run x.fxc`) | ✅ |
-| `#include` for sharing fragments (transpile-time, C-style) | ✅ |
-| JSON test suites (`fx50 test x.fxc`) | ✅ |
-| Language server (`fx50 lsp`) | ✅ (PRGM **and** `.fxc`) |
-| 40 scientific constants (2010 CODATA) | ✅ |
-| Exact decimal-arithmetic chains from the reference notes | ⚠️ approximate |
+| [`docs/LANGUAGE.md`](docs/LANGUAGE.md) | **Language manual — PRGM**: tokens, modes, priority, runtime semantics, precision, base-n |
+| [`docs/FXC.md`](docs/FXC.md) | **Language manual — `.fxc`**: grammar, statements, the memory model and `free`, compile-time data, `#include`, `#tests` |
+| [`docs/AI-AGENTS.md`](docs/AI-AGENTS.md) | Rule-oriented authoring guide for `.fxc`, written for AI agents (and a good checklist for anyone) |
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Workspace layout, interpreter and transpiler pipelines, feature matrix |
+| [`docs/DECISIONS.md`](docs/DECISIONS.md) | Design decisions and the alternatives rejected (ADRs) |
+| [`docs/PLAN.md`](docs/PLAN.md) | The original specification, kept as a record |
+| [`editors/README.md`](editors/README.md) | LSP contract, editor setup, grammars |
+| [`crates/fx-transpiler/README.md`](crates/fx-transpiler/README.md) | The transpiler crate: CLI, Rust API, tests |
+| [`crates/fx-lsp/README.md`](crates/fx-lsp/README.md) | The language-server crate |
+
+## Examples
+
+[`examples/`](examples) contains working programs.
+
+* **PRGM** (`fx50 run <file>`): `factorial.fx`, `fibonacci.fx`, `gcd.fx`,
+  `quadratic.fx`, `complex_quadratic.fx`, `statistics.fx`.
+* **`.fxc`** (`fx50 run` / `build` / `test`): `factorial.fxc`, `quadratic.fxc`,
+  `constants.fxc` (the 40 scientific constants), `compiletime.fxc` (`#data`,
+  `const`, `free`), and `include.fxc`, which splits its work across
+  [`examples/lib/`](examples/lib).
+
+The `.fxc` examples carry their own test cases, so they can be checked with:
+
+```bash
+fx50 test examples/factorial.fxc
+```
 
 ## Tests
 
 ```bash
-cargo test --workspace
+cargo test                          # everything
+cargo test -p fx-transpiler --no-default-features   # transpiler with zero deps
 ```
 
-301 tests: interpreter end-to-end tests, plus per-feature suites for complex
-numbers, statistics, base-n, scientific constants and numeric precision, 36
-golden transpiler tests with execution tests, JSON test-suite tests, and LSP
-logic + server tests.
+## License
 
-## Examples
-
-`examples/` contains working programs in PRGM (`factorial.fx`, `fibonacci.fx`,
-`gcd.fx`, `quadratic.fx`, `complex_quadratic.fx`, `statistics.fx`) and in the
-C-like language (`factorial.fxc`, `quadratic.fxc`, and `include.fxc`, which
-splits its work across `lib/`). The `.fxc` examples ship with JSON test suites,
-run with `fx50 test examples/<name>.fxc`.
+MIT.
