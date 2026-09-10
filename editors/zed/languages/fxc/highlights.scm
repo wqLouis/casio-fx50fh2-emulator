@@ -1,5 +1,11 @@
-; Syntax highlighting for the CASIO fx-50FH II C-like language
-; (tree-sitter-fxc).  Only captures known to Zed are used.
+; Syntax highlighting for the fx-50FH II C-like language (tree-sitter-fxc).
+;
+; Zed loads this from the language directory (languages/fxc/), NOT from the
+; grammar repository, so this is the copy Zed actually applies. It is kept
+; byte-identical to `editors/tree-sitter-fxc/queries/highlights.scm`, which
+; serves editors that read queries from the grammar checkout.
+;
+; Only captures known to Zed are used.
 
 ; --- comments -------------------------------------------------------------
 

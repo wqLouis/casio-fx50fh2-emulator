@@ -305,3 +305,36 @@ statement separator, so a newline cannot be an `extra` the way it is in most
 grammars: with it as trivia, an expression happily swallows the next
 statement's first token as implied multiplication. It is modelled as an
 explicit separator token instead, which parses all six `.fx` examples cleanly.
+
+## ADR 0013 — Highlight queries are duplicated, and that duplication is tested
+
+Zed does not read `highlights.scm` from the grammar repository. It reads it from
+the **language** directory (`editors/zed/languages/<lang>/highlights.scm`),
+resolved relative to the language's `config.toml`. The queries therefore exist
+twice:
+
+* `editors/tree-sitter-{fx,fxc}/queries/highlights.scm` — the grammar-side copy,
+  for editors that load queries from the grammar checkout (Neovim, Helix, …);
+* `editors/zed/languages/{fx,fxc}/highlights.scm` — the copy Zed applies.
+
+**Why keep both.** The grammars are ordinary tree-sitter grammars and are also
+useful outside Zed, so they keep their canonical `queries/` directory. Zed's
+lookup location is a Zed-specific detail that belongs with the Zed extension.
+
+**Why a test.** Getting this wrong is silent: the grammar still parses, and the
+only symptom is that nothing is coloured. The two copies also have no reason to
+differ, so `crates/fx-lsp/tests/editor_assets.rs` compares their bodies and
+fails on drift (the headers may differ — each points at the other). The same
+test file checks the other cross-file assumptions that are easy to break: that
+`extension.toml` lists every configured language name verbatim, maps it back to
+the `fx`/`fxc` id, carries a real 40-character `rev`, and that each grammar
+ships the generated `parser.c` that Zed compiles.
+
+**The related trap.** A wasm extension cannot stat the filesystem. Zed's
+`worktree` API (unchanged through `since_v0.8.0`) offers only `which`,
+`root-path`, `read-text-file`, `shell-env` and `id`, and `read-text-file`
+refuses absolute paths and only reads text. Any `std::path::Path::is_file()`
+check silently returns false in the sandbox. The extension detects a worktree
+build by reading Cargo's dep-info file (`target/debug/fx50.d`), and falls back
+to recognising this repository by its root `Cargo.toml` — necessary because
+`target/` is gitignored and the worktree file API cannot see ignored paths.

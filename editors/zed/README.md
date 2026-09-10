@@ -9,7 +9,11 @@ Zed language support for the CASIO fx-50FH II:
 
 It provides:
 
-* syntax highlighting (`queries/highlights.scm` in each grammar),
+* syntax highlighting. The queries live in `languages/<lang>/highlights.scm`, next
+  to each language's `config.toml` — that is where Zed loads them from, **not**
+  from the grammar checkout. They are kept byte-identical to
+  `editors/tree-sitter-*/queries/highlights.scm` (which serves editors that read
+  queries from the grammar), and `cargo test` asserts the copies match,
 * bracket matching and comment configuration,
 * the `fx50` language server, launched as **`fx50 lsp`**, attached to both
   languages.
@@ -25,25 +29,29 @@ cargo build --release     # produces target/release/fx50
 cargo build               # produces target/debug/fx50
 ```
 
-The LSP is behind the `lsp` feature; the workspace's default build enables it
-(see `crates/fx-cli`). If your build does not include it, use:
-
-```bash
-cargo build --release -p fx50 --features lsp
-```
+The `lsp` subcommand is enabled by default; to build without it (and without
+code completion), use `cargo build --no-default-features -p fx-cli`.
 
 ## How the server binary is located
 
-`language_server_command` resolves `fx50` in this order:
+A wasm extension cannot inspect the filesystem: Zed's `worktree` API offers
+only `which`, `root-path`, `read-text-file`, `shell-env` and `id` — there is no
+`stat`/`exists`, and `read-text-file` refuses absolute paths and only reads
+text. So `language_server_command` resolves `fx50` in this order:
 
-1. a worktree-local build:
-   `<worktree root>/target/release/fx50`, then
-   `<worktree root>/target/debug/fx50` (and the `.exe` variants on Windows);
-2. `fx50` found on `$PATH` (via Zed's `Worktree::which`);
-3. the bare name `fx50`, resolved by the operating system when the server is
-   spawned.
+1. `fx50` on `$PATH` (via `Worktree::which`);
+2. a build inside the opened worktree, detected by reading the dep-info file
+   Cargo writes next to the binary (`target/release/fx50.d`, then
+   `target/debug/fx50.d`);
+3. a worktree whose root `Cargo.toml` names this project
+   (`crates/fx-cli`), in which case `target/debug/fx50` is used. This is needed
+   because `target/` is gitignored here, and the worktree file API cannot see
+   ignored paths, so step 2 never fires in this repository itself;
+4. otherwise a clear error explaining how to make the binary findable.
 
-The command is always started with the single argument `lsp`, i.e. `fx50 lsp`.
+Steps 2 and 3 return an absolute path, so the server spawns regardless of the
+working directory. The command is always started with the single argument
+`lsp`, i.e. `fx50 lsp`.
 
 ## Installing (dev extension)
 

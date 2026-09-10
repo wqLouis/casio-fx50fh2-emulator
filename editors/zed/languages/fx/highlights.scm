@@ -1,6 +1,11 @@
 ; Syntax highlighting for the fx-50FH II PRGM language (tree-sitter-fx).
 ;
-; Only captures known to Zed are used here.
+; Zed loads this from the language directory (languages/fx/), NOT from the
+; grammar repository, so this is the copy Zed actually applies. It is kept
+; byte-identical to `editors/tree-sitter-fx/queries/highlights.scm`, which
+; serves editors that read queries from the grammar checkout.
+;
+; Only captures known to Zed are used.
 
 ; --- comments -------------------------------------------------------------
 
