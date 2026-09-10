@@ -1,0 +1,23 @@
+[package]
+name = "fx-transpiler"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Transpile a small C-like language into CASIO fx-50FH II PRGM source"
+
+[lib]
+name = "fx_transpiler"
+path = "src/lib.rs"
+
+[[bin]]
+name = "fxc"
+path = "src/main.rs"
+
+[features]
+default = ["execute"]
+# `fxc run` executes the transpiled program, which needs the interpreter.
+# Disable with `--no-default-features` while the interpreter crate is churning.
+execute = ["dep:casio-fx50fh2"]
+
+[dependencies]
+casio-fx50fh2 = { path = "../..", optional = true }

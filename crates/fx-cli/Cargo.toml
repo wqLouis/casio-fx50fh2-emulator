@@ -1,0 +1,35 @@
+[package]
+name = "fx-cli"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Unified command-line interface for the CASIO fx-50FH II toolkit"
+
+[[bin]]
+name = "fx50"
+path = "src/main.rs"
+
+[features]
+# Everything is wired together now; the sibling crates are libraries.
+default = ["transpiler", "lsp"]
+transpiler = ["dep:fx-transpiler"]
+lsp = ["dep:fx-lsp"]
+
+[dependencies]
+casio-fx50fh2 = { path = "../.." }
+
+# CLI surface.
+clap = { version = "4.6", features = ["derive", "wrap_help"] }
+clap_complete = "4.6"
+
+# Interactive REPL: line editing, history, Ctrl-C/D handling.
+rustyline = "18"
+
+# Render `CalcError` byte offsets as a caret diagnostic under the source line.
+codespan-reporting = "0.13"
+
+# Platform-correct location for the REPL history file.
+dirs = "7"
+
+fx-transpiler = { path = "../fx-transpiler", optional = true, default-features = false }
+fx-lsp = { path = "../fx-lsp", optional = true }

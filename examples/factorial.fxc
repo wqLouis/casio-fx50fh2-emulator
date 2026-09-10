@@ -1,0 +1,8 @@
+// Factorial — the same example as examples/factorial.fx, but in C-like form.
+// Transpile and run with:  fx50 run examples/factorial.fxc
+let n = input();
+let result = 1;
+for (let i = 1; i <= n; i = i + 1) {
+  result = result * i;
+}
+print(result);

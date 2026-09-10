@@ -1,0 +1,19 @@
+[package]
+name = "casio-fx50fh2"
+version = "0.1.0"
+edition = "2024"
+description = "An interpreter for the CASIO fx-50FH II programmable calculator language"
+license = "MIT"
+# The user-facing binary lives in crates/fx-cli so that the CLI can depend on
+# the core library, the transpiler and the LSP without a dependency cycle.
+autobins = false
+
+[lib]
+name = "casio_fx50fh2"
+path = "src/lib.rs"
+
+[dependencies]
+
+[workspace]
+members = ["crates/fx-transpiler", "crates/fx-lsp", "crates/fx-cli"]
+resolver = "3"

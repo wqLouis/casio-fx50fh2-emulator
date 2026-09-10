@@ -1,0 +1,13 @@
+// Quadratic formula (real roots) in C-like form.
+// fx50 run examples/quadratic.fxc   with inputs 1, -3, 2
+let a = input();
+let b = input();
+let c = input();
+let discriminant = b * b - 4 * a * c;
+
+if (discriminant >= 0) {
+  print((-b + sqrt(discriminant)) / (2 * a));
+  print((-b - sqrt(discriminant)) / (2 * a));
+} else {
+  print(discriminant);
+}
