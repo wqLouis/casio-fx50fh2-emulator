@@ -95,8 +95,10 @@ $ printf '5\n' | fx50 run examples/factorial.fxc
 ```
 
 See [`crates/fx-transpiler/README.md`](crates/fx-transpiler/README.md) for the
-full language, and [`crates/fx-lsp/README.md`](crates/fx-lsp/README.md) for
-editor setup.
+full language and [`docs/AI-AGENTS.md`](docs/AI-AGENTS.md) for a
+rule-oriented authoring guide (intended for AI agents generating `.fxc`
+source), plus [`crates/fx-lsp/README.md`](crates/fx-lsp/README.md) for editor
+setup.
 
 ## Design
 

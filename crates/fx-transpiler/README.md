@@ -82,6 +82,11 @@ Expressions support `+ - * /`, `^` / `**` (power), unary `-`, comparisons
 `sqrt cbrt abs sin cos tan asin acos atan sinh cosh tanh asinh acosh atanh
 log ln rnd` (`log` accepts one or two arguments). Values are real numbers.
 
+> Authoring `.fxc` source, especially from an AI agent? Read
+> [`docs/AI-AGENTS.md`](../../docs/AI-AGENTS.md) first. It is a rule-oriented
+guide covering the grammar, the seven-variable limit, the modes, and the
+gotchas that most often make generated programs fail to transpile.
+
 ## Modes
 
 The calculator forces an operating mode before it will compute. A program may
