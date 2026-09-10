@@ -43,6 +43,7 @@ use casio_fx50fh2::{CalcError, Environment, Host, Interpreter, MockHost, Mode, c
                   fx50 eval --mode CMPLX \"(3+4i)×(1-2i)\"\n  \
                   fx50 run examples/factorial.fx\n  \
                   fx50 build program.fxc > program.fx\n  \
+                  fx50 test examples/factorial.fxc\n  \
                   printf '3+4' | fx50"
 )]
 struct Cli {
@@ -101,6 +102,19 @@ enum Command {
         #[arg(value_enum)]
         shell: Shell,
     },
+    /// Run JSON test cases against a program
+    Test {
+        /// A `.fxc` program (its sibling `<name>.tests.json` is used) or a
+        /// `.tests.json` suite directly
+        #[arg(value_name = "FILE")]
+        file: PathBuf,
+        /// Only run cases whose name contains this text
+        #[arg(long, value_name = "TEXT")]
+        filter: Option<String>,
+        /// Print the report as JSON instead of a human summary
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -115,6 +129,9 @@ enum Fail {
         error: CalcError,
     },
     Message(String),
+    /// The command already reported its own failure (for example a test suite
+    /// with failing cases); exit non-zero without printing anything further.
+    Silent,
 }
 
 impl From<String> for Fail {
@@ -150,6 +167,7 @@ fn main() -> ExitCode {
             render_calc_error(&source, &name, &error);
             ExitCode::FAILURE
         }
+        Err(Fail::Silent) => ExitCode::FAILURE,
     }
 }
 
@@ -178,6 +196,7 @@ fn dispatch(cli: Cli) -> Result<(), Fail> {
         Some(Command::Lsp) => start_lsp(),
         Some(Command::Eval { expression }) => eval(&expression.join(" "), mode),
         Some(Command::Build { file }) => build(&file, cli.ascii, mode),
+        Some(Command::Test { file, filter, json }) => test_command(&file, filter.as_deref(), json),
         Some(Command::Run { file }) => run_file(&file, cli.ascii, mode),
         Some(Command::Completions { shell }) => {
             write_completions(shell);
@@ -245,6 +264,97 @@ fn execute(source: &str, name: &str, mode: Option<Mode>) -> Result<(), Fail> {
 fn read_source(file: &Path) -> Result<String, Fail> {
     std::fs::read_to_string(file)
         .map_err(|e| Fail::Message(format!("cannot read `{}`: {e}", file.display())))
+}
+
+// ---------------------------------------------------------------------------
+// JSON test suites
+
+/// `fx50 test FILE` — run a JSON suite against a program.
+///
+/// `FILE` may be a `.fxc` program (whose sibling `<name>.tests.json` is used)
+/// or a `.tests.json` suite directly.
+#[cfg(feature = "transpiler")]
+fn test_command(file: &Path, filter: Option<&str>, as_json: bool) -> Result<(), Fail> {
+    use fx_transpiler::testing;
+
+    let is_json = file
+        .extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("json"));
+    let (suite_path, fallback) = if is_json {
+        (file.to_path_buf(), None)
+    } else {
+        let suite = testing::sibling_suite_path(file);
+        if !suite.is_file() {
+            return Err(Fail::Message(format!(
+                "no test suite at `{}`; create it, or pass a `.tests.json` file",
+                suite.display()
+            )));
+        }
+        (suite, Some(file.to_path_buf()))
+    };
+
+    let mut suite = testing::load_suite_file(&suite_path, fallback.as_deref())
+        .map_err(|e| Fail::Message(e.to_string()))?;
+
+    if let Some(filter) = filter {
+        let needle = filter.to_ascii_lowercase();
+        suite
+            .cases
+            .retain(|case| case.name.to_ascii_lowercase().contains(&needle));
+        if suite.cases.is_empty() {
+            return Err(Fail::Message(format!("no test case matches `{filter}`")));
+        }
+    }
+
+    let report = testing::run_suite(&suite);
+    if as_json {
+        println!("{}", report.to_json_pretty());
+    } else {
+        print_test_report(&report);
+    }
+
+    if report.is_success() {
+        Ok(())
+    } else {
+        // The report has already said what failed; just exit non-zero.
+        Err(Fail::Silent)
+    }
+}
+
+#[cfg(not(feature = "transpiler"))]
+fn test_command(_file: &Path, _filter: Option<&str>, _as_json: bool) -> Result<(), Fail> {
+    Err(Fail::Message(
+        "test suites are not compiled in (rebuild with `--features transpiler`)".to_string(),
+    ))
+}
+
+#[cfg(feature = "transpiler")]
+fn print_test_report(report: &fx_transpiler::testing::SuiteReport) {
+    println!("{}", report.name);
+    for case in &report.cases {
+        if case.passed {
+            println!("  ok    {}", case.name);
+        } else {
+            println!("  FAIL  {}", case.name);
+            print_test_field("expected", &case.expected);
+            print_test_field("actual", &case.actual);
+        }
+    }
+    println!("{} passed, {} failed", report.passed(), report.failed());
+}
+
+/// Print a labelled value, indenting any continuation lines under the label.
+#[cfg(feature = "transpiler")]
+fn print_test_field(label: &str, text: &str) {
+    let pad = " ".repeat(8 + label.len() + 2);
+    let mut lines = text.lines();
+    match lines.next() {
+        Some(first) => println!("        {label}: {first}"),
+        None => println!("        {label}: <empty>"),
+    }
+    for rest in lines {
+        println!("{pad}{rest}");
+    }
 }
 
 // ---------------------------------------------------------------------------

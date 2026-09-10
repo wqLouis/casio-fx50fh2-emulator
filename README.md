@@ -47,6 +47,9 @@ printf '5\n' | ./target/release/fx50 run examples/factorial.fx
 ./target/release/fx50 build program.fxc > program.fx
 ./target/release/fx50 build --ascii program.fxc
 
+# run JSON test cases against a program (uses <name>.tests.json)
+./target/release/fx50 test examples/factorial.fxc
+
 # language server over stdio, and shell completions
 ./target/release/fx50 lsp
 ./target/release/fx50 completions bash
@@ -201,6 +204,7 @@ table.
 | Forced modes with a `#mode` header, CLI `--mode` and static checks | ✅ |
 | 15-digit rounding + autocorrection | ✅ (f64-based — see note) |
 | C-like front end (`fx50 run x.fxc`) | ✅ |
+| JSON test suites (`fx50 test x.fxc`) | ✅ |
 | Language server (`fx50 lsp`) | ✅ |
 | 40 physical constants | ⛔ not yet |
 | Exact decimal-arithmetic chains from the reference notes | ⚠️ approximate |

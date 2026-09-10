@@ -10,10 +10,13 @@ name = "fx_transpiler"
 path = "src/lib.rs"
 
 [features]
-default = ["execute"]
-# `fxc run` executes the transpiled program, which needs the interpreter.
-# Disable with `--no-default-features` while the interpreter crate is churning.
+default = ["testing"]
+# Run transpiled programs; needs the interpreter.
 execute = ["dep:casio-fx50fh2"]
+# JSON-driven test suites (`fx50 test`); needs the interpreter plus JSON.
+testing = ["execute", "dep:serde", "dep:serde_json"]
 
 [dependencies]
 casio-fx50fh2 = { path = "../..", optional = true }
+serde = { version = "1", features = ["derive"], optional = true }
+serde_json = { version = "1", optional = true }

@@ -26,6 +26,8 @@ pub mod error;
 pub mod lexer;
 pub mod mode;
 pub mod parser;
+#[cfg(feature = "testing")]
+pub mod testing;
 
 mod alloc;
 mod emit;

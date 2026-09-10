@@ -341,7 +341,88 @@ fx50: `sqrt` is not available in BASE mode (switch to COMP, CMPLX, SD or REG) (l
 
 ---
 
-## 8. Checklist before you emit `.fxc`
+## 8. Verify your program with a JSON test suite
+
+You do not have to trust your own reading of a program: a `.fxc` file can be
+shipped with a JSON suite that pins its behaviour. Writing one is the strongest
+way to be sure the program you generated is correct, and it lets a human check
+your work at a glance.
+
+Put the suite next to the program as `<name>.tests.json`:
+
+```json
+{
+  "program": "factorial.fxc",
+  "cases": [
+    { "name": "5! = 120", "input": [5], "output": ["120"] },
+    { "name": "0! = 1",   "input": [0], "output": ["1"] },
+    { "name": "no input", "input": [],  "error": "Argument ERROR" }
+  ]
+}
+```
+
+```console
+$ fx50 test factorial.fxc
+factorial
+  ok    5! = 120
+  ok    0! = 1
+  ok    no input
+3 passed, 0 failed
+```
+
+If you can run commands, **run this before reporting success**. It exits
+non-zero when a case fails, and a failure tells you the exact expected and
+actual values.
+
+### Fields
+
+| Field | Required | Meaning |
+| --- | --- | --- |
+| `name` | no | Suite label. |
+| `program` | one of | Path to the `.fxc`, **relative to the JSON file**. |
+| `source` | one of | Inline `.fxc` text instead of a file. |
+| `mode` | no | `COMP`, `CMPLX`, `BASE`, `SD` or `REG`. |
+| `ascii` | no | Transpile with ASCII aliases. |
+| `cases` | yes | The cases. |
+
+| Case field | Required | Meaning |
+| --- | --- | --- |
+| `name` | no | Label; defaults to `case N`. |
+| `input` | no | Numbers fed to `?` prompts, **in order**. |
+| `output` | one of | Expected `◢` lines, in order. |
+| `error` | one of | Expected error, matched case-insensitively by substring. |
+
+Each case gives exactly one of `output` or `error`.
+
+### Getting the expectations right
+
+These are the ways a hand-written suite usually goes wrong:
+
+* **`output` is the displayed lines, exactly as formatted.** `print(10 / 3)`
+  yields `"3.333333333"`, not `"3.33"`. Compute the expected string the same
+  way the calculator would, and prefer whole numbers in tests.
+* **A program ending in an assignment still displays.** `let a = 1;` produces
+  `["1"]`, because the calculator shows the last computed value when a program
+  ends without `◢`. Use `"output": []` only for programs that compute nothing
+  at all (such as one containing only `label 1;`).
+* **Inputs are consumed in order.** A case with fewer `input` values than the
+  program has `?` prompts fails with `Argument ERROR` — which is itself a
+  useful case to assert.
+* **Assert errors by label**, not by full message: `"error": "Math ERROR"`,
+  `"Argument ERROR"`, `"Go ERROR"`. The match is a case-insensitive substring,
+  so `"math"` works too.
+* **Path resolution:** `program` is relative to the JSON, so a suite in
+  `tests/` referring to `../src/prog.fxc` works.
+* If the suite lists neither `program` nor `source`, the sibling `.fxc` of the
+  suite file is used — so `fx50 test prog.fxc` with a `prog.tests.json` that
+  omits `program` is valid.
+
+Use `fx50 test prog.fxc --json` for a machine-readable report, and
+`--filter TEXT` to run a subset while iterating.
+
+---
+
+## 9. Checklist before you emit `.fxc`
 
 - [ ] Every statement ends with `;`.
 - [ ] `#mode` (if used) is the very first line, and the mode is spelled
@@ -358,6 +439,8 @@ fx50: `sqrt` is not available in BASE mode (switch to COMP, CMPLX, SD or REG) (l
 - [ ] Every `goto` has a matching `label`, and `break` only appears inside a
       loop.
 - [ ] In `#mode BASE`, no built-ins, no `pi`, no `e`.
+- [ ] If you can run commands, a `.tests.json` suite covers the happy path
+      **and** at least one error case, and `fx50 test` reports `0 failed`.
 
 If you can, verify with the compiler before declaring success:
 
@@ -369,4 +452,11 @@ and, where inputs are known, execute it:
 
 ```bash
 printf '5\n' | fx50 run your.fxc
+```
+
+Best of all, write a `your.tests.json` suite (§8) and run it — that checks
+many cases at once and leaves evidence behind:
+
+```bash
+fx50 test your.fxc
 ```

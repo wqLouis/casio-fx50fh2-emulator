@@ -31,5 +31,5 @@ codespan-reporting = "0.13"
 # Platform-correct location for the REPL history file.
 dirs = "7"
 
-fx-transpiler = { path = "../fx-transpiler", optional = true, default-features = false }
+fx-transpiler = { path = "../fx-transpiler", optional = true, default-features = false, features = ["testing"] }
 fx-lsp = { path = "../fx-lsp", optional = true }

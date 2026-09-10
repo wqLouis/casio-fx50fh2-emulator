@@ -157,6 +157,108 @@ A+2→A
 WhileEnd
 ```
 
+## Testing programs with JSON
+
+A program can be regression-tested against a JSON suite that pairs inputs with
+the display lines they should produce. Put the suite next to the program as
+`<name>.tests.json`:
+
+```json
+{
+  "program": "factorial.fxc",
+  "cases": [
+    { "name": "5! = 120", "input": [5], "output": ["120"] },
+    { "name": "0! = 1",   "input": [0], "output": ["1"] },
+    { "name": "no input", "input": [],  "error": "Argument ERROR" }
+  ]
+}
+```
+
+```console
+$ fx50 test examples/factorial.fxc
+factorial
+  ok    5! = 120
+  ok    1! = 1
+  ok    0! = 1
+  ok    10! = 3628800
+  ok    no input given is an Argument ERROR
+5 passed, 0 failed
+```
+
+The command exits non-zero when any case fails, so it drops straight into CI.
+It also accepts a `.tests.json` path directly, and takes `--filter TEXT` (run
+only cases whose name contains `TEXT`) and `--json` (machine-readable report):
+
+```bash
+fx50 test examples/quadratic.tests.json
+fx50 test prog.fxc --filter "roots"
+fx50 test prog.fxc --json
+```
+
+A failing case shows both sides:
+
+```text
+prog.tests.json
+  ok    doubles 21
+  FAIL  deliberately wrong
+        expected: 11
+        actual: 10
+1 passed, 1 failed
+```
+
+### Suite schema
+
+| Field | Required | Meaning |
+| --- | --- | --- |
+| `name` | no | Suite label shown in the report. |
+| `program` | one of | Path to a `.fxc` file, resolved relative to the JSON file. |
+| `source` | one of | Inline `.fxc` source instead of a file. |
+| `mode` | no | Operating mode override (`COMP`, `CMPLX`, `BASE`, `SD`, `REG`). |
+| `ascii` | no | Transpile with ASCII aliases. Default `false`. |
+| `cases` | yes | The list of cases. |
+
+`program` and `source` are mutually exclusive; when both are absent, the
+sibling `.fxc` of the suite file is used. Each case takes:
+
+| Field | Required | Meaning |
+| --- | --- | --- |
+| `name` | no | Case label. Defaults to `case N`. |
+| `input` | no | Numbers fed to `?` prompts, in order. Default `[]`. |
+| `output` | one of | Expected `◢` display lines, in order. |
+| `error` | one of | Expected error, matched case-insensitively against the label. |
+
+A case must give exactly one of `output` or `error`. `"output": []` asserts
+that the program displays nothing — note that a program ending in an
+assignment still displays its value, because the calculator shows the last
+computed value when a program ends without `◢`.
+
+### Library
+
+The runner is behind the `testing` feature (on by default, and implied by
+`execute`):
+
+```rust
+use fx_transpiler::testing::{run_suite_file, parse_suite};
+use std::path::Path;
+
+let report = run_suite_file(Path::new("examples/factorial.tests.json"), None)?;
+assert!(report.is_success());
+println!("{}", report.to_json_pretty());
+
+// Or build a suite from inline JSON.
+let suite = parse_suite(
+    r#"{"source": "print(1);", "cases": [{"output": ["1"]}]}"#,
+    "inline",
+    Path::new("."),
+    None,
+)?;
+assert!(fx_transpiler::testing::run_suite(&suite).is_success());
+# Ok::<(), fx_transpiler::testing::TestError>(())
+```
+
+`TestSuite`, `TestCase`, `SuiteReport` and `CaseResult` are public, and the
+report serialises to JSON.
+
 ## Library
 
 ```rust
