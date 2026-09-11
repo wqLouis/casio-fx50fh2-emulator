@@ -37,7 +37,10 @@
   "goto"
   "label"
   "print"
+  "fn"
+  "return"
   "phys"
+  "stat"
 ] @keyword
 
 ; --- JSON carried by `#data` / `#tests` -----------------------------------
@@ -50,10 +53,12 @@
 ; --- literals -------------------------------------------------------------
 
 (number) @number
+(base_number) @number
 
 ; --- built-ins and calls --------------------------------------------------
 
 (call_expression (identifier) @function)
+(fn_statement (identifier) @function)
 (input_expression "input" @function)
 
 ; --- scientific constants -------------------------------------------------
@@ -74,7 +79,8 @@
 
 ; --- operators ------------------------------------------------------------
 
-["+" "-" "*" "/" "^" "**" "==" "!=" "<" "<=" ">" ">=" "="] @operator
+["+" "-" "*" "/" "^" "**" "==" "!=" "<" "<=" ">" ">=" "="
+ "and" "or" "xor" "xnor" "=>"] @operator
 
 ; --- punctuation ----------------------------------------------------------
 

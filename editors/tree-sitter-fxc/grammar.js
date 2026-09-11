@@ -5,10 +5,12 @@
  * follows `docs/AI-AGENTS.md`: `//` and block comments, `#mode`/`#include`
  * directives, `#data`/`#tests` compile-time JSON, `let` (scalar and array),
  * `const`, `free` (and `unsafe_free`), assignment and `print` statements,
- * `if`/`while`/`for` with optional braces,
- * `break`/`goto`/`label`, data paths with `.field`/`[index]`, and a
- * conventional expression grammar with `^`/`**` exponentiation.  Scientific
- * constants live under the `phys.` namespace.
+ * `fn` definitions (expression and block form), `return`, `if`/`while`/`for`
+ * with optional braces, `break`/`goto`/`label`, the `=>` conditional jump,
+ * data paths with `.field`/`[index]`, base-tagged literals, and a
+ * conventional expression grammar with `^`/`**` exponentiation and the
+ * `and`/`or`/`xor`/`xnor` words.  Scientific constants live under the `phys.`
+ * namespace and statistical variables under `stat.`.
  */
 
 module.exports = grammar({
@@ -24,12 +26,22 @@ module.exports = grammar({
   rules: {
     source_file: $ => repeat($._top_level),
 
+    // A program is a run of top-level items.  `fn` definitions and `const`
+    // declarations sit here; the directives may also appear inside a function
+    // body, because an `#include`d fragment of statements is spliced in place.
     _top_level: $ => choice(
       $.mode_directive,
+      $._statement,
+    ),
+
+    // The directives that may appear wherever a statement may: `#include`
+    // splices a fragment in place, and `#data`/`#tests` are compile-time
+    // tables.  `#mode` is deliberately *not* here -- it configures the whole
+    // program, and the transpiler requires it first.
+    _directive: $ => choice(
       $.include_directive,
       $.data_directive,
       $.tests_directive,
-      $._statement,
     ),
 
     // #mode NAME (case-insensitive, `=` optional).
@@ -38,6 +50,9 @@ module.exports = grammar({
       optional('='),
       $.mode_name,
     ),
+    // The mode name is only reachable here, directly after `#mode`, so it can
+    // never be lexed as a general expression; a bare `main` stays an ordinary
+    // identifier.
     mode_name: $ => token(prec(2, /[A-Za-z][A-Za-z0-9_-]*/)),
 
     // #include "path/to/file.fxc"
@@ -112,12 +127,16 @@ module.exports = grammar({
       $.if_statement,
       $.while_statement,
       $.for_statement,
+      $.fn_statement,
+      $.return_statement,
       $.break_statement,
       $.goto_statement,
       $.label_statement,
+      $.conditional_statement,
       $.block,
       $.empty_statement,
       $.expression_statement,
+      $._directive,
     ),
 
     let_statement: $ => seq('let', $.identifier, '=', $.expression, ';'),
@@ -161,6 +180,28 @@ module.exports = grammar({
     for_init: $ => seq(optional('let'), $.identifier, '=', $.expression),
     for_update: $ => seq($.identifier, '=', $.expression),
 
+    // `fn name(a, b) = expr;` and `fn name(a, b) { ... }`.  A function is
+    // inlined at each call, so there is no callable value; the grammar only
+    // describes the two surface forms.  A stray `;` after a block body is an
+    // ordinary empty statement, which the parser discards.
+    fn_statement: $ => seq(
+      'fn', $.identifier, '(', optional($.parameters), ')',
+      choice(
+        seq('=', $.expression, ';'),
+        $.block,
+      ),
+    ),
+    parameters: $ => seq($.identifier, repeat(seq(',', $.identifier))),
+
+    // `return;` or `return expr;`.  The transpiler requires it to be the last
+    // statement of a block function; that is a semantic check, not a
+    // syntactic one.
+    return_statement: $ => seq('return', optional($.expression), ';'),
+
+    // `cond => stmt;` is the calculator's `=>` conditional jump.  It guards a
+    // single statement (an `if` is how larger bodies are guarded).
+    conditional_statement: $ => prec.right(seq($.expression, '=>', $._statement)),
+
     _body: $ => $._statement,
 
     break_statement: $ => seq('break', ';'),
@@ -180,9 +221,11 @@ module.exports = grammar({
       $.call_expression,
       $.input_expression,
       $.constant_ref,
+      $.stat_ref,
       $.data_reference,
       $.parenthesized_expression,
       $.number,
+      $.base_number,
       $.identifier,
     ),
 
@@ -191,10 +234,16 @@ module.exports = grammar({
     data_reference: $ => prec(8, seq($.identifier, repeat1($._accessor))),
     _accessor: $ => choice(
       seq('.', $.identifier),
-      seq('[', $.number, ']'),
+      seq('[', $.expression, ']'),
     ),
 
+    // Binding strength, loosest first: `or`/`xor`/`xnor`, `and`, equality,
+    // comparison, `+ -`, `* /`, `^ **`.  The base-n words are reserved -- the
+    // transpiler's lexer keywords them in every mode -- so `or` is an operator
+    // here, never an identifier.
     binary_expression: $ => choice(
+      prec.left(-2, seq($.expression, choice('or', 'xor', 'xnor'), $.expression)),
+      prec.left(-1, seq($.expression, 'and', $.expression)),
       prec.left(1, seq($.expression, choice('==', '!='), $.expression)),
       prec.left(2, seq($.expression, choice('<', '<=', '>', '>='), $.expression)),
       prec.left(3, seq($.expression, choice('+', '-'), $.expression)),
@@ -216,12 +265,26 @@ module.exports = grammar({
     // `phys.NAME` reaches one of the 40 scientific constants, by ASCII name
     // or by the symbol the display shows.
     constant_ref: $ => seq('phys', '.', choice($.identifier, $.constant_symbol)),
+
+    // `stat.NAME` reaches a statistical variable (`stat.n`, `stat.meanx`,
+    // `stat.regA`); the transpiler validates the name against the machine's
+    // table.
+    stat_ref: $ => seq('stat', '.', $.identifier),
     constant_symbol: $ => choice(
       'mμ', 'μN', 'μB', 'ħ', 'α', 'λc', 'γp', 'λcp', 'λcn', 'R∞',
       'μp', 'μe', 'μn', 'μμ', 'σ', 'ε0', 'μ0', 'φ0',
     ),
 
     identifier: $ => /[A-Za-z_][A-Za-z0-9_]*/,
+
+    // Base-tagged integer literals, available in BASE mode: `0x1F` (hex),
+    // `0b1010` (binary), `0o17` (octal).  Each alternative requires a digit,
+    // so a bare `0x` still lexes as the number `0` followed by the name `x`.
+    base_number: $ => token(choice(
+      /0[xX][0-9a-fA-F]+/,
+      /0[bB][01]+/,
+      /0[oO][0-7]+/,
+    )),
 
     number: $ => token(choice(
       /[0-9]+(\.[0-9]*)?([eE][+-]?[0-9]+)?/,
