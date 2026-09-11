@@ -607,6 +607,8 @@ fn fxc_completion_items() -> Vec<CompletionItem> {
         ("goto", "unconditional jump to a label"),
         ("label", "jump label"),
         ("print", "display a value"),
+        ("fn", "define a function (inlined at each call)"),
+        ("return", "leave a function body (last statement only)"),
         ("and", "bitwise AND (BASE mode)"),
         ("or", "bitwise OR (BASE mode)"),
         ("xor", "bitwise XOR (BASE mode)"),
@@ -1202,6 +1204,9 @@ fn fxc_description(source: &str, word: &str, start: usize) -> String {
     match word {
         "phys" => "**`phys`** — scientific-constant namespace\n\nWrite `phys.NAME`, for example `phys.h` (Planck constant) or `phys.hbar` (reduced Planck constant).".to_string(),
         "stat" => "**`stat`** — statistical-variable namespace\n\nWrite `stat.NAME`, for example `stat.meanx` or `stat.regA` (SD or REG mode).".to_string(),
+        "fn" => "**`fn`** — define a function\n\n`fn f(a, b) = expr;` is an expression function; `fn f(a, b) { … return v; }` is a procedure. A function is inlined at each call, so it costs no memory of its own. Arguments are passed by name (substituted at each mention).\n\nEvery program needs a `fn main()` entry point, and a function may only use its parameters, its locals and top-level `const`/`#data` values.".to_string(),
+        "return" => "**`return`** — leave a function body\n\nOnly valid as the last statement of a function. For two results, assign through an output parameter instead.".to_string(),
+        "main" => "**`main`** — the entry point\n\nRequired in every program. `fn main() { … }` is the program that runs.".to_string(),
         // Statement-only calculator keys.
         "mplus" => "**`mplus(x)`** — add to the fixed `M` memory (`M+`)".to_string(),
         "mminus" => "**`mminus(x)`** — subtract from the fixed `M` memory (`M-`)".to_string(),
@@ -1388,6 +1393,34 @@ fn collect_fxc_symbols(
                     ));
                 }
             }
+            Stmt::Function(def) => {
+                let name = format!("{}({})", def.name, def.params.join(", "));
+                if !seen.contains(&name) {
+                    seen.push(name.clone());
+                    symbols.push(fxc_symbol(
+                        name,
+                        SymbolKind::FUNCTION,
+                        "function (inlined at each call)",
+                        source,
+                        def.pos,
+                    ));
+                }
+                // Under the universal `fn main()`, every declaration lives in
+                // a function body, so walk it like any other block.
+                collect_fxc_symbols(&def.body, source, symbols, seen);
+            }
+            Stmt::Const { name, pos, .. } => {
+                if !seen.contains(name) {
+                    seen.push(name.clone());
+                    symbols.push(fxc_symbol(
+                        name.clone(),
+                        SymbolKind::CONSTANT,
+                        "compile-time constant",
+                        source,
+                        *pos,
+                    ));
+                }
+            }
             Stmt::For(for_stmt) => {
                 if !seen.contains(&for_stmt.init_name) {
                     seen.push(for_stmt.init_name.clone());
@@ -1469,6 +1502,33 @@ mod tests {
             .into_iter()
             .map(|item| item.label)
             .collect()
+    }
+
+    /// Wrap a fragment in `fn main() { … }`, the universal entry point.
+    ///
+    /// Mirrors `crates/fx-transpiler/tests/common/mod.rs`: leading directives
+    /// stay at the top level and a source that already defines `main` is
+    /// returned unchanged.
+    fn wrap(source: &str) -> String {
+        if source.contains("fn main") {
+            return source.to_string();
+        }
+        let mut directives = String::new();
+        let mut body = String::new();
+        let mut in_body = false;
+        for line in source.lines() {
+            let trimmed = line.trim_start();
+            let is_directive = trimmed.starts_with('#');
+            if !in_body && (is_directive || trimmed.is_empty()) {
+                directives.push_str(line);
+                directives.push('\n');
+            } else {
+                in_body = true;
+                body.push_str(line);
+                body.push('\n');
+            }
+        }
+        format!("{directives}fn main() {{\n{body}}}\n")
     }
 
     #[test]
@@ -1834,12 +1894,12 @@ mod tests {
 
     #[test]
     fn fxc_valid_program_has_no_diagnostics() {
-        assert!(super::diagnostics("let a = 1; print(a);", Language::Fxc, None).is_empty());
+        assert!(super::diagnostics(&wrap("let a = 1; print(a);"), Language::Fxc, None).is_empty());
     }
 
     #[test]
     fn fxc_syntax_error_is_a_transpile_error() {
-        let diags = super::diagnostics("let a = ;", Language::Fxc, None);
+        let diags = super::diagnostics(&wrap("let a = ;"), Language::Fxc, None);
         assert_eq!(diags.len(), 1);
         assert_eq!(
             diags[0].code,
@@ -1849,7 +1909,7 @@ mod tests {
 
     #[test]
     fn fxc_base_mode_rejects_builtin() {
-        let diags = super::diagnostics("#mode BASE\nprint(sqrt(4));", Language::Fxc, None);
+        let diags = super::diagnostics(&wrap("#mode BASE\nprint(sqrt(4));"), Language::Fxc, None);
         assert_eq!(diags.len(), 1);
     }
 
@@ -1865,8 +1925,8 @@ mod tests {
 
     #[test]
     fn fxc_hover_variable_and_constant() {
-        let src = "let hbar = phys.h;";
-        let bare = super::hover(src, Position::new(0, 5), Language::Fxc).expect("bare hbar");
+        let src = wrap("let hbar = phys.h;");
+        let bare = super::hover(&src, Position::new(1, 5), Language::Fxc).expect("bare hbar");
         match bare.contents {
             HoverContents::Markup(markup) => {
                 assert!(markup.value.contains("variable"), "{}", markup.value);
@@ -1874,7 +1934,7 @@ mod tests {
             }
             other => panic!("unexpected hover contents: {other:?}"),
         }
-        let constant = super::hover(src, Position::new(0, 16), Language::Fxc).expect("phys.h");
+        let constant = super::hover(&src, Position::new(1, 16), Language::Fxc).expect("phys.h");
         match constant.contents {
             HoverContents::Markup(markup) => {
                 assert!(markup.value.contains("Planck constant"), "{}", markup.value);
@@ -1886,7 +1946,7 @@ mod tests {
     #[test]
     fn fxc_document_symbols_labels_and_variables() {
         let symbols = super::document_symbols(
-            "label 1;\nlet a = 1;\nfor (let i = 0; i < 3; i = i + 1) { print(i); }",
+            &wrap("label 1;\nlet a = 1;\nfor (let i = 0; i < 3; i = i + 1) { print(i); }"),
             Language::Fxc,
         );
         let names: Vec<String> = symbols.iter().map(|symbol| symbol.name.clone()).collect();
@@ -1897,6 +1957,6 @@ mod tests {
 
     #[test]
     fn fxc_document_symbols_empty_for_malformed_source() {
-        assert!(super::document_symbols("let a = ;", Language::Fxc).is_empty());
+        assert!(super::document_symbols(&wrap("let a = ;"), Language::Fxc).is_empty());
     }
 }

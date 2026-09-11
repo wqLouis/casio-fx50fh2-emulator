@@ -66,6 +66,37 @@ fn labels(language: Language) -> Vec<String> {
         .collect()
 }
 
+/// Wrap a fragment in `fn main() { … }`, the universal entry point.
+///
+/// Leading `#mode`/`#data`/`#tests`/`#include` directives stay at the top
+/// level, where the preprocessor expects them, and a source that already
+/// defines `main` is returned unchanged. The wrapper adds one line before the
+/// body (plus one per leading directive), so tests that assert on exact line
+/// numbers account for the shift.
+fn wrap(source: &str) -> String {
+    if source.contains("fn main") {
+        return source.to_string();
+    }
+
+    let mut directives = String::new();
+    let mut body = String::new();
+    let mut in_body = false;
+    for line in source.lines() {
+        let trimmed = line.trim_start();
+        let is_directive = trimmed.starts_with('#');
+        if !in_body && (is_directive || trimmed.is_empty()) {
+            directives.push_str(line);
+            directives.push('\n');
+        } else {
+            in_body = true;
+            body.push_str(line);
+            body.push('\n');
+        }
+    }
+
+    format!("{directives}fn main() {{\n{body}}}\n")
+}
+
 // ---------------------------------------------------------------------------
 // Language selection
 
@@ -96,30 +127,35 @@ fn language_from_path() {
 
 #[test]
 fn valid_fxc_program_has_no_diagnostics() {
-    let source = "let a = input();\nlet b = a * 2;\nprint(b);\n";
-    assert!(diagnostics(source, Language::Fxc, None).is_empty());
+    let source = wrap("let a = input();\nlet b = a * 2;\nprint(b);\n");
+    assert!(diagnostics(&source, Language::Fxc, None).is_empty());
 }
 
 #[test]
 fn fxc_syntax_error_is_a_single_transpile_error() {
-    let diags = diagnostics("let a = ;", Language::Fxc, None);
+    let source = wrap("let a = ;");
+    let diags = diagnostics(&source, Language::Fxc, None);
     assert_eq!(diags.len(), 1);
     assert_eq!(code(&diags[0]), "Transpile ERROR");
-    assert_eq!(diags[0].range.start.line, 0);
-    assert_eq!(diags[0].range.end.line, 0);
+    // `fn main() {` is line 0, so the body's first line is line 1.
+    assert_eq!(diags[0].range.start.line, 1);
+    assert_eq!(diags[0].range.end.line, 1);
 }
 
 #[test]
 fn fxc_base_mode_rejects_a_builtin() {
-    let diags = diagnostics("#mode BASE\nprint(sqrt(4));", Language::Fxc, None);
+    let source = wrap("#mode BASE\nprint(sqrt(4));");
+    let diags = diagnostics(&source, Language::Fxc, None);
     assert_eq!(diags.len(), 1);
     assert_eq!(code(&diags[0]), "Transpile ERROR");
-    assert_eq!(diags[0].range.start.line, 1, "error should point at sqrt");
+    // `#mode` is line 0 and `fn main() {` is line 1, so `sqrt` is on line 2.
+    assert_eq!(diags[0].range.start.line, 2, "error should point at sqrt");
 }
 
 #[test]
 fn fxc_unknown_function_is_reported() {
-    let diags = diagnostics("print(nope(1));", Language::Fxc, None);
+    let source = wrap("print(nope(1));");
+    let diags = diagnostics(&source, Language::Fxc, None);
     assert_eq!(diags.len(), 1);
     assert!(
         diags[0].message.contains("unknown function"),
@@ -130,29 +166,32 @@ fn fxc_unknown_function_is_reported() {
 
 #[test]
 fn fxc_phys_constant_is_valid() {
-    let source = "let f = input();\nlet energy = phys.h * f;\nprint(energy);\n";
-    assert!(diagnostics(source, Language::Fxc, None).is_empty());
+    let source = wrap("let f = input();\nlet energy = phys.h * f;\nprint(energy);\n");
+    assert!(diagnostics(&source, Language::Fxc, None).is_empty());
 }
 
 #[test]
 fn fxc_compile_time_features_are_valid() {
-    let source = "#data config = { \"n\": 3, \"xs\": [1, 2] };\n\
+    let source = wrap(
+        "#data config = { \"n\": 3, \"xs\": [1, 2] };\n\
                   const k = config.n;\n\
                   let total = config.xs[1] * k;\n\
                   print(total);\n\
                   free total;\n\
                   let next = k;\n\
-                  print(next);\n";
+                  print(next);\n",
+    );
     assert!(
-        diagnostics(source, Language::Fxc, None).is_empty(),
+        diagnostics(&source, Language::Fxc, None).is_empty(),
         "{:?}",
-        diagnostics(source, Language::Fxc, None)
+        diagnostics(&source, Language::Fxc, None)
     );
 }
 
 #[test]
 fn fxc_use_after_free_is_reported() {
-    let diags = diagnostics("let a = 1;\nfree a;\nprint(a);\n", Language::Fxc, None);
+    let source = wrap("let a = 1;\nfree a;\nprint(a);\n");
+    let diags = diagnostics(&source, Language::Fxc, None);
     assert_eq!(diags.len(), 1);
     assert_eq!(code(&diags[0]), "Transpile ERROR");
     assert!(
@@ -160,38 +199,36 @@ fn fxc_use_after_free_is_reported() {
         "{}",
         diags[0].message
     );
-    assert_eq!(diags[0].range.start.line, 2, "should point at the use");
+    assert_eq!(diags[0].range.start.line, 3, "should point at the use");
 }
 
 #[test]
 fn fxc_redeclaration_of_a_live_name_is_reported() {
-    let diags = diagnostics("let x = 1;\nlet x = 2;\n", Language::Fxc, None);
+    let source = wrap("let x = 1;\nlet x = 2;\n");
+    let diags = diagnostics(&source, Language::Fxc, None);
     assert_eq!(diags.len(), 1);
     assert!(
         diags[0].message.contains("already declared"),
         "{}",
         diags[0].message
     );
-    assert_eq!(diags[0].range.start.line, 1);
+    assert_eq!(diags[0].range.start.line, 2);
 }
 
 #[test]
 fn fxc_redeclaration_after_free_is_clean() {
-    let source = "let x = input();\nfree x;\nlet x = input();\nprint(x);\n";
+    let source = wrap("let x = input();\nfree x;\nlet x = input();\nprint(x);\n");
     assert!(
-        diagnostics(source, Language::Fxc, None).is_empty(),
+        diagnostics(&source, Language::Fxc, None).is_empty(),
         "{:?}",
-        diagnostics(source, Language::Fxc, None)
+        diagnostics(&source, Language::Fxc, None)
     );
 }
 
 #[test]
 fn fxc_checked_free_with_a_jump_is_reported() {
-    let diags = diagnostics(
-        "let a = 1;\nfree a;\ngoto 1;\nlabel 1;\n",
-        Language::Fxc,
-        None,
-    );
+    let source = wrap("let a = 1;\nfree a;\ngoto 1;\nlabel 1;\n");
+    let diags = diagnostics(&source, Language::Fxc, None);
     assert_eq!(diags.len(), 1);
     assert!(
         diags[0].message.contains("unsafe_free"),
@@ -202,7 +239,8 @@ fn fxc_checked_free_with_a_jump_is_reported() {
 
 #[test]
 fn fxc_double_free_is_reported() {
-    let diags = diagnostics("let a = 1;\nfree a;\nfree a;\n", Language::Fxc, None);
+    let source = wrap("let a = 1;\nfree a;\nfree a;\n");
+    let diags = diagnostics(&source, Language::Fxc, None);
     assert_eq!(diags.len(), 1);
     assert!(
         diags[0].message.contains("double free"),
@@ -213,7 +251,8 @@ fn fxc_double_free_is_reported() {
 
 #[test]
 fn fxc_const_of_a_variable_is_reported() {
-    let diags = diagnostics("let a = 1;\nconst k = a;\n", Language::Fxc, None);
+    let source = wrap("let a = 1;\nconst k = a;\n");
+    let diags = diagnostics(&source, Language::Fxc, None);
     assert_eq!(diags.len(), 1);
     assert_eq!(code(&diags[0]), "Transpile ERROR");
     assert!(
@@ -225,11 +264,8 @@ fn fxc_const_of_a_variable_is_reported() {
 
 #[test]
 fn fxc_missing_data_file_is_reported() {
-    let diags = diagnostics(
-        "#data v = \"definitely-missing.json\";\nprint(v);\n",
-        Language::Fxc,
-        None,
-    );
+    let source = wrap("#data v = \"definitely-missing.json\";\nprint(v);\n");
+    let diags = diagnostics(&source, Language::Fxc, None);
     assert_eq!(diags.len(), 1);
     assert_eq!(code(&diags[0]), "Transpile ERROR");
     assert!(
@@ -243,18 +279,15 @@ fn fxc_missing_data_file_is_reported() {
 fn fxc_data_file_resolves_against_the_document_directory() {
     let dir = TempDir::new("data");
     dir.write("values.json", r#"{ "scale": 10 }"#);
-    let source = "#data v = \"values.json\";\nprint(v.scale);\n";
-    assert!(diagnostics(source, Language::Fxc, Some(dir.path())).is_empty());
+    let source = wrap("#data v = \"values.json\";\nprint(v.scale);\n");
+    assert!(diagnostics(&source, Language::Fxc, Some(dir.path())).is_empty());
 }
 
 #[test]
 fn missing_include_is_an_include_error_naming_the_path() {
     let dir = TempDir::new("missing-include");
-    let diags = diagnostics(
-        "let a = 1;\n#include \"nope-missing.fxc\"\n",
-        Language::Fxc,
-        Some(dir.path()),
-    );
+    let source = wrap("let a = 1;\n#include \"nope-missing.fxc\"\n");
+    let diags = diagnostics(&source, Language::Fxc, Some(dir.path()));
     assert_eq!(diags.len(), 1, "expected exactly one diagnostic: {diags:?}");
     assert_eq!(code(&diags[0]), "Include ERROR");
     assert!(
@@ -262,22 +295,23 @@ fn missing_include_is_an_include_error_naming_the_path() {
         "message should name the missing path: {}",
         diags[0].message
     );
-    assert_eq!(diags[0].range.start.line, 1, "include is on line 2");
+    assert_eq!(diags[0].range.start.line, 2, "include is on line 3");
 }
 
 #[test]
 fn include_resolves_relative_to_the_base_dir() {
     let dir = TempDir::new("valid-include");
     dir.write("lib/squares.fxc", "let squared = value * value;");
-    let source = "let value = input();\n#include \"lib/squares.fxc\"\nprint(squared);\n";
-    assert!(diagnostics(source, Language::Fxc, Some(dir.path())).is_empty());
+    let source = wrap("let value = input();\n#include \"lib/squares.fxc\"\nprint(squared);\n");
+    assert!(diagnostics(&source, Language::Fxc, Some(dir.path())).is_empty());
 }
 
 #[test]
 fn a_missing_base_dir_does_not_panic() {
     let missing = std::env::temp_dir().join("fx-lsp-base-dir-that-does-not-exist");
     let _ = std::fs::remove_dir_all(&missing);
-    let diags = diagnostics("let a = 1;", Language::Fxc, Some(missing.as_path()));
+    let source = wrap("let a = 1;");
+    let diags = diagnostics(&source, Language::Fxc, Some(missing.as_path()));
     assert!(diags.is_empty());
 }
 
@@ -382,54 +416,60 @@ fn prgm_completion_is_unchanged() {
 
 #[test]
 fn fxc_hover_on_keyword() {
-    let hover = hover("let a = 1;", Position::new(0, 1), Language::Fxc).expect("let");
+    let source = wrap("let a = 1;");
+    let hover = hover(&source, Position::new(1, 1), Language::Fxc).expect("let");
     assert!(markup(&hover).contains("declare a variable"), "{hover:?}");
 }
 
 #[test]
 fn fxc_hover_on_builtin() {
-    let src = "sqrt(4)";
-    let hover = hover(src, Position::new(0, 1), Language::Fxc).expect("sqrt");
+    let src = wrap("sqrt(4)");
+    let hover = hover(&src, Position::new(1, 1), Language::Fxc).expect("sqrt");
     let value = markup(&hover);
     assert!(value.contains("built-in function"), "{value}");
     assert_eq!(
         hover.range,
-        Some(Range::new(Position::new(0, 0), Position::new(0, 4)))
+        Some(Range::new(Position::new(1, 0), Position::new(1, 4)))
     );
 }
 
 #[test]
 fn fxc_hover_on_pi() {
-    let hover = hover("pi", Position::new(0, 1), Language::Fxc).expect("pi");
+    let src = wrap("pi");
+    let hover = hover(&src, Position::new(1, 1), Language::Fxc).expect("pi");
     assert!(markup(&hover).contains("constant"), "{hover:?}");
 }
 
 #[test]
 fn fxc_hover_on_phys_constant_names_planck() {
-    let planck = hover("phys.h", Position::new(0, 5), Language::Fxc).expect("phys.h");
+    let src = wrap("phys.h");
+    let planck = hover(&src, Position::new(1, 5), Language::Fxc).expect("phys.h");
     let value = markup(&planck);
     assert!(value.contains("Planck constant"), "{value}");
     assert!(value.contains("CONST 06"), "{value}");
     assert_eq!(
         planck.range,
-        Some(Range::new(Position::new(0, 5), Position::new(0, 6)))
+        Some(Range::new(Position::new(1, 5), Position::new(1, 6)))
     );
 
     // Whitespace around the dot is ignored, matching the parser.
-    let spaced = hover("phys . h", Position::new(0, 7), Language::Fxc).expect("phys . h");
+    let spaced_src = wrap("phys . h");
+    let spaced = hover(&spaced_src, Position::new(1, 7), Language::Fxc).expect("phys . h");
     assert!(markup(&spaced).contains("Planck constant"));
 }
 
 #[test]
 fn fxc_hover_on_whitespace_is_none() {
-    assert!(hover("let a = 1;", Position::new(0, 3), Language::Fxc).is_none());
+    let source = wrap("let a = 1;");
+    assert!(hover(&source, Position::new(1, 3), Language::Fxc).is_none());
     assert!(hover("   ", Position::new(0, 1), Language::Fxc).is_none());
 }
 
 #[test]
 fn fxc_bare_constant_name_is_described_as_a_variable() {
     // In `.fxc`, `hbar` without the `phys.` namespace is an ordinary variable.
-    let hover = hover("let hbar = phys.h;", Position::new(0, 5), Language::Fxc).expect("hbar");
+    let source = wrap("let hbar = phys.h;");
+    let hover = hover(&source, Position::new(1, 5), Language::Fxc).expect("hbar");
     let value = markup(&hover);
     assert!(value.contains("variable"), "{value}");
     assert!(
@@ -443,8 +483,10 @@ fn fxc_bare_constant_name_is_described_as_a_variable() {
 
 #[test]
 fn fxc_document_symbols_list_labels_and_variables() {
-    let source = "label 1;\nlet total = 1;\nfor (let i = 0; i < 3; i = i + 1) {\n  total = total + i;\n}\nlabel 2;\n";
-    let symbols = document_symbols(source, Language::Fxc);
+    let source = wrap(
+        "label 1;\nlet total = 1;\nfor (let i = 0; i < 3; i = i + 1) {\n  total = total + i;\n}\nlabel 2;\n",
+    );
+    let symbols = document_symbols(&source, Language::Fxc);
     let names: Vec<String> = symbols.iter().map(|symbol| symbol.name.clone()).collect();
     for expected in ["label 1", "label 2", "total", "i"] {
         assert!(
@@ -453,20 +495,21 @@ fn fxc_document_symbols_list_labels_and_variables() {
         );
     }
 
-    // Sorted by position, with plausible ranges.
+    // Sorted by position, with plausible ranges. The wrapper puts the body on
+    // lines 1..=6, so `label 2` sits on the last body line.
     let mut previous = (0u32, 0u32);
     for symbol in &symbols {
         let here = (symbol.range.start.line, symbol.range.start.character);
         assert!(here >= previous, "symbols out of order: {names:?}");
         previous = here;
-        assert!(symbol.range.start.line < 6);
+        assert!(symbol.range.start.line < 7);
     }
 }
 
 #[test]
 fn fxc_document_symbols_list_arrays_with_their_size() {
-    let source = "let v[3] = {1, 2, 3};\nlet total = v[0] + v[1];\n";
-    let symbols = document_symbols(source, Language::Fxc);
+    let source = wrap("let v[3] = {1, 2, 3};\nlet total = v[0] + v[1];\n");
+    let symbols = document_symbols(&source, Language::Fxc);
     let array = symbols
         .iter()
         .find(|symbol| symbol.name == "v")
@@ -481,20 +524,21 @@ fn fxc_document_symbols_list_arrays_with_their_size() {
 #[test]
 fn fxc_array_diagnostics_are_reported_against_the_document() {
     // The index is out of range, which the transpiler catches while building.
-    let source = "let v[3] = {1, 2, 3};\nprint(v[3]);\n";
-    let diagnostics = diagnostics(source, Language::Fxc, Some(Path::new(".")));
+    let source = wrap("let v[3] = {1, 2, 3};\nprint(v[3]);\n");
+    let diagnostics = diagnostics(&source, Language::Fxc, Some(Path::new(".")));
     assert_eq!(diagnostics.len(), 1, "{diagnostics:#?}");
     let message = &diagnostics[0].message;
     assert!(
         message.contains("index 3 is out of range for `v` (length 3)"),
         "{message}"
     );
-    assert_eq!(diagnostics[0].range.start.line, 1);
+    assert_eq!(diagnostics[0].range.start.line, 2);
 }
 
 #[test]
 fn fxc_document_symbols_deduplicate_names() {
-    let symbols = document_symbols("let a = 1;\nlet a = 2;\n", Language::Fxc);
+    let source = wrap("let a = 1;\nlet a = 2;\n");
+    let symbols = document_symbols(&source, Language::Fxc);
     assert_eq!(
         symbols.iter().filter(|symbol| symbol.name == "a").count(),
         1
@@ -503,8 +547,8 @@ fn fxc_document_symbols_deduplicate_names() {
 
 #[test]
 fn fxc_document_symbols_are_empty_for_malformed_source() {
-    assert!(document_symbols("let a = ;", Language::Fxc).is_empty());
-    assert!(document_symbols("@@@", Language::Fxc).is_empty());
+    assert!(document_symbols(&wrap("let a = ;"), Language::Fxc).is_empty());
+    assert!(document_symbols(&wrap("@@@"), Language::Fxc).is_empty());
 }
 
 // ---------------------------------------------------------------------------
