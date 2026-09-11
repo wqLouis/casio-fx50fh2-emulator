@@ -300,7 +300,7 @@ pub fn diagnostics(source: &str, language: Language, base_dir: Option<&Path>) ->
 /// The range prefers the error's 1-based line/column and falls back to its
 /// byte offset when those are unknown.  The code distinguishes an error in the
 /// document itself (`Transpile ERROR`) from one that involves another file —
-/// an included fragment, or an `#include` that could not be resolved
+/// an included library, or an `#include` that could not be resolved
 /// (`Include ERROR`).  The offending file is named in the message either way.
 pub fn transpile_diagnostic(source: &str, err: &TranspileError) -> Diagnostic {
     let range = if err.line == 0 || err.column == 0 {
@@ -331,7 +331,7 @@ pub fn transpile_diagnostic(source: &str, err: &TranspileError) -> Diagnostic {
 ///
 /// [`fx_transpiler::transpile_with_base`] transpiles anonymous text, so a
 /// compile error in the document carries no `file`, while an error inside an
-/// included fragment names that fragment.  An `#include` that cannot be
+/// included library names that library.  An `#include` that cannot be
 /// resolved at the root is reported without a file too, so its message is the
 /// only signal.
 fn is_include_error(err: &TranspileError) -> bool {
@@ -339,7 +339,7 @@ fn is_include_error(err: &TranspileError) -> bool {
         || err.message.starts_with("cannot include")
         || err.message.starts_with("circular `#include`")
         || err.message.starts_with("`#include`")
-        || err.message.contains("included fragment")
+        || err.message.contains("included file")
 }
 
 // ---------------------------------------------------------------------------
@@ -870,7 +870,7 @@ fn fxc_completion_items() -> Vec<CompletionItem> {
             kind: Some(CompletionItemKind::KEYWORD),
             detail: Some("inline another `.fxc` file".to_string()),
             documentation: Some(Documentation::String(
-                "Include another `.fxc` fragment, resolved relative to this file".to_string(),
+                "Include another `.fxc` library, resolved relative to this file".to_string(),
             )),
             insert_text: Some("#include \"$0\"".to_string()),
             insert_text_format: Some(InsertTextFormat::SNIPPET),
@@ -1563,7 +1563,7 @@ mod tests {
             .collect()
     }
 
-    /// Wrap a fragment in `fn main() { … }`, the universal entry point.
+    /// Wrap a snippet in `fn main() { … }`, the universal entry point.
     ///
     /// Mirrors `crates/fx-transpiler/tests/common/mod.rs`: leading directives
     /// stay at the top level and a source that already defines `main` is

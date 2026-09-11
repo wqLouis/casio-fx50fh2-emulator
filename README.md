@@ -232,8 +232,10 @@ fn main() {
   `constants.fxc` (the 40 scientific constants), `compiletime.fxc` (`#data`,
   `const`, `free`), `arrays.fxc` (one memory per element), `determinant.fxc`
   (a 3x3 determinant against the seven-memory limit), `functions.fxc`
-  (user-defined functions, inlined at each call), and `include.fxc`, which
-  splits its work across [`examples/lib/`](examples/lib).
+  (user-defined functions, inlined at each call), and `include.fxc`, which pulls
+  in the [`examples/lib/`](examples/lib) libraries. A library is a `.fxc` file of
+  `fn` definitions with no `fn main()`; it builds on its own and is included at
+  the top level.
 
 The `.fxc` examples carry their own test cases, so they can be checked with:
 

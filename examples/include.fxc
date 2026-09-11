@@ -1,13 +1,20 @@
-// Pulls in shared fragments at transpile time.
+// Pulls in a library of functions at transpile time.
 //
-// `fx50 build examples/include.fxc` inlines each `#include` before compiling,
-// so the calculator only ever sees one flat program. Removing the files under
+// `fx50 build examples/include.fxc` inlines each `#include` before compiling, so
+// the calculator only ever sees one flat program. Removing the files under
 // `examples/lib/` stops this building — that is the point of the example.
+//
+// `#include` is a **top-level** directive: a library contributes `fn`
+// definitions to be *called*, not statements spliced into a body. Putting the
+// include inside `main` is an error, which is what keeps every file's meaning
+// local to itself — `squares.fxc` cannot see this file's `n`, and this file
+// cannot be surprised by a name the library happens to define.
+
+#include "lib/squares.fxc"
 
 fn main() {
     let n = input();
-    #include "lib/squares.fxc"
-    print(result);
+    print(square_plus_one(n));
 }
 
 #tests = [

@@ -26,9 +26,11 @@ this document is about the language, not the Rust API.
 ```text
 program    := directive* item*
 item       := funndef | 'const' NAME '=' expr ';'
-             -- every program needs `fn main()`; no statements at the top level
+             -- a file with no `fn main()` is a library: it defines functions
+             -- for another program to `#include`, and builds to nothing
 funndef    := 'fn' NAME '(' [NAME (',' NAME)*] ')' ('=' expr ';' | body)
 directive  := '#mode' MODENAME             -- must be first if present
+            | '#include' STRING             -- top-level only; a library
             | '#data' NAME '=' JSON ';'    -- may appear anywhere
             | '#tests' '=' JSON ';'        -- sugar for `#data tests = ...`
 stmt       := 'let' NAME '=' expr ';'      -- declaration
@@ -936,31 +938,38 @@ an ordinary consumer of this facility rather than a special case.
 
 ## Sharing code with `#include`
 
-A program can pull in another file's text at transpile time:
+A program can pull in a **library** — another file of `fn` definitions — at
+transpile time:
 
 ```c
 // main.fxc
+#include "lib/squares.fxc"
+
 fn main() {
     let n = input();
-    #include "lib/squares.fxc"
-    print(result);
+    print(square_plus_one(n));
 }
 ```
 
 ```c
 // lib/squares.fxc
-let n_squared = n * n;
 #include "increment.fxc"
+
+fn square(n) = n * n;
+fn square_plus_one(n) = increment(square(n));
 ```
 
-`fx50 build main.fxc` inlines both fragments before compiling, so the
-calculator only ever sees one flat program:
+```c
+// lib/increment.fxc
+fn increment(x) = x + 1;
+```
+
+`fx50 build main.fxc` inlines both libraries before compiling, so the calculator
+only ever sees one flat program:
 
 ```text
 ?→A
-A×A→B
-B+1→C
-C◢
+A×A+1◢
 ```
 
 This is the `.fxc` analogue of C's `#include` or Rust's `include_str!`. It is
@@ -970,31 +979,64 @@ Rules:
 
 * The directive is `#include "path"` and must be the first thing on its line
   (leading whitespace is fine, and a trailing `// comment` is allowed).
+* **It is a top-level directive.** A library contributes `fn` definitions — and
+  optionally compile-time `const`/`#data` values — to be *called*. It does not
+  contribute statements to be spliced into a body: an `#include` inside a `fn`
+  body is an error.
 * The path is resolved **relative to the file containing the directive**, so a
-  fragment can include its own neighbours without knowing who included it.
+  library can include its own neighbours without knowing who included it.
 * Includes nest, and a cycle is reported with the chain rather than looping.
 * Expansion is textual and unguarded, exactly like C: including a file twice
   includes its text twice.
-* **A fragment is spliced text.** A fragment of `fn` definitions (with any
-  top-level `const`s) is placed at the top level; an included library
-  contributes only its function names, and each function is scoped to its own
-  parameters and locals (see [Functions](#functions)). A fragment of
-  **statements** must be included inside a function body — normally `main` —
-  because no statement runs at the top level; its statements then share that
-  body's names and memories. Names in spliced statements are allocated in
-  expanded source order, so a fragment's variables are numbered where the
-  `#include` line sits.
 * `#mode` may only appear in the root file, since the mode applies to the whole
-  program. A fragment that declares one is an error.
+  program. A library that declares one is an error.
 
 The include itself never reaches the calculator — only the expanded program
 does. Diagnostics are reported against the file and line that actually caused
-them, even when the error is inside a fragment:
+them, even when the error is inside a library:
 
 ```console
 $ fx50 build main.fxc
 fx50: unknown function `nope` (lib/squares.fxc:2:11)
 ```
+
+### A library is a file in its own right
+
+A library has **no `fn main()`**, and that is not an error. It is a valid file
+that defines functions, so it can be built, checked and opened in an editor on
+its own:
+
+```console
+$ fx50 build lib/squares.fxc     # succeeds; prints nothing, because there is
+                                 # no `main` and so no program to emit
+$ fx50 run   lib/squares.fxc
+fx50: nothing to run: `lib/squares.fxc` has no `fn main()`; it defines functions
+      for another program to `#include`
+```
+
+Because a library cannot see its includer, its dependencies are all in its
+signature. `fn square(n)` above takes `n` as a parameter rather than reading a
+variable named `n` from whoever called it:
+
+```c
+// lib/broken.fxc
+fn square() = n * n;
+```
+
+```console
+$ fx50 build lib/broken.fxc
+fx50: `n` is not defined in `square`; declare it with `let`/`const`, add it as a
+      parameter, or make it a top-level `const` (lib/broken.fxc:1:15)
+```
+
+That error appearing when the *library* is built is the point: a mistake is
+reported where it is written, not when some other program happens to include it.
+
+That is the point. A library used to be a *fragment* of statements spliced into
+whatever included it — sharing the includer's variables and memories — which
+made a file's meaning depend on where it was included, let an `#include`
+silently introduce or overwrite the includer's memories, and left a file that
+defines nothing runnable unable to say so (ADR 0026).
 
 ## Testing a program with `#tests`
 

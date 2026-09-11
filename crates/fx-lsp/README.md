@@ -47,7 +47,7 @@ diagnostic from `fx-transpiler`:
   document itself.
 * **`Include ERROR`** — the failure involves another file: an `#include` that
   cannot be resolved or is circular, or a compile error inside an included
-  fragment. The message names the offending path.
+  library. The message names the offending path.
 
 The range uses the error's 1-based line/column (`line-1`, `column-1 .. column`,
 converted to UTF-16 columns) and falls back to the byte offset when those are

@@ -88,9 +88,12 @@ source ─► #include ─► #data/#tests ─► lexer ─► parser ─► fun
 
 Preprocessing is textual and happens before lexing: `#include` splices files,
 then `#data`/`#tests` extract JSON and blank the directive (keeping newlines, so
-diagnostics still point at the line the user wrote). `functions.rs` then
+diagnostics still point at the line the user wrote). `#include` is a top-level
+directive, and an included file is a **library** — `fn` definitions to be
+called, never statements spliced into a body (ADR 0026). `functions.rs` then
 resolves the `fn main()` entry point and inlines every user function call (see
-ADR 0022).
+ADR 0022). A file with no `main` is a library and expands to an empty program,
+so a library is buildable and checkable on its own.
 
 The passes that follow exist because the machine has only **680 bytes of program
 storage shared by all four program areas**, and it stores one byte per key:
@@ -149,7 +152,7 @@ The CLI exposes it as `fx50 lsp`. Editor wiring is described in
 | C-like front end: `const`, `free`/`unsafe_free`, `#data`, `#tests`, `#include` | ✅ |
 | User-defined functions (`fn`, inlined; `fn main()` entry point, scoped bodies) | ✅ |
 | Full PRGM key coverage: postfix/infix keys, `stat.` and `phys.` namespaces, setup/clear/data keys, `and`-family, `⇒`, base literals | ✅ |
-| `#include` for sharing fragments (transpile-time, C-style) | ✅ |
+| `#include` for sharing libraries (transpile-time, top-level, C-style) | ✅ |
 | `#data` / `#tests` compile-time JSON, and a zero-dependency JSON parser | ✅ |
 | JSON test suites, embedded in the program or standalone (`fx50 test`) | ✅ |
 | Memory plan report (`fx50 regs`) | ✅ |

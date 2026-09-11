@@ -66,7 +66,7 @@ fn labels(language: Language) -> Vec<String> {
         .collect()
 }
 
-/// Wrap a fragment in `fn main() { … }`, the universal entry point.
+/// Wrap a snippet in `fn main() { … }`, the universal entry point.
 ///
 /// Leading `#mode`/`#data`/`#tests`/`#include` directives stay at the top
 /// level, where the preprocessor expects them, and a source that already
@@ -286,8 +286,8 @@ fn fxc_data_file_resolves_against_the_document_directory() {
 #[test]
 fn missing_include_is_an_include_error_naming_the_path() {
     let dir = TempDir::new("missing-include");
-    let source = wrap("let a = 1;\n#include \"nope-missing.fxc\"\n");
-    let diags = diagnostics(&source, Language::Fxc, Some(dir.path()));
+    let source = "#include \"nope-missing.fxc\"\nfn main() {\n    let a = 1;\n}\n";
+    let diags = diagnostics(source, Language::Fxc, Some(dir.path()));
     assert_eq!(diags.len(), 1, "expected exactly one diagnostic: {diags:?}");
     assert_eq!(code(&diags[0]), "Include ERROR");
     assert!(
@@ -295,15 +295,64 @@ fn missing_include_is_an_include_error_naming_the_path() {
         "message should name the missing path: {}",
         diags[0].message
     );
-    assert_eq!(diags[0].range.start.line, 2, "include is on line 3");
+    assert_eq!(diags[0].range.start.line, 0, "include is on line 1");
 }
 
 #[test]
 fn include_resolves_relative_to_the_base_dir() {
     let dir = TempDir::new("valid-include");
-    dir.write("lib/squares.fxc", "let squared = value * value;");
-    let source = wrap("let value = input();\n#include \"lib/squares.fxc\"\nprint(squared);\n");
-    assert!(diagnostics(&source, Language::Fxc, Some(dir.path())).is_empty());
+    dir.write("lib/squares.fxc", "fn square(x) = x * x;");
+    let source = "#include \"lib/squares.fxc\"\nfn main() {\n    let value = input();\n    \
+                  print(square(value));\n}\n";
+    assert!(diagnostics(source, Language::Fxc, Some(dir.path())).is_empty());
+}
+
+/// A library has no `fn main()`, and an editor must not flag that as an error —
+/// the whole point of a library is that it is included by something else.
+#[test]
+fn a_library_without_main_is_not_a_diagnostic() {
+    let dir = TempDir::new("library");
+    let source = "fn square(x) = x * x;\nconst k = 2;\n";
+    assert!(
+        diagnostics(source, Language::Fxc, Some(dir.path())).is_empty(),
+        "a library must lint clean: {:?}",
+        diagnostics(source, Language::Fxc, Some(dir.path()))
+    );
+}
+
+/// Including inside a body is the error that replaced statement fragments.
+#[test]
+fn an_include_inside_a_body_is_reported() {
+    let dir = TempDir::new("include-in-body");
+    dir.write("lib.fxc", "fn square(x) = x * x;");
+    let source = "fn main() {\n    #include \"lib.fxc\"\n    print(1);\n}\n";
+    let diags = diagnostics(source, Language::Fxc, Some(dir.path()));
+    assert_eq!(diags.len(), 1, "{diags:?}");
+    assert!(
+        diags[0].message.contains("must be at the top level"),
+        "{}",
+        diags[0].message
+    );
+    assert_eq!(diags[0].range.start.line, 1);
+}
+
+/// An error that belongs to an included file is an `Include ERROR`, whatever
+/// the message says, so the code shown to the user points at the real culprit.
+/// This pins the classification for the `#mode`-in-a-library case, whose
+/// wording has changed before.
+#[test]
+fn an_error_in_a_library_is_an_include_error() {
+    let dir = TempDir::new("library-mode");
+    dir.write("lib.fxc", "#mode CMPLX\nfn f(x) = x;\n");
+    let source = "#include \"lib.fxc\"\nfn main() {\n    print(f(1));\n}\n";
+    let diags = diagnostics(source, Language::Fxc, Some(dir.path()));
+    assert_eq!(diags.len(), 1, "{diags:?}");
+    assert_eq!(code(&diags[0]), "Include ERROR");
+    assert!(
+        diags[0].message.contains("lib.fxc"),
+        "the message should name the library: {}",
+        diags[0].message
+    );
 }
 
 #[test]

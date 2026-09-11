@@ -7,7 +7,7 @@ use std::path::Path;
 /// 1-based line/column of the offending source.
 ///
 /// `file` is set when the error can be attributed to a specific file — an
-/// included fragment, or the root file when transpiling from a path. It is
+/// included library, or the root file when transpiling from a path. It is
 /// `None` for anonymous source, in which case `line`/`column` refer to that
 /// text directly.
 #[derive(Debug, Clone, PartialEq, Eq)]

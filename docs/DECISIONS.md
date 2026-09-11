@@ -992,3 +992,61 @@ fix added >12 000 probes built to sit exactly on the autocorrection boundaries
 (`LMNO` in `0..=20` and `9980..=9999` across 101 exponents and three mantissa
 prefixes), plus explicit carry cases, and a check that every decade of the
 machine's range agrees.
+
+## ADR 0026 — `#include` pulls in libraries, not statement fragments
+
+`.fxc` had two kinds of included file. A **library** contributed `fn`
+definitions, which are hygienic and scoped. A **fragment** contributed loose
+statements, spliced into whatever included it and sharing the includer's seven
+memories:
+
+```c
+// main.fxc
+fn main() {
+    let n = input();
+    #include "lib/squares.fxc"   // contributed `let n_squared = n * n;`
+    print(n_squared);
+}
+```
+
+Fragments are gone. `#include` is now a top-level directive, and an included file
+must be a library.
+
+**Why.** Three problems, in increasing order of severity:
+
+1. *A file's meaning depended on where it was included.* The same fragment
+   produced different programs depending on the includer's names and the
+   expansion point, so it could not be read, tested or reused on its own.
+2. *An include could silently change the program that used it.* A fragment's
+   variables joined the includer's allocation in expanded source order, so
+   adding a statement to a shared file could shift which memory an unrelated
+   variable in the caller received.
+3. *A library could not say what it needed.* With fragments available, a file
+   of `fn` definitions and no `fn main()` was an error — "a program needs an
+   entry point" — which is exactly the bug that prompted this. A file that
+   defines nothing runnable had no way to declare itself a library.
+
+Removing fragments fixes all three at once. A library's dependencies are in its
+signature (`fn square(n)`, not a free `n`), so it composes without reaching into
+anything; it cannot read or create a name in the includer; and it is a valid file
+on its own.
+
+**What a library is, mechanically.** A file whose top level holds `fn`
+definitions and no `main` expands to an **empty program** rather than erroring.
+Building one prints nothing and exits successfully. `fx50 run` on one reports
+`nothing to run: … has no fn main()`, since running nothing silently would be
+worse than saying so. The scope check that rejects a free variable in a function
+runs whether or not there is a `main`, so a library is *checked* as well as
+buildable — a typo in it is reported where it is written rather than only when
+another program includes it.
+
+An `#include` inside a `fn` body is now an error rather than a splice. Detecting
+that is the one genuinely fiddly part: expansion is textual and happens before
+parsing, so the check tracks brace depth per file with a small scanner that skips
+`//` comments, `/* … */` comments and string literals. Braces inside a
+`#data`/`#tests` JSON value are counted but harmless, since the value is valid
+JSON and so balances before the directive ends.
+
+`stray top-level statements` still get the "a program needs an entry point"
+message when nothing at all is defined, because that is the more useful thing to
+say to someone who typed `print(1);` at the top level.

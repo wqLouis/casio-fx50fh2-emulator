@@ -712,7 +712,7 @@ fx50: `sqrt` is not available in BASE mode (needs COMP, CMPLX, SD or REG) (line 
 
 ## 8. Splitting a program with `#include`
 
-A program can inline another file's text at transpile time:
+The other file must be a **library**: `fn` definitions you call by name.
 
 ```c
 // main.fxc
@@ -720,52 +720,62 @@ A program can inline another file's text at transpile time:
 fn main() { let n = input(); print(square(n)); }
 ```
 
-`fx50 build main.fxc` substitutes the fragment before compiling, so the
+```c
+// lib/squares.fxc
+fn square(x) = x * x;
+```
+
+`fx50 build main.fxc` substitutes the library before compiling, so the
 calculator still receives one flat program. This is the `.fxc` analogue of
 C's `#include` or Rust's `include_str!`.
 
 Rules that matter when generating code:
 
 * Syntax is exactly `#include "path"`, starting the line.
-* The path is relative to the file containing the directive, and includes
-  nest.
-* **A fragment may hold statements or `fn` definitions.** A statement is
-  spliced in place and shares the includer's seven memories; a `fn` is scoped to
-  its own parameters and locals, so an included **library** contributes only its
-  function names and cannot pollute the caller:
+* **The include goes at the top level, never inside a `fn` body.** It
+  contributes definitions to be called, not statements to be spliced:
 
   ```c
-  // lib/geometry.fxc
-  fn square(x) = x * x;
-
-  // main.fxc
-  #include "lib/geometry.fxc"
-  fn main() { print(square(4)); }
+  fn main() {
+      #include "lib/squares.fxc"   // ERROR: must be at the top level
+      print(square(4));
+  }
   ```
 
-* Including a file that defines a `fn` makes the program function-based, so it
-  then needs `fn main()` and cannot have loose top-level statements.
-* Variables are allocated in **expanded** source order, so the names inside a
-  spliced statement fragment are numbered where the `#include` line sits. Place includes after
-  the inputs that should be allocated first if the numbering matters to you.
-* The seven-memory budget is shared across all files. Two fragments plus the
-  main program still fit in seven distinct names in total.
-* A fragment may **not** contain `#mode`; only the root file may declare a mode.
-* Expansion is unguarded, so including the same file twice duplicates its
-  statements.
+* The path is relative to the file containing the directive, and includes nest.
+* **A library is scoped to itself.** It sees only its parameters, its own
+  locals, top-level `const`/`#data` values, and other functions — never a name
+  from the program that included it. So a library's dependencies are in its
+  signature:
 
-Errors inside a fragment are reported against that fragment, with its own line
+  ```c
+  // lib/broken.fxc
+  fn square() = n * n;   // ERROR when the library is built: `n` is not defined
+  ```
+
+* A file with no `fn main()` **is** a library, and building it succeeds with
+  empty output. It is checked on its own, so a mistake in it is reported where
+  it is written. `fx50 run` on one says there is nothing to run.
+* A library may not contain `#mode`; only the root file may declare a mode.
+* Only the root file may hold `fn main()`, and it cannot have loose top-level
+  statements beside it.
+* The seven-memory budget is shared across everything that is inlined, so a
+  library's locals are allocated where its calls are expanded, not where the
+  `#include` line sits. Keep libraries small — a function is inlined at each
+  call, and each call's locals take memories.
+* Expansion is unguarded, so including the same file twice duplicates it.
+
+Errors inside a library are reported against that library, with its own line
 numbers:
 
 ```text
 fx50: unknown function `nope` (lib/squares.fxc:2:11)
 ```
 
-Prefer `#include` for sharing code, and put the shared code in `fn`s so the
-caller's memories are untouched. A fragment of bare statements is also allowed,
-but it must be included **inside a function body** (normally `main`) — nothing
-runs at the top level. Such a fragment has no parameters and no return value;
-use a `fn` when you want an interface.
+Prefer `#include` for sharing functions, and give each one parameters so the
+caller's memories are untouched. A library that reaches for a caller's variable
+cannot compile, which is what keeps an include from silently changing the
+program that uses it.
 
 ---
 

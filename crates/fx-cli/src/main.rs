@@ -295,6 +295,14 @@ fn run_file(file: &Path, ascii: bool, mode: Option<Mode>, no_optimize: bool) -> 
     } else {
         read_source(file)?
     };
+    // A `.fxc` file with no `fn main()` is a library: it builds (to nothing) so
+    // that it can be checked and edited on its own, but there is nothing to run.
+    if is_c_like && prgm.trim().is_empty() {
+        return Err(Fail::Message(format!(
+            "nothing to run: `{name}` has no `fn main()`; it defines functions for another \
+             program to `#include`"
+        )));
+    }
     execute(&prgm, &name, mode)
 }
 

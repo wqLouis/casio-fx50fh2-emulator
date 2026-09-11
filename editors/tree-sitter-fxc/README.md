@@ -43,6 +43,12 @@ tree-sitter parse ../../examples/factorial.fxc
 
 ## Coverage
 
+> The grammar is deliberately **permissive**: it accepts a superset of the
+> language so that a file still parses (and highlights) while it is being
+> edited. `#include` is accepted anywhere a directive can appear, for instance,
+> while the transpiler allows it only at the top level — the language server
+> reports that, and a highlighter does not need to.
+
 * `//` line comments and `/* … */` block comments.
 * Directives: `#mode NAME` (case-insensitive, optional `=`),
   `#include "path"`, and the compile-time data tables `#data NAME = <json>;`

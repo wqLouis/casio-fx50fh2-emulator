@@ -1,8 +1,14 @@
-// Fragment: squares `n` into `n_squared`.
+// A library that itself uses another library, showing that `#include` nests.
 //
-// A fragment is plain statements, not a function: it reads and writes the same
-// seven calculator memories as whatever included it. `n` is defined by the
-// including program; `n_squared` is handed back to it.
-let n_squared = n * n;
+// `#include` is a *top-level* directive: it contributes declarations, never
+// statements spliced into a body. So each file here is buildable on its own —
+// `fx50 build examples/lib/squares.fxc` succeeds and prints nothing, because a
+// library has no `fn main()` and therefore nothing to run.
+//
+// Paths resolve relative to the file containing the directive, so the sibling
+// `increment.fxc` is found without knowing where this file was included from.
 
 #include "increment.fxc"
+
+fn square(n) = n * n;
+fn square_plus_one(n) = increment(square(n));

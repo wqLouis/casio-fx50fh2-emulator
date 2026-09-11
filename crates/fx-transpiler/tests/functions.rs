@@ -322,7 +322,7 @@ fn a_library_function_may_call_another_library_function() {
 }
 
 #[test]
-fn a_fragment_may_not_declare_a_mode_even_with_functions() {
+fn a_library_may_not_declare_a_mode_even_with_functions() {
     let dir = TempDir::new("mode-frag");
     dir.write("lib.fxc", "#mode CMPLX\nfn f(x) = x;\n");
     let main = dir.write(
@@ -496,8 +496,27 @@ fn inline_source_gets_functions_from_an_include() {
 // The entry point and scoping
 
 #[test]
-fn functions_need_an_entry_point() {
-    let e = err("fn f(x) = x + 1;");
+fn a_file_without_main_is_a_library() {
+    // A library is not a program: it exists to be `#include`d, so it builds to
+    // an empty program rather than reporting a missing entry point.
+    assert_eq!(transpile("fn f(x) = x + 1;").unwrap(), "");
+    assert_eq!(transpile("const k = 1;").unwrap(), "");
+}
+
+#[test]
+fn a_library_is_checked_on_its_own() {
+    // The scope check runs whether or not there is a `main`, so a typo in a
+    // library is reported where it is written rather than only when another
+    // program includes it.
+    let e = err("fn square() = n * n;");
+    assert!(e.message.contains("`n` is not defined"), "{}", e.message);
+    // A function that names its dependency is fine.
+    assert_eq!(transpile("fn square(n) = n * n;").unwrap(), "");
+}
+
+#[test]
+fn a_loose_statement_still_needs_an_entry_point() {
+    let e = err("print(1);");
     assert!(e.message.contains("needs an entry point"), "{}", e.message);
 }
 

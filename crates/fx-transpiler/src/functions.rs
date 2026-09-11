@@ -68,6 +68,14 @@
 //! * Calling a procedure (block body) from a `while`/`for` condition, where
 //!   hoisting its statements would move them out of the loop.
 //! * An unknown function name, or the wrong number of arguments.
+//! * A loose statement at the top level.
+//!
+//! ## Libraries
+//!
+//! A file with `fn` definitions but **no `fn main()`** is a library: it exists to
+//! be `#include`d by a program. It has nothing to run, so expanding it yields an
+//! empty program rather than an error, which is what lets a library file be
+//! built, linted and opened in an editor on its own.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -120,44 +128,25 @@ pub fn expand(program: Program, source: &str, data: &Data) -> Result<Program, Tr
     // generic top-level rule so the message is specific.
     reject_stray_return(&rest, source)?;
 
-    // With no function at all, every statement is a stray top-level statement,
-    // so the useful message is the entry point, not the per-statement rule.
-    if defs.is_empty() {
-        let pos = rest.first().and_then(stmt_position).unwrap_or(0);
-        return Err(TranspileError::at(
-            source,
-            "a program needs an entry point; add `fn main() { … }`",
-            pos,
-        ));
-    }
-
     // The top level holds only definitions and compile-time values. A loose
     // statement would run in the very namespace the functions are kept out of.
     for stmt in &rest {
         if !matches!(stmt, Stmt::Const { .. }) {
+            // With nothing defined at all, the writer was starting a program and
+            // has simply not reached `main` yet, so name the missing entry point
+            // rather than the top-level rule.
+            let message = if defs.is_empty() {
+                "a program needs an entry point; add `fn main() { … }`"
+            } else {
+                "only `fn` definitions and `const` declarations may appear at the top level; \
+                 move this statement into `fn main()`"
+            };
             return Err(TranspileError::at(
                 source,
-                "only `fn` definitions and `const` declarations may appear at the top level; \
-                 move this statement into `fn main()`",
+                message,
                 stmt_position(stmt).unwrap_or(0),
             ));
         }
-    }
-
-    let Some(main) = defs.get("main") else {
-        let pos = defs.values().map(|def| def.pos).min().unwrap_or(0);
-        return Err(TranspileError::at(
-            source,
-            "a program needs an entry point; add `fn main() { … }`",
-            pos,
-        ));
-    };
-    if !main.params.is_empty() {
-        return Err(TranspileError::at(
-            source,
-            "`main` takes no parameters",
-            main.pos,
-        ));
     }
 
     // Names every function may reach without declaring them: compile-time
@@ -173,10 +162,33 @@ pub fn expand(program: Program, source: &str, data: &Data) -> Result<Program, Tr
 
     // `main` is where a program's loose code lives, so it keeps the classic
     // order-free rules. Every other function is closed.
+    //
+    // This runs whether or not there is a `main`, so that a **library is checked
+    // on its own**. That is most of the value of a library being a file you can
+    // build: a typo in it is reported where it is written, rather than only when
+    // some other program happens to include it.
     for (name, def) in &defs {
         if name != "main" {
             check_scope(def, &globals, source)?;
         }
+    }
+
+    // No `main`: this file is a **library**.
+    //
+    // A library defines functions — and optionally compile-time `const`/`#data`
+    // values — for another program to `#include`. It has nothing to run, so its
+    // expansion is empty, and building it is *not* an error. Libraries used to
+    // carry their own loose statements ("fragments"); see `crate::include` for
+    // why that is gone.
+    let Some(main) = defs.get("main") else {
+        return Ok(Vec::new());
+    };
+    if !main.params.is_empty() {
+        return Err(TranspileError::at(
+            source,
+            "`main` takes no parameters",
+            main.pos,
+        ));
     }
 
     let entry = match &main.expr {
@@ -1945,8 +1957,22 @@ mod tests {
     }
 
     #[test]
-    fn functions_require_an_entry_point() {
-        let err = expanded("fn f(n) = n + 1;").unwrap_err();
+    fn a_file_without_main_is_a_library() {
+        // No `fn main()`: this is a library for another program to `#include`,
+        // so there is nothing to run and the expansion is empty. Building it is
+        // therefore not an error. (`expanded` reports the `Debug` form, so an
+        // empty program is `"[]"`.)
+        assert_eq!(expanded("fn f(n) = n + 1;").unwrap(), "[]");
+        assert_eq!(expanded("const k = 1;").unwrap(), "[]");
+        assert_eq!(expanded("").unwrap(), "[]");
+    }
+
+    #[test]
+    fn a_loose_statement_needs_an_entry_point() {
+        // Nothing is defined, so the writer was starting a program and has not
+        // reached `main`; naming the missing entry point is more useful than the
+        // top-level rule.
+        let err = expanded("print(1);").unwrap_err();
         assert!(
             err.message.contains("needs an entry point"),
             "{}",

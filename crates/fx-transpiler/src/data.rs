@@ -28,7 +28,7 @@
 //!   which is why `#tests = "cases.json";` works. Strings nested inside
 //!   objects or arrays stay strings.
 //! * A file path resolves relative to the file containing the directive, so a
-//!   library fragment can ship its own data.
+//!   library can ship its own data.
 //! * Names are program-global and must be unique.
 //! * Extraction happens after `#include` expansion but before lexing. The
 //!   directive text is blanked out — newlines preserved — so every line number

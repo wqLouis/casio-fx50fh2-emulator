@@ -1,5 +1,7 @@
-// Fragment: adds one to `n_squared`, producing `result`.
+// A one-function library, included by `squares.fxc`.
 //
-// This file is included by another fragment (`squares.fxc`), which shows that
-// includes nest and that paths resolve relative to the *including* file.
-let result = n_squared + 1;
+// A library is a set of `fn` definitions (and optionally `const` values) with
+// no `fn main()` of its own. It defines nothing until another program calls it,
+// and it is inlined at each call, so a call costs exactly its body.
+
+fn increment(x) = x + 1;

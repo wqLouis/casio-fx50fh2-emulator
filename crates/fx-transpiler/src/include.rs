@@ -1,10 +1,12 @@
-//! `#include` preprocessing: inline another file's text at transpile time.
+//! `#include` preprocessing: inline another file at transpile time.
 //!
 //! ```text
 //! // main.fxc
-//! #include "common.fxc"
-//! let a = input();
-//! show(a);
+//! #include "lib/geometry.fxc"
+//!
+//! fn main() {
+//!     print(hypot(3, 4));
+//! }
 //! ```
 //!
 //! This is the `.fxc` analogue of C's `#include` or Rust's `include_str!`: the
@@ -17,13 +19,32 @@
 //! * The directive is `#include "path"`, and must be the first thing on the
 //!   line apart from leading whitespace. An optional `// comment` may follow.
 //! * The path is resolved **relative to the file containing the directive**,
-//!   which is what makes a library of fragments relocatable.
+//!   which is what makes a library relocatable.
+//! * **An include is a top-level directive.** It contributes *declarations* —
+//!   `fn` definitions and compile-time `const`/`#data` values — never statements
+//!   spliced into a body. An `#include` inside a `fn` body is an error; see
+//!   below.
 //! * Includes nest, up to [`MAX_DEPTH`], and a cycle is reported rather than
 //!   recursing forever.
 //! * Expansion is purely textual and unguarded, exactly like C: including the
 //!   same file twice includes its text twice.
-//! * `#mode` may only appear in the root file. A fragment that declares a mode
-//!   is an error, because the mode applies to the whole program.
+//! * `#mode` may only appear in the root file. An included file that declares a
+//!   mode is an error, because the mode applies to the whole program.
+//!
+//! ## Libraries, not fragments
+//!
+//! An included file is a **library**: a set of `fn` definitions (and optionally
+//! `const`/`#data` values) that the including program calls. It has no `fn
+//! main()` of its own, and building it directly is not an error — it simply
+//! produces an empty program, because there is nothing to run.
+//!
+//! Earlier versions also allowed a *statement fragment*: a file of loose
+//! statements spliced into whatever included it, sharing the includer's
+//! variables. That is gone. It made a file's meaning depend on where it was
+//! included, let an include silently introduce or clobber the includer's
+//! memories, and gave a buildable file no way to say what it needed. A library
+//! takes parameters and returns values, so its dependencies are in its signature
+//! rather than in its caller's memory layout.
 //!
 //! Because expansion rewrites the source, byte offsets no longer point into
 //! any real file. [`Expanded`] carries a line map so a diagnostic can be
@@ -137,10 +158,27 @@ impl Expander {
             .map(Path::to_path_buf)
             .unwrap_or_else(|| self.base_dir.clone());
 
+        // Brace depth of the *code* seen so far in this file, used to reject an
+        // `#include` that sits inside a function body. Braces in comments and
+        // string literals do not count, and braces inside a `#data`/`#tests`
+        // value balance out because the value is valid JSON.
+        let mut depth = 0i32;
+        let mut in_block_comment = false;
+
         for (index, line) in source.lines().enumerate() {
             let line_number = index + 1;
 
             if let Some(relative) = parse_include(line) {
+                if depth > 0 {
+                    return Err(TranspileError::at(
+                        source,
+                        "`#include` must be at the top level, not inside a function body: \
+                         a library contributes `fn` definitions to be called, not statements \
+                         spliced into a body",
+                        line_offset(source, line_number),
+                    )
+                    .in_file(at));
+                }
                 self.include(&relative, &dir, source, line_number, at)?;
                 continue;
             }
@@ -148,11 +186,13 @@ impl Expander {
             if !is_root && is_mode_directive(line) {
                 return Err(TranspileError::at(
                     source,
-                    "`#mode` may only appear in the program's own file, not in an included fragment",
+                    "`#mode` may only appear in the program's own file, not in an included file",
                     line_offset(source, line_number),
                 )
                 .in_file(at));
             }
+
+            depth += code_brace_delta(line, &mut in_block_comment);
 
             self.text.push_str(line);
             self.text.push('\n');
@@ -215,6 +255,69 @@ impl Expander {
         self.stack.pop();
         result
     }
+}
+
+/// The net change in brace depth contributed by one line of **code**.
+///
+/// Used only to decide whether an `#include` is inside a function body, so it
+/// errs towards *not* counting a brace: anything inside a `//` comment, a
+/// `/* … */` comment or a string literal is skipped, and `*in_block_comment`
+/// carries the block-comment state across lines.
+///
+/// Braces inside a `#data`/`#tests` JSON value are counted, which is fine: the
+/// value is valid JSON, so they balance out before the directive ends and an
+/// `#include` cannot appear inside it.
+fn code_brace_delta(line: &str, in_block_comment: &mut bool) -> i32 {
+    let bytes = line.as_bytes();
+    let mut i = 0;
+    let mut delta = 0i32;
+    let mut in_string = false;
+
+    while i < bytes.len() {
+        let byte = bytes[i];
+        if *in_block_comment {
+            if byte == b'*' && bytes.get(i + 1) == Some(&b'/') {
+                *in_block_comment = false;
+                i += 2;
+            } else {
+                i += 1;
+            }
+            continue;
+        }
+        if in_string {
+            match byte {
+                // Skip the escaped character, but not past the end of the line.
+                b'\\' => i += 2,
+                b'"' => {
+                    in_string = false;
+                    i += 1;
+                }
+                _ => i += 1,
+            }
+            continue;
+        }
+        match byte {
+            b'/' if bytes.get(i + 1) == Some(&b'/') => break,
+            b'/' if bytes.get(i + 1) == Some(&b'*') => {
+                *in_block_comment = true;
+                i += 2;
+            }
+            b'"' => {
+                in_string = true;
+                i += 1;
+            }
+            b'{' => {
+                delta += 1;
+                i += 1;
+            }
+            b'}' => {
+                delta -= 1;
+                i += 1;
+            }
+            _ => i += 1,
+        }
+    }
+    delta
 }
 
 /// The byte offset of the start of `line` (1-based) in `source`.

@@ -246,17 +246,20 @@ fn the_shipped_examples_pass_through_the_cli() {
 #[test]
 fn includes_resolve_relative_to_the_program() {
     let dir = TempDir::new("includes");
-    dir.write("lib/double.fxc", "// doubles a into b\nlet b = a * 2;");
+    dir.write(
+        "lib/double.fxc",
+        "// doubles its argument\nfn double(n) = n * 2;",
+    );
     let program = dir.write(
         "prog.fxc",
-        "fn main() {\n    let a = input();\n    #include \"lib/double.fxc\"\n    print(b);\n}\n",
+        "#include \"lib/double.fxc\"\nfn main() {\n    let a = input();\n    print(double(a));\n}\n",
     );
 
-    // Build: the fragment is inlined.
+    // Build: the library is inlined.
     let out = fx50().arg("build").arg(&program).output().unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(out.status.success(), "{stdout}");
-    assert_eq!(stdout, "?→A\nA×2→B\nB◢\n");
+    assert_eq!(stdout, "?→A\nA×2◢\n");
 
     // Run: end to end, feeding the `?` prompt.
     let out = fx50()
@@ -297,7 +300,7 @@ fn a_missing_include_is_reported_with_its_location() {
     let dir = TempDir::new("missing-include");
     let program = dir.write(
         "prog.fxc",
-        "fn main() {\n    let a = 1;\n    #include \"nope.fxc\"\n}\n",
+        "#include \"nope.fxc\"\nfn main() {\n    let a = 1;\n}\n",
     );
 
     let out = fx50().arg("build").arg(&program).output().unwrap();
@@ -305,7 +308,31 @@ fn a_missing_include_is_reported_with_its_location() {
     assert!(!out.status.success());
     assert!(stderr.contains("cannot include"), "{stderr}");
     assert!(stderr.contains("nope.fxc"), "{stderr}");
-    assert!(stderr.contains(":3:1"), "{stderr}");
+    assert!(stderr.contains(":1:1"), "{stderr}");
+}
+
+/// A library has no `fn main()`, so there is nothing to run — and saying so is
+/// better than running an empty program silently.
+#[test]
+fn running_a_library_explains_there_is_no_entry_point() {
+    let dir = TempDir::new("run-library");
+    let library = dir.write("lib.fxc", "fn square(x) = x * x;\n");
+
+    // Building it is fine: it is a valid, if empty, program.
+    let out = fx50().arg("build").arg(&library).output().unwrap();
+    assert!(
+        out.status.success(),
+        "{} has no main and must still build",
+        library.display()
+    );
+    assert!(String::from_utf8_lossy(&out.stdout).trim().is_empty());
+
+    // Running it is the error, and the message says why.
+    let out = fx50().arg("run").arg(&library).output().unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success());
+    assert!(stderr.contains("nothing to run"), "{stderr}");
+    assert!(stderr.contains("fn main()"), "{stderr}");
 }
 
 /// `fx50 constants` lists every entry, formatted like the calculator's display.
