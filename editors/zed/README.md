@@ -31,19 +31,38 @@ matches the tokens directly); only the pairing/rainbow colouring is missing.
 Modelling a real `parenthesized_expression` in the grammar would enable it, at
 the cost of regenerating the parser.
 
-## Requirements
+## Installing the language server
 
-The language server is the repository's own `fx50` binary. Build it from the
-repository root:
+**Zed extensions cannot ship the server, so `fx50` has to be installed on your
+system separately.** A Zed extension is a WebAssembly module: Zed compiles it to
+`wasm32-wasip2`, and the only file-facing API is *downloading* a file at
+runtime — there is no way to bundle an executable in the extension, and nowhere
+in `extension.toml` to declare one. So the extension starts `fx50` by looking
+for it (see [How the server binary is located](#how-the-server-binary-is-located)).
+
+The easiest way to provide it is
+[`cargo install`](https://doc.rust-lang.org/cargo/commands/cargo-install.html),
+which puts `fx50` in `~/.cargo/bin` (make sure that is on your `PATH`):
 
 ```bash
-cargo build --release     # produces target/release/fx50
-# or
-cargo build               # produces target/debug/fx50
+# Straight from GitHub, no clone needed:
+cargo install --git https://github.com/wqLouis/casio-fx50fh2-emulator fx-cli
+
+# Or from a clone of this repository:
+git clone https://github.com/wqLouis/casio-fx50fh2-emulator
+cd casio-fx50fh2-emulator
+cargo install --path crates/fx-cli
 ```
 
-The `lsp` subcommand is enabled by default; to build without it (and without
-code completion), use `cargo build --no-default-features -p fx-cli`.
+Either way you get a `fx50` binary; confirm it with `fx50 --version`.
+
+If you are working *in this repository*, you do not need to install anything:
+build with `cargo build` and the extension finds `target/debug/fx50` itself
+(below). That is the workflow the
+[dev-extension instructions](#installing-as-a-dev-extension) assume.
+
+> Auto-downloading the server from a GitHub release, the way many Zed extensions
+> do, is not wired up yet. When it is, this section becomes optional.
 
 ## How the server binary is located
 
@@ -66,10 +85,15 @@ Steps 2 and 3 return an absolute path, so the server spawns regardless of the
 working directory. The command is always started with the single argument
 `lsp`, i.e. `fx50 lsp`.
 
-## Installing (dev extension)
+## Installing as a dev extension
 
-1. Build `fx50` (above) so that `target/release/fx50` or `target/debug/fx50`
-   exists in the repository you open in Zed, or install `fx50` on your `PATH`.
+The extension is not on the Zed extension registry, so it is installed from
+source as a **dev extension**. Either install `fx50` on your `PATH` (see
+[Installing the language server](#installing-the-language-server)), or work in
+this repository so the workspace build is found automatically.
+
+1. Provide `fx50`: `cargo install --git https://github.com/wqLouis/casio-fx50fh2-emulator fx-cli`,
+   or `cargo build` here so `target/debug/fx50` exists.
 2. In Zed, run the `zed: extensions` action to open the Extensions page.
 3. Click **Install Dev Extension** and choose this directory,
    `editors/zed`.
@@ -77,7 +101,8 @@ working directory. The command is always started with the single argument
    bar (`fx-50FH II PRGM` / `fx-50FH II C-like`).
 
 If the server does not start, check Zed's log (`zed: open log`) while launching
-Zed from a terminal with `zed --foreground`.
+Zed from a terminal with `zed --foreground`, and run `zed: reload extensions`
+after changing anything under `editors/zed/`.
 
 ## Grammar revision
 

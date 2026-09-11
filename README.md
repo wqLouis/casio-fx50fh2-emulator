@@ -32,8 +32,16 @@ exactly one binary.
 To put it on your `PATH`:
 
 ```bash
-cargo install --path crates/fx-cli     # -> ~/.cargo/bin/fx50
+# from a clone:
+cargo install --path crates/fx-cli
+
+# or without cloning:
+cargo install --git https://github.com/wqLouis/casio-fx50fh2-emulator fx-cli
 ```
+
+Either way you get `~/.cargo/bin/fx50`. Installing system-wide is also what the
+editor extensions need — they cannot bundle the server, so they look for `fx50`
+on your `PATH` (see [Editor support](#editor-support)).
 
 During development `cargo run -- <args>` runs it without installing, and
 `cargo test` runs the whole test suite. If `fx50` is not on `PATH`, the editor
@@ -93,12 +101,14 @@ The two languages use fixed ids, which every integration below relies on:
 ### VS Code
 
 A client extension plus TextMate grammars live in
-[`editors/vscode/`](editors/vscode). It auto-discovers the `fx50` binary (or you
-can pin one with the `fx50.serverPath` setting).
+[`editors/vscode/`](editors/vscode).
+
+The extension cannot ship the language server, so install `fx50` first — then
+build and install the extension itself:
 
 ```bash
-# 1. build the server
-cargo build
+# 1. install the server (puts `fx50` in ~/.cargo/bin)
+cargo install --git https://github.com/wqLouis/casio-fx50fh2-emulator fx-cli
 
 # 2. build the extension
 cd editors/vscode
@@ -110,26 +120,30 @@ npx @vscode/vsce package        # -> fx50-vscode-<version>.vsix
 code --install-extension fx50-vscode-*.vsix
 ```
 
-Then open any `.fx` or `.fxc` file. To iterate instead, open the
-`editors/vscode` folder in VS Code and press **F5** ("Run Extension").
+Then open any `.fx` or `.fxc` file. The extension looks for the server in the
+`fx50.serverPath` setting, then `PATH`, then the workspace's `target/`, so
+working inside this repository needs no install at all. To iterate on the
+extension, open `editors/vscode` and press **F5** ("Run Extension").
 
 Full details: [`editors/vscode/README.md`](editors/vscode/README.md).
 
 ### Zed
 
 A Zed extension with tree-sitter grammars for both languages lives in
-[`editors/zed/`](editors/zed). It is installed as a **dev extension**:
+[`editors/zed/`](editors/zed).
 
-1. Build the server so `target/debug/fx50` (or `target/release/fx50`) exists in
-   this repository, or put `fx50` on `PATH`:
+Zed extensions are WebAssembly modules and cannot bundle a binary, so install
+`fx50` first (installing from a clone with `cargo install --path crates/fx-cli`
+works too, as does `cargo build` if you are working in this repository), then
+install the extension as a dev extension:
 
-   ```bash
-   cargo build
-   ```
+```bash
+cargo install --git https://github.com/wqLouis/casio-fx50fh2-emulator fx-cli
+```
 
-2. In Zed, run the `zed: extensions` action.
-3. Click **Install Dev Extension** and choose the `editors/zed` directory.
-4. Open a `.fx` or `.fxc` file — the status bar should read
+1. In Zed, run the `zed: extensions` action.
+2. Click **Install Dev Extension** and choose the `editors/zed` directory.
+3. Open a `.fx` or `.fxc` file — the status bar should read
    `fx-50FH II PRGM` / `fx-50FH II C-like`.
 
 If the server does not start, check `zed: open log` while launching Zed from a

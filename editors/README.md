@@ -32,19 +32,37 @@ extension, so the wiring is forgiving.
 
 `--stdio` is accepted and ignored, because many clients append it.
 
-## Building the server
+## Installing the server
 
-All of these need the `fx50` binary. From the repository root:
+All of these need the `fx50` binary on your system. **Editor extensions cannot
+ship it**: a Zed extension is a WebAssembly module and a VS Code extension is a
+zip of JavaScript — neither can carry a platform executable — so `fx50` is
+installed separately and the extension only *finds* it.
+
+The simplest way is [`cargo install`](https://doc.rust-lang.org/cargo/commands/cargo-install.html),
+which puts `fx50` on your `PATH` in `~/.cargo/bin`:
 
 ```bash
-cargo build            # -> target/debug/fx50
-cargo build --release  # -> target/release/fx50
+# Straight from GitHub, no clone needed:
+cargo install --git https://github.com/wqLouis/casio-fx50fh2-emulator fx-cli
+
+# Or from a clone:
+cargo install --path crates/fx-cli
 ```
 
-Put it on `PATH` (so editors find it by name), or point the editor's server
-setting at the absolute path. The VS Code and Zed integrations both also look
-for `target/release/fx50` / `target/debug/fx50` inside the opened workspace, so
-developing in this repository works without installing anything.
+Other ways to provide it:
+
+* **Build it** from a clone (`cargo build --release`) and put
+  `target/release/fx50` somewhere on your `PATH`, or point the editor's server
+  setting at its absolute path (VS Code has `fx50.serverPath`).
+* **Develop in this repository** and do nothing: both integrations also look for
+  `target/release/fx50` / `target/debug/fx50` inside the opened workspace.
+
+Check it works before blaming the editor:
+
+```bash
+fx50 --version
+```
 
 ## Neovim (built-in LSP)
 

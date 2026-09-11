@@ -481,3 +481,54 @@ a message pointing at `free` rather than as an unknown directive.
 
 `const` (ADR 0015) and `#data` remain the first answers to memory pressure,
 because a value that is inlined needs no memory and therefore no `free`.
+
+## ADR 0017 — Extensions do not bundle the language server
+
+The VS Code and Zed integrations both need `fx50` running as a language server.
+Neither ships it; both look for a binary the user installed. That is not a
+preference — bundling is impossible.
+
+**A Zed extension is a WebAssembly module.** Zed compiles extensions to
+`wasm32-wasip2`, and `extension.toml` has no field for shipping files: a
+language extension registers `languages/`, `[grammars.*]` (a Git repository, a
+`rev` and a `path`) and `[language_servers.*]` (a name and the languages it
+applies to). There is no resources directory and no way to declare an
+executable. The only file-facing capability in `zed_extension_api` is
+
+```rust
+download_file(url, path, DownloadedFileType)  // Gzip | GzipTar | Zip | Uncompressed
+```
+
+i.e. fetch one at runtime into the extension's working directory, plus
+`make_file_executable`. Nothing can read bytes out of the bundle, and the
+`Worktree` API is read-only (`which`, `root_path`, `read_text_file`,
+`shell_env`) — so there is no path from "bundled file" to "executable on disk"
+even in principle. A VS Code extension has the same shape of problem: it is a
+zip of JavaScript, with no place to put a platform binary.
+
+**The rejected alternative is runtime download**, which is what many Zed
+extensions do and what this project should eventually do: `latest_github_release`
+→ `current_platform` → `download_file` → `make_file_executable` →
+`set_language_server_installation_status`, with `language_server_command`
+returning the downloaded path. It is not wired up yet because it needs
+infrastructure this repository does not have: a release pipeline cross-compiling
+`fx50` for roughly six OS/architecture pairs on every tag, with the binaries
+attached as release assets. The extension code itself is small; the release
+pipeline is the work. Two further objections to doing it badly are worth
+recording: shipping or fetching executables is a known malware vector (the
+reason the API is download-only in the first place), and an unsigned binary
+materialised on macOS is quarantined by Gatekeeper.
+
+**What we do instead.** `cargo install` puts `fx50` on `PATH`:
+
+```bash
+cargo install --git https://github.com/wqLouis/casio-fx50fh2-emulator fx-cli
+cargo install --path crates/fx-cli     # from a clone
+```
+
+The resolution order is then `PATH` (via `Worktree::which`) → a dep-info probe
+for a build inside the opened worktree → the worktree-root `Cargo.toml` marker
+heuristic, so anyone hacking on this repository needs no install at all. When a
+release pipeline exists, the download becomes a further fallback and the install
+step becomes optional. The user-facing instructions live in
+[`editors/README.md`](../editors/README.md) and each editor's README.

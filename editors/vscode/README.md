@@ -17,16 +17,25 @@ and document symbols.
 
 ## Prerequisites
 
-The extension needs the `fx50` binary, which is built from the repository that
-contains this folder:
+**The extension cannot ship the server, so `fx50` must be installed on your
+system first.** (A VS Code extension is a zip of JavaScript; it has nowhere to
+put a platform executable.) The extension then *finds* it — see
+[How the server path is resolved](#how-the-server-path-is-resolved).
+
+The easiest way is [`cargo install`](https://doc.rust-lang.org/cargo/commands/cargo-install.html),
+which puts `fx50` in `~/.cargo/bin`:
 
 ```bash
-# from the repository root
-cargo build
+# Straight from GitHub, no clone needed:
+cargo install --git https://github.com/wqLouis/casio-fx50fh2-emulator fx-cli
+
+# Or from a clone:
+cargo install --path crates/fx-cli
 ```
 
-That produces `target/debug/fx50` (use `cargo build --release` for
-`target/release/fx50`).
+If you are working in this repository instead, `cargo build` is enough — the
+extension also looks for `target/debug/fx50` in the workspace folder. Confirm
+the binary works with `fx50 --version`.
 
 ## Build the extension
 
