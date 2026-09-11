@@ -332,6 +332,7 @@ native keystroke back out, so a `.fxc` program can reach all of PRGM.
 | `npr(n, r)` / `ncr(n, r)` | `<n>nPr<r>` / `<n>nCr<r>` | |
 | `pol(x, y)` / `rec(x, y)` | `Pol(x,y)` / `Rec(x,y)` | COMP or CMPLX; write into `X`/`Y` |
 | `arg(x)` / `conjg(x)` | `arg(x)` / `Conjg(x)` | CMPLX |
+| `rep(z)` / `imp(z)` | `(z+Conjg(z))÷2` / `(z-Conjg(z))÷(2i)` | CMPLX; the real and imaginary parts — **no key on this model**, so they lower to arithmetic |
 | `polar(r, θ)` | `r∠θ` | CMPLX |
 | `dms(deg, min, sec)` | `deg°min′sec″` | sexagesimal literal; the three arguments must be literals |
 | `not(x)` / `neg(x)` | `Not(x)` / `Neg(x)` | BASE |
@@ -664,9 +665,9 @@ The ways to fit a program, in order of preference:
   See [`examples/lib/pack.fxc`](../examples/lib/pack.fxc) and
   [`examples/packing.fxc`](../examples/packing.fxc), which keeps eight reals live
   in four memories. The trade is bytes for memories — every `pack`/`unpack` call
-  is inlined, so it always makes the program *longer*. Unpacking uses `conjg`,
-  since this model has no `ReP`/`ImP`, and is exact for values of up to 14
-  significant digits (the display shows 10).
+  is inlined, so it always makes the program *longer*. Unpacking is `rep`/`imp`
+  (see the built-ins table) and is exact for values of up to 14 significant
+  digits; the display shows 10, so the difference is not visible.
 
 `fx50 regs FILE` reports the plan and the memories left over:
 

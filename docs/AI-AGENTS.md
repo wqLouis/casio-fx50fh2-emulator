@@ -347,6 +347,7 @@ the machine are statements ending in `;`.
 | `rnd(x)` | `Rnd(x)` | round to 10 significant digits |
 | `pol(x, y)` / `rec(x, y)` | `Pol(x,y)` / `Rec(x,y)` | COMP or CMPLX; write `X`/`Y` |
 | `arg(x)` / `conjg(x)` | `arg(x)` / `Conjg(x)` | CMPLX |
+| `rep(z)` / `imp(z)` | `(z+Conjg(z))÷2` / `(z-Conjg(z))÷(2i)` | CMPLX; the real and imaginary parts. **No key on this model** — write these instead of looking for `ReP`/`ImP` |
 | `polar(r, θ)` | `r∠θ` | CMPLX |
 | `dms(deg, min, sec)` | `deg°min′sec″` | sexagesimal literal; the three arguments must be literals |
 | `not(x)` / `neg(x)` | `Not(x)` / `Neg(x)` | BASE |
@@ -651,7 +652,7 @@ with a **header directive**:
 | Name | Aliases | What it means for `.fxc` |
 | --- | --- | --- |
 | `COMP` | — | default; general real arithmetic |
-| `CMPLX` | `CPLX`, `COMPLEX` | unlocks `i()`, `arg`, `conjg`, `polar`, `to_cartesian`/`to_polar`, `re_im` |
+| `CMPLX` | `CPLX`, `COMPLEX` | unlocks `i()`, `arg`, `conjg`, `rep`/`imp`, `polar`, `to_cartesian`/`to_polar`, `re_im` |
 | `BASE` | `BASEN`, `BASE-N` | integer arithmetic; bitwise words, base literals, `dec`/`hex`/`bin`/`oct`, `not`/`neg`; **rejects every float built-in and `pi`/`e`/`phys.*`** |
 | `SD` | `STAT`, `STATS`, `STATISTICS` | unlocks `stat.*`, `dt`, `clrstat`, `freqon`/`freqoff` |
 | `REG` | `REGRESSION` | everything SD has, plus the `y`/regression stats (`stat.sumy`, `stat.regA`, …) and the regression model keys (`reg_lin`…`reg_abexp`) |
@@ -966,7 +967,7 @@ hand when the values are already available as JSON.
 - [ ] In `#mode BASE`, no float built-ins, no `pi`, no `e`, no `phys.`
       constant; base literals (`0x1F`) and the bitwise words are welcome.
 - [ ] Mode-specific keys match the mode: complex keys (`i()`, `arg`, `conjg`,
-      `polar`, `to_cartesian`, `re_im`) need CMPLX, `stat.*` and `dt` need SD/REG
+      `rep`, `imp`, `polar`, `to_cartesian`, `re_im`) need CMPLX, `stat.*` and `dt` need SD/REG
       (`stat.sumy`… and the `reg_*` model keys need REG), base keys need BASE,
       setup and `dms` need a non-BASE mode, `pol`/`rec` need COMP or CMPLX.
 - [ ] Scientific constants are written `phys.<name>` and statistical variables

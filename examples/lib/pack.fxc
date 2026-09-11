@@ -12,37 +12,29 @@
 // `examples/packing.fxc` uses it to keep eight reals live in four memories,
 // which the same program cannot do unpacked.
 //
-// ## Unpacking needs `conjg`, because there is no `ReP`/`ImP`
+// ## Unpacking uses `rep` and `imp`
 //
-// The real and imaginary parts are recovered with arithmetic identities, since
-// this model has no "real part" or "imaginary part" key — `ReP`/`ImP` are a
-// documented gap (see the TODO list in `docs/LANGUAGE.md`):
+// Those are the real and imaginary parts. The machine has **no key for either** —
+// `ReP`/`ImP` exist on other Casio models but not this one — so the transpiler
+// lowers them to the `conjg` identities:
 //
-//     z + conjg(z) = 2·x        x = (z + conjg(z)) / 2
-//     z - conjg(z) = 2·y·i      y = (z - conjg(z)) / (2i)
+//     rep(z) → (z + Conjg(z)) ÷ 2       x = (z + conjg(z)) / 2
+//     imp(z) → (z - Conjg(z)) ÷ (2i)    y = (z - conjg(z)) / (2i)
 //
-// Both are exact *arithmetically*: adding and subtracting a conjugate pair
-// leaves only the doubled part, and dividing by two is exact (a power of two).
-// The one place a rounding can creep in is the doubling, because `2x` may need
-// one digit more than `x` did and the machine normalises every operation to 15
-// significant digits. So the round trip is guaranteed for
+// `unpack_x` and `unpack_y` below are just those, written once so every caller
+// does not repeat the arithmetic. If you only need one part, call `rep`/`imp`
+// directly and skip the library.
 //
-//   * a value of **up to 14 significant digits** — `unpack_x(pack(x, y))` is
-//     exactly `x`; measured over 1200 random pairs at 10, 12, 13 and 14 digits,
-//     with no failures;
-//   * a **15-digit** value may lose its last digit, because `2x` needs 16 —
-//     measured at 139 of 200 pairs.
-//
-// The display shows 10 significant digits, so this is invisible in practice:
-// packing is lossless for everything the machine can print. It is not lossless
-// for every `f64`, and it is better to say so than to imply otherwise — the
-// difference is a last-place rounding, not an error that grows.
+// The round trip is exact up to **14 significant digits**. The doubling is where
+// the bound comes from: `2·x` may need one digit more than `x` did, and every
+// operation is normalised to 15, so a 15-digit value can lose its last digit.
+// The display shows 10 digits, so this is invisible in practice.
 //
 // ## What packing costs, and when to use it
 //
 // Packing trades **program bytes for memories**, and only the second is scarce
 // in the way this helps with. Every call is inlined, so each `unpack_x(p)` emits
-// the six keys of `(p+Conjg(p))÷2` and each `pack(x, y)` the four of `x+yi`. So:
+// the eight keys of `(p+Conjg(p))÷2` and each `pack(x, y)` the four of `x+yi`:
 //
 //   * pack a pair when a *memory* is what you are short of, not when the program
 //     is too long — it always makes the program longer;
@@ -59,13 +51,14 @@
 // ## The mode
 //
 // A library cannot declare `#mode`, so the **program that includes this must say
-// `#mode CMPLX`** — `i()` and `conjg` are CMPLX keys and are rejected in COMP.
+// `#mode CMPLX`** — `i`, `conjg`, `rep` and `imp` are CMPLX keys and are rejected
+// in COMP.
 
 /// Combine two reals into one complex value.
 fn pack(x, y) = x + y * i();
 
 /// The first of the two values packed by [`pack`].
-fn unpack_x(p) = (p + conjg(p)) / 2;
+fn unpack_x(p) = rep(p);
 
 /// The second of the two values packed by [`pack`].
-fn unpack_y(p) = (p - conjg(p)) / (2 * i());
+fn unpack_y(p) = imp(p);

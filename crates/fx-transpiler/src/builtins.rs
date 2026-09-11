@@ -96,6 +96,13 @@ pub const BUILTINS: &[Builtin] = &[
     builtin!("rec", 2, 2, "Rec", "Rec", Call),
     builtin!("arg", 1, 1, "arg", "arg", Call),
     builtin!("conjg", 1, 1, "Conjg", "Conjg", Call),
+    // `rep(z)` and `imp(z)` are the real and imaginary parts. The machine has
+    // **no key for either** — `ReP`/`ImP` exist on other Casio models but not
+    // this one (see `docs/LANGUAGE.md`) — so the emitter lowers them to the
+    // `conjg` identities instead of a single key. They are therefore `Special`
+    // and carry no spelling of their own.
+    builtin!("rep", 1, 1, "rep", "rep", Special),
+    builtin!("imp", 1, 1, "imp", "imp", Special),
     // `polar(r, theta)` is the `r∠θ` literal.
     builtin!("polar", 2, 2, "\u{2220}", "\u{2220}", Infix),
     // `dms(deg, min, sec)` is a sexagesimal literal.  It is emitted as the

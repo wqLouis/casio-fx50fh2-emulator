@@ -463,10 +463,33 @@ fn prgm_completion_is_unchanged() {
 #[test]
 fn fxc_completion_offers_the_new_calculator_keys() {
     let labels = labels(Language::Fxc);
-    for expected in ["re_im(", "reg_quad(", "dms(", "stat.regc"] {
+    for expected in ["re_im(", "reg_quad(", "dms(", "stat.regc", "rep(", "imp("] {
         assert!(
             labels.iter().any(|label| label == expected),
             "missing `{expected}` in {labels:?}"
+        );
+    }
+}
+
+/// `rep`/`imp` have no key on this machine, so their hover must not claim to
+/// emit one — it has to say what they actually lower to.
+#[test]
+fn fxc_hover_explains_that_rep_and_imp_lower_to_conjg() {
+    for (name, identity) in [("rep", "(z+Conjg(z))÷2"), ("imp", "(z-Conjg(z))÷(2i)")] {
+        let src = wrap(&format!("#mode CMPLX\nprint({name}(z));"));
+        // `wrap` puts the directive on line 0, `fn main() {` on line 1 and the
+        // body on line 2; `rep`/`imp` start at column 6.
+        let hover = hover(&src, Position::new(2, 7), Language::Fxc)
+            .unwrap_or_else(|| panic!("no hover for `{name}`"));
+        let text = markup(&hover);
+        assert!(text.contains(name), "hover for `{name}` was {text:?}");
+        assert!(
+            text.contains(identity),
+            "hover for `{name}` should spell out the lowering `{identity}`: {text:?}"
+        );
+        assert!(
+            text.contains("no `ReP`") || text.contains("no `ImP`"),
+            "hover for `{name}` should say the key does not exist: {text:?}"
         );
     }
 }

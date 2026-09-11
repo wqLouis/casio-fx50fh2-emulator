@@ -274,6 +274,22 @@ between decimal and scientific outside `[1e-2, 1e10)`; `Norm2` outside
 
 ## Known deviations / TODO
 
+* **There is no `ReP` or `ImP` on this model.** Many Casio models have them —
+  `fx-991ES` and friends extract the real or imaginary part with one key — but
+  this one does not: the manual's complete bracketed-function list (CN-103) is
+  `Pol( Rec( sin( cos( tan( sin⁻¹( cos⁻¹( tan⁻¹( sinh( cosh( tanh( sinh⁻¹(
+  cosh⁻¹( tanh⁻¹( log( ln( e^( 10^( √( ∛( arg( Abs( Conjg( Not( Neg( Rnd(`, and
+  the CMPLX menu (`1,`) offers `Conjg` and the `Re⇔Im` *display* toggle, not an
+  extraction. Both reference implementations agree. So to take a complex value
+  apart in PRGM, use the identities
+
+  ```text
+  (z+Conjg(z))÷2       the real part
+  (z-Conjg(z))÷(2i)    the imaginary part
+  ```
+
+  In `.fxc` these are the built-ins `rep(z)` and `imp(z)`, which lower to exactly
+  those expressions — see [`FXC.md`](FXC.md).
 * Untagged integer literals are always read as decimal; only tagged literals
   (`1Fh`, `1010b`, …) select another base.
 * `Goto` clears the `If`/loop context, so jumping *out* of a loop works but

@@ -185,6 +185,62 @@ fn re_im_display_toggle() {
     ascii("#mode CMPLX\nre_im();", "#mode CMPLX\nre_im\n");
 }
 
+/// `rep(z)` and `imp(z)` — the real and imaginary parts.
+///
+/// This machine has no `ReP`/`ImP` key (see `docs/LANGUAGE.md`), so the
+/// transpiler lowers them to the `conjg` identities instead. The spelling is
+/// therefore *compiled code*, not a key, and both output styles are the same
+/// expression with the operator respelled.
+#[test]
+fn real_and_imaginary_parts_lower_to_conjg_arithmetic() {
+    glyph(
+        "#mode CMPLX\nlet z = 3 + 4 * i(); print(rep(z)); print(imp(z));",
+        "#mode CMPLX\n3+4×i→A\n(A+Conjg(A))÷2◢\n(A-Conjg(A))÷(2×i)◢\n",
+    );
+    ascii(
+        "#mode CMPLX\nlet z = 3 + 4 * i(); print(rep(z)); print(imp(z));",
+        "#mode CMPLX\n3+4*i->A\n(A+Conjg(A))/2disp\n(A-Conjg(A))/(2*i)disp\n",
+    );
+    // Precedence: the emitted form is a division, so it needs no parentheses
+    // under `+` or `-` but does under a tighter operator.
+    glyph(
+        "#mode CMPLX\nlet z = 3 + 4 * i(); print(rep(z) + imp(z));",
+        "#mode CMPLX\n3+4×i→A\n(A+Conjg(A))÷2+(A-Conjg(A))÷(2×i)◢\n",
+    );
+    glyph(
+        "#mode CMPLX\nlet z = 3 + 4 * i(); print(rep(z) ^ 2);",
+        "#mode CMPLX\n3+4×i→A\n((A+Conjg(A))÷2)^(2)◢\n",
+    );
+}
+
+/// Both parts need CMPLX, like every other complex key.
+#[test]
+fn rep_and_imp_need_cmplx_mode() {
+    for name in ["rep", "imp"] {
+        let e = err(&format!("print({name}(x));"));
+        assert!(e.message.contains("not available in COMP"), "{e}");
+        assert!(e.message.contains("CMPLX"), "{e}");
+    }
+}
+
+/// Each writes its argument twice, so the argument must evaluate to the same
+/// value both times. `ran()` and `ans()` do not.
+#[test]
+fn a_part_of_a_stateful_read_is_rejected() {
+    for name in ["rep", "imp"] {
+        let e = err(&format!("#mode CMPLX\nprint({name}(ran()));"));
+        assert!(e.message.contains("writes its argument twice"), "{e}");
+        assert!(e.message.contains("ran()"), "{e}");
+    }
+    // A value that is stable when read twice is fine, including a call that
+    // may raise — it would raise the same way both times. (`x` comes from
+    // `input()` so the optimiser cannot fold it away.)
+    glyph(
+        "#mode CMPLX\nlet x = input(); print(rep(abs(x)));",
+        "#mode CMPLX\n?→A\n(Abs(A)+Conjg(Abs(A)))÷2◢\n",
+    );
+}
+
 #[test]
 fn regression_model_setup() {
     glyph("#mode REG\nreg_lin();", "#mode REG\nLin\n");

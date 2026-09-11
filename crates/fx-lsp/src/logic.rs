@@ -1301,6 +1301,10 @@ fn fxc_description(source: &str, word: &str, start: usize) -> String {
         "pi" => "**`pi`** — the constant π (3.14159…)".to_string(),
         "e" => "**`e`** — Euler's number (2.71828…)".to_string(),
         "input" => "**`input()`** — read a number from the user\n\nOnly valid as the whole right-hand side of an assignment.".to_string(),
+        // These two are the only built-ins with no key of their own, so the
+        // generic "emits `…`" message below would be a lie for them.
+        "rep" => "**`rep(z)`** — the real part of a complex value\n\nThis machine has no `ReP` key, so it lowers to `(z+Conjg(z))÷2`. Needs CMPLX mode.".to_string(),
+        "imp" => "**`imp(z)`** — the imaginary part of a complex value\n\nThis machine has no `ImP` key, so it lowers to `(z-Conjg(z))÷(2i)`. Needs CMPLX mode.".to_string(),
         _ => {
             if let Some(builtin) = fx_transpiler::builtins::lookup(word) {
                 let arity = if builtin.min_args == builtin.max_args {

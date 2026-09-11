@@ -637,9 +637,62 @@ impl Emitter<'_> {
                     prec::ATOM,
                 ))
             }
+            // `rep(z)` / `imp(z)`: the real and imaginary parts, which this
+            // machine has no key for. They are lowered to the `conjg`
+            // identities
+            //
+            //     z + Conjg(z) = 2·x      z - Conjg(z) = 2·y·i
+            //
+            // so each one writes its argument **twice**. That is exact for the
+            // same reason packing is — adding a conjugate pair is exact, and
+            // both `/2` and `*2` are powers of two — but it does mean the
+            // argument cannot be an expression whose two evaluations would
+            // differ, or the identity would not hold. `ran()` and `ans()` are
+            // the two such reads, so they are refused rather than silently
+            // giving a value that is not the real or imaginary part.
+            "rep" => {
+                let value = self.duplicated_argument(name, args)?;
+                let div = binary_symbol(BinOp::Div, self.opts.ascii);
+                Ok((
+                    format!("({value}+Conjg({value})){div}2"),
+                    prec::MULTIPLICATIVE,
+                ))
+            }
+            "imp" => {
+                let value = self.duplicated_argument(name, args)?;
+                let div = binary_symbol(BinOp::Div, self.opts.ascii);
+                let mul = binary_symbol(BinOp::Mul, self.opts.ascii);
+                Ok((
+                    format!("({value}-Conjg({value})){div}(2{mul}i)"),
+                    prec::MULTIPLICATIVE,
+                ))
+            }
             // The remaining specials are nullary and need no arguments.
             _ => Ok((spelling.to_string(), prec::ATOM)),
         }
+    }
+
+    /// Render the single argument of a built-in that writes it twice.
+    ///
+    /// `rep`/`imp` expand to an expression mentioning their argument on both
+    /// sides of an operator, so the argument must evaluate to the same value
+    /// each time. A variable, a literal or arithmetic over those does; a
+    /// stateful read does not, and neither does a call that is inlined from one
+    /// (`fn f() = ran();`), since function expansion has already happened by
+    /// the time this runs.
+    fn duplicated_argument(&self, name: &str, args: &[Expr]) -> Result<String, TranspileError> {
+        let expr = &args[0];
+        if let Some(stateful) = stateful_read(expr) {
+            return Err(TranspileError::at(
+                self.source,
+                format!(
+                    "`{name}({stateful}())` cannot be used: `{name}` writes its argument twice \
+                     to recover one part, and `{stateful}()` returns a different value each time"
+                ),
+                expr_position(expr),
+            ));
+        }
+        self.expr(expr, 0)
     }
 
     /// Render a statement that may follow `⇒` on the same line.
@@ -732,6 +785,63 @@ fn ends_with_base_literal(text: &str) -> bool {
     // At least one hex digit must precede the suffix; whatever comes before
     // that is a token boundary (a space, an operator or the start).
     chars.next().is_some_and(|ch| ch.is_ascii_hexdigit())
+}
+
+/// The name of a stateful nullary read inside `expr`, if there is one.
+///
+/// These are the expressions whose *second* evaluation may differ from their
+/// first, which breaks any rewrite that duplicates them: `ran()` advances the
+/// random sequence, and evaluating an expression updates the hidden result
+/// memory that `ans()` reads. `input()` cannot appear here (the parser allows it
+/// only as a whole assignment), but it is listed so the rule reads completely.
+fn stateful_read(expr: &Expr) -> Option<&'static str> {
+    match expr {
+        Expr::Call(name, args, _) => {
+            let stateful = match name.as_str() {
+                "ran" => Some("ran"),
+                "ans" => Some("ans"),
+                "input" => Some("input"),
+                _ => None,
+            };
+            stateful.or_else(|| args.iter().find_map(stateful_read))
+            // `mvalue()` reads the fixed `M` memory, which nothing inside
+            // one expression writes, so it is stable and allowed.
+        }
+        Expr::Unary(_, inner) => stateful_read(inner),
+        Expr::Binary(_, left, right) => stateful_read(left).or_else(|| stateful_read(right)),
+        Expr::Data { accessors, .. } => accessors.iter().find_map(|accessor| match accessor {
+            Accessor::IndexExpr { expr, .. } => stateful_read(expr),
+            _ => None,
+        }),
+        Expr::Number(_)
+        | Expr::BaseLiteral { .. }
+        | Expr::Name(..)
+        | Expr::Pi(_)
+        | Expr::E(_)
+        | Expr::Constant(..)
+        | Expr::StatVar(..)
+        | Expr::Ans(_)
+        | Expr::Input(_) => None,
+    }
+}
+
+/// The byte offset of an expression, for a diagnostic.
+fn expr_position(expr: &Expr) -> usize {
+    match expr {
+        Expr::Name(_, pos)
+        | Expr::Pi(pos)
+        | Expr::E(pos)
+        | Expr::Constant(_, pos)
+        | Expr::Ans(pos)
+        | Expr::Input(pos)
+        | Expr::Call(_, _, pos)
+        | Expr::StatVar(_, pos)
+        | Expr::Data { pos, .. } => *pos,
+        Expr::BaseLiteral { pos, .. } => *pos,
+        Expr::Unary(_, inner) => expr_position(inner),
+        Expr::Binary(_, left, _) => expr_position(left),
+        Expr::Number(_) => 0,
+    }
 }
 
 fn binary_precedence(op: BinOp) -> u8 {

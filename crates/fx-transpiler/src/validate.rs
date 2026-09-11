@@ -244,7 +244,7 @@ impl Checker<'_> {
                 &format!("`{name}`"),
                 Some(pos),
             ),
-            "arg" | "conjg" | "i" | "polar" => self.require(
+            "arg" | "conjg" | "i" | "polar" | "rep" | "imp" => self.require(
                 self.mode.allows_complex(),
                 "CMPLX",
                 &format!("`{name}`"),

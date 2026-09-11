@@ -1189,3 +1189,62 @@ It is a library you include when you need it, because it makes programs longer
 and because arithmetic on a packed value means something different from
 arithmetic on its parts — `z1 + z2` adds both coordinates, which is a feature for
 coordinates and a surprise for unrelated values.
+
+## ADR 0029 — `rep`/`imp` are `.fxc` built-ins, not PRGM keys
+
+`.fxc` gained `rep(z)` and `imp(z)`, the real and imaginary parts of a complex
+value. They are **not** keys on this machine, and that is the whole design.
+
+**The machine has no `ReP`/`ImP`.** Many Casio models do — an `fx-991ES` extracts
+either part with one key — so this is worth evidencing, and it took three sources
+agreeing:
+
+* the manual's complete bracketed-function list (CN-103) is `Pol( Rec( sin( cos(
+  tan( sin⁻¹( cos⁻¹( tan⁻¹( sinh( cosh( tanh( sinh⁻¹( cosh⁻¹( tanh⁻¹( log( ln(
+  e^( 10^( √( ∛( arg( Abs( Conjg( Not( Neg( Rnd(` — no `ReP` or `ImP`;
+* the CMPLX menu (`1,`) offers `Conjg` and the `Re⇔Im` **display** toggle, and
+  `Re⇔Im` chooses *which part is shown on screen*, not a value you can compute
+  with;
+* both reference implementations agree — `KeroppiMomo/calsimtor`, which claims to
+  support "all COMP mode tokens", and `throwingogo-hub/fx-50fh-ii`.
+
+Our `docs/LANGUAGE.md` had listed "`ReP`/`ImP` are not implemented" as a
+deviation since early on. That entry was wrong — it described a feature the model
+does not have — and it was removed in `fead28d` when the `Re⇔Im` display toggle
+was implemented, apparently reading the toggle as covering the extraction. It did
+not: `Re⇔Im` changes the display, `ReP`/`ImP` produce a value. So the capability
+really was missing, and the doc now says so explicitly, with the evidence,
+because a reader arriving from another Casio model will look for those keys.
+
+**Adding them to the interpreter would be a fidelity lie.** The interpreter is a
+simulator: it accepts what the machine accepts. A `FuncName::ReP` variant would
+make `fx50` run PRGM the hardware cannot be given, which is the one thing this
+project does not do. The keys stay absent there, and PRGM users write
+`(z+Conjg(z))÷2` by hand.
+
+**`.fxc` is the right layer.** It already lowers constructs the keypad cannot
+express — `for` becomes `While`, functions are inlined, `root` is written
+`x√(`, `dms` becomes a `°′″` literal — so a built-in that lowers to arithmetic
+is exactly what it is for. `rep`/`imp` emit
+
+    rep(z)  →  (z+Conjg(z))÷2
+    imp(z)  →  (z-Conjg(z))÷(2i)
+
+which is the same code `examples/lib/pack.fxc` had been writing by hand, so that
+library is now three one-line functions and every caller gets the arithmetic for
+free. Like the other complex keys they require CMPLX mode, checked at transpile
+time.
+
+**One consequence of the lowering, and it is not free.** The identity needs its
+argument *twice*, so the argument is emitted twice and must evaluate to the same
+value both times. `ran()` advances the random sequence and evaluating any
+expression updates the hidden result memory `ans()` reads, so both are refused
+with an error rather than silently returning something that is not a real or
+imaginary part. `fn f() = ran();` is caught too, because function expansion runs
+before emission. Everything else is allowed, including a call that may raise — it
+would raise identically both times.
+
+**A visible cost worth stating:** `rep(z)` is eight keys (`(z+Conjg(z))÷2`),
+against the one key `ReP(` would be if the machine had it. That is the price of
+the key not existing, and it is why the built-in exists at all: it is written
+once in `pack.fxc` rather than at every use.

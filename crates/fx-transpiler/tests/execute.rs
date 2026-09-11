@@ -275,3 +275,85 @@ fn fix_setup_rounds_the_display() {
 fn ans_reads_the_previous_result() {
     assert_eq!(run("let a = 6 * 7; print(ans());", &[]), vec!["42"]);
 }
+
+// ---------------------------------------------------------------------------
+// `rep` / `imp`: the real and imaginary parts
+//
+// The machine has no `ReP`/`ImP` key, so these lower to `conjg` arithmetic. The
+// point of running them is that the *lowering* is what has to be right: the
+// emitted expression must give back the part that was packed, and it must do so
+// exactly.
+
+/// The real and imaginary parts of a packed pair, on the interpreter.
+#[test]
+fn rep_and_imp_recover_a_packed_pair() {
+    let source = "\
+#mode CMPLX
+let x = input();
+let y = input();
+let z = x + y * i();
+print(rep(z));
+print(imp(z));
+";
+    assert_eq!(run(source, &[3.0, 4.0]), vec!["3", "4"]);
+    assert_eq!(run(source, &[-2.5, 7.25]), vec!["-2.5", "7.25"]);
+    assert_eq!(run(source, &[0.0, 0.0]), vec!["0", "0"]);
+    // Negative and fractional, to catch a sign error in either identity.
+    assert_eq!(run(source, &[-0.5, -0.25]), vec!["-0.5", "-0.25"]);
+}
+
+/// The round trip is exact to 14 significant digits. The doubling is why there
+/// is a bound at all: `2·x` may need one digit more than `x` did, and every
+/// operation is normalised to 15.
+#[test]
+fn rep_and_imp_are_exact_to_fourteen_digits() {
+    let source = "\
+#mode CMPLX
+let x = input();
+let y = input();
+let z = x + y * i();
+print(rep(z) - x);
+print(imp(z) - y);
+";
+    // A value that needs all 14 digits the identity preserves.
+    let x = 1.2345678901234e8;
+    let y = -9.8765432109876e-7;
+    assert_eq!(run(source, &[x, y]), vec!["0", "0"]);
+}
+
+/// Arithmetic on a packed value is arithmetic on both parts, so a squared
+/// complex number has the parts you would expect — which is the reason to pack
+/// coordinates rather than two unrelated values.
+#[test]
+fn rep_and_imp_see_the_result_of_complex_arithmetic() {
+    let source = "\
+#mode CMPLX
+let x = input();
+let y = input();
+let z = x + y * i();
+print(rep(z * z));
+print(imp(z * z));
+";
+    // (3+4i)² = -7+24i
+    assert_eq!(run(source, &[3.0, 4.0]), vec!["-7", "24"]);
+    // (0.1+0.2i)² = -0.03+0.04i
+    assert_eq!(run(source, &[0.1, 0.2]), vec!["-0.03", "0.04"]);
+}
+
+/// The pieces compose: `rep` of a sum, and a part used inside arithmetic.
+#[test]
+fn rep_and_imp_compose_with_ordinary_arithmetic() {
+    let source = "\
+#mode CMPLX
+let a = input();
+let b = input();
+let c = input();
+let d = input();
+let p = a + b * i();
+let q = c + d * i();
+print(rep(p + q));
+print(imp(p + q));
+print(rep(p) * 10 + imp(p));
+";
+    assert_eq!(run(source, &[1.0, 2.0, 3.0, 4.0]), vec!["4", "6", "12"]);
+}
