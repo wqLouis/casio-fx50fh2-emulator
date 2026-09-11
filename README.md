@@ -213,8 +213,9 @@ print(result);
   `quadratic.fx`, `complex_quadratic.fx`, `statistics.fx`.
 * **`.fxc`** (`fx50 run` / `build` / `test`): `factorial.fxc`, `quadratic.fxc`,
   `constants.fxc` (the 40 scientific constants), `compiletime.fxc` (`#data`,
-  `const`, `free`), `arrays.fxc` (one memory per element), and `include.fxc`,
-  which splits its work across [`examples/lib/`](examples/lib).
+  `const`, `free`), `arrays.fxc` (one memory per element), `determinant.fxc`
+  (a 3x3 determinant against the seven-memory limit), and `include.fxc`, which
+  splits its work across [`examples/lib/`](examples/lib).
 
 The `.fxc` examples carry their own test cases, so they can be checked with:
 
