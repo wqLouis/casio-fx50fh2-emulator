@@ -4,7 +4,21 @@
 //! and anti-drift cases need the interpreter, so they are compiled only with
 //! the `execute` feature (which `testing`, on by default, implies).
 
-use fx_transpiler::{Options, transpile, transpile_with};
+use fx_transpiler::error::TranspileError;
+use fx_transpiler::{Options, transpile as raw_transpile, transpile_with as raw_transpile_with};
+
+mod common;
+
+/// Transpile, wrapping the classic top-level statements in `fn main()`.
+fn transpile(source: &str) -> Result<String, TranspileError> {
+    raw_transpile(&common::wrap(source))
+}
+
+/// Transpile with options, wrapping the classic top-level statements in
+/// `fn main()`.
+fn transpile_with(source: &str, options: Options) -> Result<String, TranspileError> {
+    raw_transpile_with(&common::wrap(source), options)
+}
 
 /// Transpile with the ASCII output style.
 #[track_caller]
@@ -103,7 +117,7 @@ fn an_unknown_constant_is_an_error() {
         "{}",
         e.message
     );
-    assert_eq!((e.line, e.column), (1, 12));
+    assert_eq!((e.line, e.column), (2, 12));
 }
 
 #[test]

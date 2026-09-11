@@ -10,10 +10,13 @@
 use casio_fx50fh2::{Interpreter, MockHost};
 use fx_transpiler::{Options, analyze, transpile, transpile_with};
 
+mod common;
+
 /// Transpile `source`, run it with the given `?` inputs and return the `◢`
 /// displays in order.
 #[track_caller]
 fn run(source: &str, inputs: &[f64]) -> Vec<String> {
+    let source = &common::wrap(source);
     let prgm = transpile(source).unwrap_or_else(|e| panic!("transpile failed: {e}\n{source}"));
     let program = casio_fx50fh2::compile(&prgm)
         .unwrap_or_else(|e| panic!("transpiled PRGM failed to compile: {e}\n---\n{prgm}"));
@@ -26,12 +29,13 @@ fn run(source: &str, inputs: &[f64]) -> Vec<String> {
 
 #[track_caller]
 fn out(source: &str) -> String {
+    let source = &common::wrap(source);
     transpile(source).unwrap_or_else(|e| panic!("transpile failed: {e}\n{source}"))
 }
 
 #[track_caller]
 fn err(source: &str) -> fx_transpiler::error::TranspileError {
-    transpile(source).unwrap_err()
+    transpile(&common::wrap(source)).unwrap_err()
 }
 
 // ---------------------------------------------------------------------------
@@ -85,7 +89,7 @@ fn elements_are_written_by_a_literal_index() {
 #[test]
 fn ascii_mode_applies_to_array_code_too() {
     let prgm = transpile_with(
-        "let v[2] = {1, 2};\nv[1] = 3;\nprint(v[1]);\n",
+        &common::wrap("let v[2] = {1, 2};\nv[1] = 3;\nprint(v[1]);\n"),
         Options {
             ascii: true,
             ..Default::default()
@@ -166,7 +170,7 @@ print(v[1]);
 // Memory plan
 
 fn used(source: &str) -> usize {
-    analyze(source, std::path::Path::new("."))
+    analyze(&common::wrap(source), std::path::Path::new("."))
         .unwrap_or_else(|e| panic!("analyze failed: {e}"))
         .allocation
         .used()
@@ -182,7 +186,8 @@ fn an_array_uses_one_memory_per_element() {
 #[test]
 fn a_freed_array_returns_every_memory() {
     let source = "let v[3] = {1,2,3};\nfree v;\nlet w[1] = {1};\n";
-    let analysis = analyze(source, std::path::Path::new(".")).unwrap();
+    let source = common::wrap(source);
+    let analysis = analyze(&source, std::path::Path::new(".")).unwrap();
     // `w` reuses A, the first memory the freed array gave back.
     assert_eq!(analysis.allocation.bindings[3].memory, 'A');
     // `used` counts the memories touched over the program's life, so the three
@@ -193,7 +198,11 @@ fn a_freed_array_returns_every_memory() {
 
 #[test]
 fn an_array_is_reported_element_by_element() {
-    let analysis = analyze("let v[2] = {1,2};\n", std::path::Path::new(".")).unwrap();
+    let analysis = analyze(
+        &common::wrap("let v[2] = {1,2};\n"),
+        std::path::Path::new("."),
+    )
+    .unwrap();
     let labels: Vec<String> = analysis
         .allocation
         .bindings
@@ -208,7 +217,7 @@ fn an_array_is_reported_element_by_element() {
 #[test]
 fn the_reuse_note_names_the_array_not_the_element() {
     let analysis = analyze(
-        "let v[2] = {1,2};\nfree v;\nlet w[2] = {3,4};\n",
+        &common::wrap("let v[2] = {1,2};\nfree v;\nlet w[2] = {3,4};\n"),
         std::path::Path::new("."),
     )
     .unwrap();
@@ -228,7 +237,11 @@ fn the_reuse_note_names_the_array_not_the_element() {
 
 #[test]
 fn an_array_declared_after_a_scalar_starts_at_the_next_memory() {
-    let analysis = analyze("let x = 1;\nlet v[2] = {1,2};\n", std::path::Path::new(".")).unwrap();
+    let analysis = analyze(
+        &common::wrap("let x = 1;\nlet v[2] = {1,2};\n"),
+        std::path::Path::new("."),
+    )
+    .unwrap();
     assert_eq!(analysis.allocation.bindings[0].memory, 'A');
     assert_eq!(analysis.allocation.bindings[1].memory, 'B');
     assert_eq!(analysis.allocation.bindings[2].memory, 'C');
@@ -460,7 +473,7 @@ fn an_array_with_jumps_still_needs_unsafe_free() {
 #[test]
 fn arrays_work_in_base_mode_when_they_are_integers() {
     let prgm = transpile_with(
-        "#mode BASE\nlet v[2] = {1, 2};\nprint(v[0] + v[1]);\n",
+        &common::wrap("#mode BASE\nlet v[2] = {1, 2};\nprint(v[0] + v[1]);\n"),
         Options::default(),
     )
     .unwrap();
@@ -469,8 +482,11 @@ fn arrays_work_in_base_mode_when_they_are_integers() {
 
 #[test]
 fn a_float_builtin_in_a_base_mode_array_is_still_rejected() {
-    let error =
-        transpile_with("#mode BASE\nlet v[2] = {sqrt(2), 1};\n", Options::default()).unwrap_err();
+    let error = transpile_with(
+        &common::wrap("#mode BASE\nlet v[2] = {sqrt(2), 1};\n"),
+        Options::default(),
+    )
+    .unwrap_err();
     assert!(error.message.contains("BASE mode"), "{}", error.message);
 }
 

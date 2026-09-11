@@ -33,6 +33,25 @@ impl Drop for TempDir {
     }
 }
 
+/// Wrap a suite's inline `"source"` value in its required `fn main()`.
+///
+/// These tests exercise the suite *runner*, so they keep writing bare
+/// statement lists; this inserts the entry point the language now needs.
+fn with_main(json: &str) -> String {
+    const KEY: &str = "\"source\": \"";
+    let Some(start) = json.find(KEY) else {
+        return json.to_string();
+    };
+    let value_start = start + KEY.len();
+    let Some(relative_end) = json[value_start..].find('"') else {
+        return json.to_string();
+    };
+    let value_end = value_start + relative_end;
+    let source = &json[value_start..value_end];
+    let wrapped = format!("fn main() {{\\n{source}\\n}}");
+    format!("{}{wrapped}{}", &json[..value_start], &json[value_end..])
+}
+
 fn examples_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples")
 }
@@ -82,7 +101,7 @@ fn program_is_resolved_relative_to_the_suite() {
     std::fs::create_dir_all(dir.0.join("tests")).unwrap();
     std::fs::write(
         dir.0.join("src/double.fxc"),
-        "let a = input(); print(a * 2);",
+        "fn main() { let a = input(); print(a * 2); }",
     )
     .unwrap();
     let suite_path = dir.0.join("tests/double.tests.json");
@@ -99,8 +118,11 @@ fn program_is_resolved_relative_to_the_suite() {
 #[test]
 fn a_suite_may_omit_program_and_use_the_fallback() {
     let dir = TempDir::new("fallback");
-    let program = dir.write("prog.fxc", "print(7);");
-    let suite = dir.write("prog.tests.json", r#"{"cases": [{"output": ["7"]}]}"#);
+    let program = dir.write("prog.fxc", "fn main() { print(7); }");
+    let suite = dir.write(
+        "prog.tests.json",
+        &with_main(r#"{"cases": [{"output": ["7"]}]}"#),
+    );
 
     // Without a fallback, the sibling `prog.fxc` is discovered automatically.
     let report = run_suite_file(&suite, None).unwrap();
@@ -114,7 +136,7 @@ fn a_suite_may_omit_program_and_use_the_fallback() {
 #[test]
 fn a_suite_with_neither_program_nor_source_is_rejected() {
     let dir = TempDir::new("nocase");
-    let suite = dir.write("empty.tests.json", r#"{"cases": []}"#);
+    let suite = dir.write("empty.tests.json", &with_main(r#"{"cases": []}"#));
     let err = load_suite_file(&suite, None).unwrap_err();
     assert!(matches!(err, TestError::Schema(_)), "{err}");
     assert!(err.to_string().contains("`program`"), "{err}");
@@ -123,8 +145,10 @@ fn a_suite_with_neither_program_nor_source_is_rejected() {
 #[test]
 fn inline_source_needs_no_file() {
     let suite = parse_suite(
-        r#"{"source": "let a = input(); print(a + 1);",
+        &with_main(
+            r#"{"source": "let a = input(); print(a + 1);",
             "cases": [{"input": [41], "output": ["42"]}]}"#,
+        ),
         "inline",
         Path::new("."),
         None,
@@ -136,7 +160,7 @@ fn inline_source_needs_no_file() {
 #[test]
 fn the_json_name_field_labels_the_report() {
     let suite = parse_suite(
-        r#"{"name": "my suite", "source": "", "cases": []}"#,
+        &with_main(r#"{"name": "my suite", "source": "", "cases": []}"#),
         "fallback-name",
         Path::new("."),
         None,
@@ -153,7 +177,7 @@ fn a_failing_case_reports_expected_and_actual() {
     let dir = TempDir::new("failing");
     let suite = dir.write(
         "f.tests.json",
-        r#"{"source": "print(2+3);", "cases": [{"name": "adds", "output": ["6"]}]}"#,
+        &with_main(r#"{"source": "print(2+3);", "cases": [{"name": "adds", "output": ["6"]}]}"#),
     );
     let report = run_suite_file(&suite, None).unwrap();
     assert!(!report.is_success());
@@ -166,7 +190,7 @@ fn a_failing_case_reports_expected_and_actual() {
 #[test]
 fn multi_line_output_is_rendered_line_by_line() {
     let suite = parse_suite(
-        r#"{"source": "print(1); print(2);", "cases": [{"output": ["9", "9"]}]}"#,
+        &with_main(r#"{"source": "print(1); print(2);", "cases": [{"output": ["9", "9"]}]}"#),
         "s",
         Path::new("."),
         None,
@@ -182,7 +206,7 @@ fn the_json_report_round_trips_through_a_parser() {
     let dir = TempDir::new("json");
     let suite = dir.write(
         "j.tests.json",
-        r#"{"source": "print(1);", "cases": [{"name": "one", "output": ["1"]}]}"#,
+        &with_main(r#"{"source": "print(1);", "cases": [{"name": "one", "output": ["1"]}]}"#),
     );
     let report = run_suite_file(&suite, None).unwrap();
     let json = report.to_json_pretty();
@@ -207,7 +231,7 @@ fn the_json_report_round_trips_through_a_parser() {
 #[test]
 fn a_transpile_error_is_reported_per_case() {
     let suite = parse_suite(
-        r#"{"source": "print(nope(1));", "cases": [{"output": []}]}"#,
+        &with_main(r#"{"source": "print(nope(1));", "cases": [{"output": []}]}"#),
         "s",
         Path::new("."),
         None,
@@ -224,8 +248,10 @@ fn a_transpile_error_is_reported_per_case() {
 #[test]
 fn every_case_is_run_even_when_one_fails() {
     let suite = parse_suite(
-        r#"{"source": "print(1);",
+        &with_main(
+            r#"{"source": "print(1);",
             "cases": [{"output": ["9"]}, {"output": ["1"]}, {"output": ["9"]}]}"#,
+        ),
         "s",
         Path::new("."),
         None,

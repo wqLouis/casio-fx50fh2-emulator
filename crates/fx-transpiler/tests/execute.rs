@@ -10,10 +10,13 @@
 use casio_fx50fh2::{Interpreter, MockHost};
 use fx_transpiler::transpile;
 
+mod common;
+
 /// Transpile `source`, run it with the given `?` inputs and return the `◢`
 /// displays in order.
 #[track_caller]
 fn run(source: &str, inputs: &[f64]) -> Vec<String> {
+    let source = &common::wrap(source);
     let prgm = transpile(source).unwrap_or_else(|e| panic!("transpile failed: {e}"));
     let program = casio_fx50fh2::compile(&prgm)
         .unwrap_or_else(|e| panic!("transpiled PRGM failed to compile: {e}\n---\n{prgm}"));
@@ -151,7 +154,7 @@ fn transpiler_mode_acceptance_implies_interpreter_acceptance() {
 
     for mode in modes {
         for builtin in BUILTINS {
-            let source = format!("print({}(a));\n", builtin.name);
+            let source = common::wrap(&format!("print({}(a));\n", builtin.name));
             let options = Options {
                 ascii: false,
                 mode: Some(mode),

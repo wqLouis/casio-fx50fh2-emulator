@@ -350,6 +350,24 @@ pub struct ForStmt {
     pub pos: usize,
 }
 
+/// A user-defined function, inlined at each call while transpiling.
+///
+/// `fn name(a, b) = expr;` is the *expression* form: it has no locals and may
+/// be used anywhere a value is expected. `fn name(a, b) { … }` is the
+/// *procedure* form: it may declare locals and end with a single `return expr;`
+/// in the last position.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FnDef {
+    pub name: String,
+    pub params: Vec<String>,
+    /// `Some` for the `= expr` form; `None` for a block body.
+    pub expr: Option<Expr>,
+    /// The block body. Empty for the expression form.
+    pub body: Vec<Stmt>,
+    /// Byte offset of the `fn` keyword.
+    pub pos: usize,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Stmt {
     /// `let name = value;`
@@ -415,6 +433,15 @@ pub enum Stmt {
     Print(Expr),
     /// An expression evaluated for its side effects (or just discarded).
     ExprStmt(Expr),
+    /// `fn name(params) = expr;` or `fn name(params) { … }` — a definition.
+    /// Removed by the function-expansion pass before allocation.
+    Function(FnDef),
+    /// `return [expr];` — only valid inside a function body, only in the last
+    /// position. Removed by the function-expansion pass.
+    Return {
+        value: Option<Expr>,
+        pos: usize,
+    },
     /// `mplus(value);` / `mminus(value);` — the `M+` / `M-` keys.
     Memory {
         value: Expr,

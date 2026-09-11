@@ -7,7 +7,7 @@
 //!
 //! ```
 //! # use fx_transpiler::transpile;
-//! let prgm = transpile("let a = input(); let b = a * 2; print(b);").unwrap();
+//! let prgm = transpile("fn main() { let a = input(); let b = a * 2; print(b); }").unwrap();
 //! assert_eq!(prgm, "?→A\nA×2→B\nB◢\n");
 //! ```
 //!
@@ -16,7 +16,7 @@
 //!
 //! ```
 //! # use fx_transpiler::{transpile_with, Options};
-//! let prgm = transpile_with("print(a <= b);", Options { ascii: true, ..Default::default() }).unwrap();
+//! let prgm = transpile_with("fn main() { print(a <= b); }", Options { ascii: true, ..Default::default() }).unwrap();
 //! assert_eq!(prgm, "A<=Bdisp\n");
 //! ```
 
@@ -36,6 +36,7 @@ pub mod testing;
 mod alloc;
 mod emit;
 mod fold;
+mod functions;
 mod unroll;
 mod validate;
 
@@ -154,8 +155,10 @@ fn transpile_expanded(
     let effective = opts.mode.or(header).unwrap_or(Mode::Comp);
 
     let mut program = parser::parse(&tokens, &text)?;
-    // Pre-calculate constant expressions and unroll the loops that need it, so
-    // the emitter sees plain literal array indices.
+    // Inline user functions, then pre-calculate constant expressions and
+    // unroll the loops that need it, so the emitter sees plain literal array
+    // indices.
+    program = functions::expand(program, &text, &data)?;
     fold::fold_program(&mut program);
     unroll::unroll_program(&mut program);
     validate::validate(&program, effective, &text)?;
@@ -203,6 +206,7 @@ fn analyze_expanded(
     let mut program = parser::parse(&tokens, &text)?;
     // Mirror the transpiler front end, so `fx50 regs` and `fx50 build` never
     // disagree about the memory plan.
+    program = functions::expand(program, &text, &data)?;
     fold::fold_program(&mut program);
     unroll::unroll_program(&mut program);
     let allocator = alloc::Allocator::collect(&program, &text, &data)?;

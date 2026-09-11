@@ -299,7 +299,11 @@ fn stmt_has_computed_index_of(stmt: &Stmt, name: &str) -> bool {
         | Stmt::Break
         | Stmt::Goto(..)
         | Stmt::Label(..)
-        | Stmt::Empty => false,
+        | Stmt::Empty
+        | Stmt::Function(_) => false,
+        Stmt::Return { value, .. } => value
+            .as_ref()
+            .is_some_and(|value| expr_has_computed_index_of(value, name)),
     }
 }
 
@@ -344,7 +348,9 @@ fn body_is_unrollable(stmts: &[Stmt]) -> bool {
         | Stmt::Free { .. }
         | Stmt::Break
         | Stmt::Goto(..)
-        | Stmt::Label(..) => false,
+        | Stmt::Label(..)
+        | Stmt::Function(_)
+        | Stmt::Return { .. } => false,
         Stmt::If {
             then_body,
             else_body,
@@ -500,7 +506,13 @@ fn walk_exprs(stmt: &mut Stmt, f: &mut dyn FnMut(&mut Expr)) {
         | Stmt::Break
         | Stmt::Goto(..)
         | Stmt::Label(..)
-        | Stmt::Empty => {}
+        | Stmt::Empty
+        | Stmt::Function(_) => {}
+        Stmt::Return { value, .. } => {
+            if let Some(value) = value {
+                f(value);
+            }
+        }
     }
 }
 
@@ -598,7 +610,13 @@ fn resolve_stmt(stmt: &mut Stmt) {
         | Stmt::Break
         | Stmt::Goto(..)
         | Stmt::Label(..)
-        | Stmt::Empty => {}
+        | Stmt::Empty
+        | Stmt::Function(_) => {}
+        Stmt::Return { value, .. } => {
+            if let Some(value) = value {
+                resolve_expr(value);
+            }
+        }
     }
 }
 
@@ -744,7 +762,13 @@ fn count_stmt(stmt: &Stmt, totals: &mut BTreeMap<String, usize>) {
         | Stmt::Break
         | Stmt::Goto(..)
         | Stmt::Label(..)
-        | Stmt::Empty => {}
+        | Stmt::Empty
+        | Stmt::Function(_) => {}
+        Stmt::Return { value, .. } => {
+            if let Some(value) = value {
+                count_expr(value, totals);
+            }
+        }
     }
 }
 

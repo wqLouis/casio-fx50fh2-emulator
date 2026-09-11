@@ -8,14 +8,18 @@
 
 use fx_transpiler::{Options, transpile, transpile_with};
 
+mod common;
+
 #[track_caller]
 fn glyph(source: &str, expected: &str) {
+    let source = &common::wrap(source);
     let got = transpile(source).unwrap_or_else(|e| panic!("transpile failed: {e}\n{source}"));
     assert_eq!(got, expected, "glyph output for:\n{source}");
 }
 
 #[track_caller]
 fn ascii(source: &str, expected: &str) {
+    let source = &common::wrap(source);
     let got = transpile_with(
         source,
         Options {
@@ -29,7 +33,7 @@ fn ascii(source: &str, expected: &str) {
 
 #[track_caller]
 fn err(source: &str) -> fx_transpiler::error::TranspileError {
-    transpile(source).unwrap_err()
+    transpile(&common::wrap(source)).unwrap_err()
 }
 
 // ---------------------------------------------------------------------------
@@ -107,7 +111,7 @@ fn random_and_fixed_memories() {
 fn using_the_fixed_m_memory_reserves_it() {
     // `mplus`/`mvalue` touch the calculator's fixed `M`, so the allocator keeps
     // `M` out of the pool and the variable takes `A`.
-    let prgm = transpile("let a = 1;\nmplus(a);\nprint(mvalue());").unwrap();
+    let prgm = transpile(&common::wrap("let a = 1;\nmplus(a);\nprint(mvalue());")).unwrap();
     assert_eq!(prgm, "1→A\nA M+\nM◢\n");
     assert!(
         !prgm.contains("→M"),
@@ -294,6 +298,7 @@ fn ascii_output_round_trips_through_the_core_lexer() {
         "let x = 5;\nx > 0 => print(1);",
         "mplus(3);",
     ] {
+        let source = &common::wrap(source);
         let prgm = transpile_with(
             source,
             Options {
@@ -376,7 +381,7 @@ fn every_prgm_function_has_an_fxc_spelling() {
         );
         let args = vec!["a"; func_arity(func)].join(", ");
         let header = mode.map(|m| format!("#mode {m}\n")).unwrap_or_default();
-        let src = format!("{header}let a = 1;\nprint({name}({args}));\n");
+        let src = common::wrap(&format!("{header}let a = 1;\nprint({name}({args}));\n"));
         assert!(
             transpile(&src).is_ok(),
             "{func:?} should transpile as `{name}`, got: {:?}",
@@ -398,7 +403,7 @@ fn every_prgm_postfix_and_infix_key_has_an_fxc_spelling() {
             Postfix::Percent => "pct",
         };
         assert!(fx_transpiler::builtins::lookup(name).is_some(), "{name}");
-        let src = format!("let a = 1;\nprint({name}(a));\n");
+        let src = common::wrap(&format!("let a = 1;\nprint({name}(a));\n"));
         assert!(transpile(&src).is_ok(), "{postfix:?} -> {name}");
     }
     for op in BinOp::ALL {
@@ -423,6 +428,7 @@ fn every_prgm_postfix_and_infix_key_has_an_fxc_spelling() {
             BinOp::Polar => ("#mode CMPLX\nlet a = 1; print(polar(a, a));", None),
         };
         let _ = mode;
+        let src = &common::wrap(src);
         assert!(
             transpile(src).is_ok(),
             "{op:?} should transpile, got: {:?}",
@@ -457,7 +463,7 @@ fn every_prgm_statistical_variable_has_an_fxc_spelling() {
             StatVar::RegB => "regb",
             StatVar::RegR => "regr",
         };
-        let src = format!("#mode REG\nprint(stat.{name});\n");
+        let src = common::wrap(&format!("#mode REG\nprint(stat.{name});\n"));
         assert!(
             transpile(&src).is_ok(),
             "{var:?} should transpile as stat.{name}, got: {:?}",

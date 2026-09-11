@@ -32,6 +32,10 @@ pub enum Tok {
     Goto,
     Label,
     Print,
+    /// `fn` — begin a function definition.
+    Fn,
+    /// `return` — leave a function body.
+    Return,
     /// The `phys` namespace keyword (scientific constants).
     Phys,
     /// The `stat` namespace keyword (statistical variables).
@@ -94,6 +98,8 @@ impl Tok {
             Tok::Goto => "`goto`".into(),
             Tok::Label => "`label`".into(),
             Tok::Print => "`print`".into(),
+            Tok::Fn => "`fn`".into(),
+            Tok::Return => "`return`".into(),
             Tok::Phys => "`phys`".into(),
             Tok::Stat => "`stat`".into(),
             Tok::Plus => "`+`".into(),
@@ -532,6 +538,8 @@ fn keyword(word: &str) -> Option<Tok> {
         "goto" => Tok::Goto,
         "label" => Tok::Label,
         "print" => Tok::Print,
+        "fn" => Tok::Fn,
+        "return" => Tok::Return,
         "phys" => Tok::Phys,
         "stat" => Tok::Stat,
         "and" => Tok::And,

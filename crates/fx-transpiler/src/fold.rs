@@ -100,6 +100,13 @@ impl Folder {
             | Stmt::Goto(..)
             | Stmt::Label(..)
             | Stmt::Empty => {}
+            // Gone before folding; walked anyway so the pass is total.
+            Stmt::Function(_) => {}
+            Stmt::Return { value, .. } => {
+                if let Some(value) = value {
+                    self.expr(value);
+                }
+            }
             Stmt::Print(expr) | Stmt::ExprStmt(expr) => self.expr(expr),
             Stmt::If {
                 cond,

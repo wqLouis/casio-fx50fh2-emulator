@@ -7,14 +7,17 @@
 
 use fx_transpiler::{Options, analyze, transpile};
 
+mod common;
+
 #[track_caller]
 fn out(source: &str) -> String {
+    let source = &common::wrap(source);
     transpile(source).unwrap_or_else(|e| panic!("transpile failed: {e}\n{source}"))
 }
 
 #[track_caller]
 fn err(source: &str) -> fx_transpiler::error::TranspileError {
-    transpile(source).unwrap_err()
+    transpile(&common::wrap(source)).unwrap_err()
 }
 
 // ---------------------------------------------------------------------------
@@ -39,7 +42,7 @@ fn booleans_become_one_and_zero() {
 #[test]
 fn data_uses_no_memory() {
     let source = "#data c = { \"a\": 1, \"b\": 2 };\nlet x = c.a; print(x + c.b);\n";
-    let analysis = analyze(source, std::path::Path::new(".")).unwrap();
+    let analysis = analyze(&common::wrap(source), std::path::Path::new(".")).unwrap();
     assert_eq!(analysis.data, vec!["c"]);
     assert_eq!(analysis.allocation.bindings.len(), 1);
     assert_eq!(analysis.allocation.bindings[0].name, "x");
@@ -54,7 +57,8 @@ fn a_data_file_is_read_relative_to_the_source() {
     std::fs::write(&data, r#"{ "scale": 10 }"#).unwrap();
     let source = "#data v = \"values.json\";\nprint(v.scale * 2);\n";
     // `transpile_with_base` resolves the file against `dir`.
-    let prgm = fx_transpiler::transpile_with_base(source, Options::default(), &dir).unwrap();
+    let prgm = fx_transpiler::transpile_with_base(&common::wrap(source), Options::default(), &dir)
+        .unwrap();
     assert_eq!(prgm, "10×2◢\n");
     std::fs::remove_dir_all(&dir).ok();
 }
@@ -241,7 +245,7 @@ fn a_const_may_hold_a_calculator_constant_symbolically() {
 #[test]
 fn a_const_frees_a_memory_for_a_variable() {
     let analysis = analyze(
-        "const k = 1;\nlet a = k; print(a);\n",
+        &common::wrap("const k = 1;\nlet a = k; print(a);\n"),
         std::path::Path::new("."),
     )
     .unwrap();
@@ -306,7 +310,7 @@ fn free_emits_nothing() {
 #[test]
 fn free_is_tracked_by_the_allocator() {
     let source = "let t = 1;\nfree t;\nlet u = 2;\nprint(u);\n";
-    let analysis = analyze(source, std::path::Path::new(".")).unwrap();
+    let analysis = analyze(&common::wrap(source), std::path::Path::new(".")).unwrap();
     assert_eq!(analysis.allocation.freed, vec!["t"]);
     assert_eq!(
         analysis
@@ -323,7 +327,7 @@ fn free_is_tracked_by_the_allocator() {
 #[test]
 fn a_program_without_free_keeps_every_memory_separate() {
     let analysis = analyze(
-        "let a = 1; let b = 2; print(a + b);\n",
+        &common::wrap("let a = 1; let b = 2; print(a + b);\n"),
         std::path::Path::new("."),
     )
     .unwrap();
@@ -367,9 +371,9 @@ fn eight_variables_do_not_fit_and_the_error_says_so() {
 #[test]
 fn replaying_the_same_program_gives_the_same_plan() {
     // Determinism matters: `regs` and `build` must agree.
-    let source = "let b = 1; let a = 2;\nprint(a + b);\n";
-    let first = analyze(source, std::path::Path::new(".")).unwrap();
-    let second = analyze(source, std::path::Path::new(".")).unwrap();
+    let source = common::wrap("let b = 1; let a = 2;\nprint(a + b);\n");
+    let first = analyze(&source, std::path::Path::new(".")).unwrap();
+    let second = analyze(&source, std::path::Path::new(".")).unwrap();
     assert_eq!(first, second);
-    assert_eq!(out(source), "1→A\n2→B\nB+A◢\n");
+    assert_eq!(out(&source), "1→A\n2→B\nB+A◢\n");
 }

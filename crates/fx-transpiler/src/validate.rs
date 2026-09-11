@@ -114,6 +114,12 @@ impl Checker<'_> {
             }
             Stmt::Block(stmts) => self.stmts(stmts),
             Stmt::Break | Stmt::Goto(..) | Stmt::Label(..) | Stmt::Empty => Ok(()),
+            // Gone after function expansion; kept total for the compiler.
+            Stmt::Return { value, .. } => match value {
+                Some(value) => self.expr(value),
+                None => Ok(()),
+            },
+            Stmt::Function(_) => Ok(()),
         }
     }
 

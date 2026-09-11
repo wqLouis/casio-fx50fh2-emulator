@@ -5,9 +5,12 @@
 
 use fx_transpiler::{Options, transpile, transpile_with};
 
+mod common;
+
 /// Assert glyph-mode output.
 #[track_caller]
 fn glyph(source: &str, expected: &str) {
+    let source = &common::wrap(source);
     let got = transpile(source).unwrap_or_else(|e| panic!("transpile failed: {e}\n{source}"));
     assert_eq!(got, expected, "glyph output for:\n{source}");
 }
@@ -15,6 +18,7 @@ fn glyph(source: &str, expected: &str) {
 /// Assert ASCII-mode output.
 #[track_caller]
 fn ascii(source: &str, expected: &str) {
+    let source = &common::wrap(source);
     let got = transpile_with(
         source,
         Options {
@@ -380,8 +384,8 @@ fn ascii_operator_spellings() {
 #[test]
 fn default_options_match_transpile() {
     assert_eq!(
-        transpile_with("print(a);", Options::default()).unwrap(),
-        transpile("print(a);").unwrap(),
+        transpile_with(&common::wrap("print(a);"), Options::default()).unwrap(),
+        transpile(&common::wrap("print(a);")).unwrap(),
     );
 }
 
@@ -391,7 +395,7 @@ fn default_options_match_transpile() {
 #[test]
 fn more_than_seven_names_is_an_error() {
     let source = "let a=1; let b=1; let c=1; let d=1; let x=1; let y=1; let m=1; let z=1;";
-    let err = transpile(source).unwrap_err();
+    let err = transpile(&common::wrap(source)).unwrap_err();
     assert!(
         err.message.contains("no free memory for `z`"),
         "unexpected message: {}",
@@ -402,7 +406,9 @@ fn more_than_seven_names_is_an_error() {
         "the message should point at the way out: {}",
         err.message
     );
-    assert_eq!((err.line, err.column), (1, 68));
+    // The wrapper adds one line before the body, so the column is unchanged
+    // and the line is 2.
+    assert_eq!((err.line, err.column), (2, 68));
     // `z` really is the eighth distinct name.
     assert!(
         err.message.contains("`z`"),
@@ -413,16 +419,16 @@ fn more_than_seven_names_is_an_error() {
 
 #[test]
 fn input_in_an_expression_is_an_error() {
-    let err = transpile("let a = input() + 1;").unwrap_err();
+    let err = transpile(&common::wrap("let a = input() + 1;")).unwrap_err();
     assert!(err.message.contains("`input()`"), "{}", err.message);
-    assert_eq!((err.line, err.column), (1, 9));
+    assert_eq!((err.line, err.column), (2, 9));
 
-    let err = transpile("print(input());").unwrap_err();
+    let err = transpile(&common::wrap("print(input());")).unwrap_err();
     assert!(err.message.contains("`input()`"), "{}", err.message);
 }
 
 #[test]
 fn unknown_functions_are_rejected_by_the_parser() {
-    let err = transpile("print(foo(1));").unwrap_err();
+    let err = transpile(&common::wrap("print(foo(1));")).unwrap_err();
     assert!(err.message.contains("unknown function"), "{}", err.message);
 }

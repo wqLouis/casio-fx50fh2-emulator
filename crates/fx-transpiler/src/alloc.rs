@@ -987,6 +987,13 @@ impl Scanner<'_> {
                 self.has_jump = true;
                 Ok(())
             }
+            // Function expansion runs before allocation, so these never appear;
+            // walking the value keeps the pass total.
+            Stmt::Return { value, .. } => match value {
+                Some(value) => self.expr(value),
+                None => Ok(()),
+            },
+            Stmt::Function(_) => Ok(()),
             Stmt::Empty => Ok(()),
         }
     }
@@ -1138,7 +1145,9 @@ fn collect_consts(stmts: &[Stmt], out: &mut BTreeSet<String>) {
             | Stmt::Break
             | Stmt::Goto(..)
             | Stmt::Label(..)
-            | Stmt::Empty => {}
+            | Stmt::Empty
+            | Stmt::Function(_)
+            | Stmt::Return { .. } => {}
         }
     }
 }
@@ -1235,7 +1244,9 @@ fn scan_fixed_stmt(stmt: &Stmt, reserved: &mut [bool; VARIABLES.len()]) {
         | Stmt::Break
         | Stmt::Goto(..)
         | Stmt::Label(..)
-        | Stmt::Empty => {}
+        | Stmt::Empty
+        | Stmt::Function(_)
+        | Stmt::Return { .. } => {}
     }
 }
 

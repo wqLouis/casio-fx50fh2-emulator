@@ -1,7 +1,22 @@
 //! Tests for the `#mode` header and [`fx_transpiler::Options::mode`] override.
 
 use fx_transpiler::error::TranspileError;
-use fx_transpiler::{Mode, Options, transpile, transpile_with};
+use fx_transpiler::{
+    Mode, Options, transpile as raw_transpile, transpile_with as raw_transpile_with,
+};
+
+mod common;
+
+/// Transpile, wrapping the classic top-level statements in `fn main()`.
+fn transpile(source: &str) -> Result<String, TranspileError> {
+    raw_transpile(&common::wrap(source))
+}
+
+/// Transpile with options, wrapping the classic top-level statements in
+/// `fn main()`.
+fn transpile_with(source: &str, options: Options) -> Result<String, TranspileError> {
+    raw_transpile_with(&common::wrap(source), options)
+}
 
 /// Transpile with default options and unwrap, for the success cases.
 #[track_caller]
@@ -78,11 +93,16 @@ fn trailing_line_comment_is_allowed() {
 
 #[test]
 fn comments_and_blank_lines_may_precede_the_header() {
+    // The comments sit above `fn main()`, which the lexer skips when it looks
+    // for the first non-comment line.
     assert_eq!(
-        ok("// a comment\n\n#mode CMPLX\nprint(1);"),
+        ok("// a comment\n\n#mode CMPLX\nfn main() { print(1); }"),
         "#mode CMPLX\n1◢\n"
     );
-    assert_eq!(ok("/* block */\n#mode SD\nprint(1);"), "#mode SD\n1◢\n");
+    assert_eq!(
+        ok("/* block */\n#mode SD\nfn main() { print(1); }"),
+        "#mode SD\n1◢\n"
+    );
 }
 
 #[test]
@@ -160,7 +180,9 @@ fn trailing_junk_after_the_name_is_an_error() {
 fn header_must_be_first() {
     let e = err("print(1);\n#mode CMPLX\n");
     assert!(e.message.contains("must be the first"), "{}", e.message);
-    assert_eq!((e.line, e.column), (2, 1));
+    // Wrapping puts the statement inside `fn main()`, so the stray header is
+    // now on the third line.
+    assert_eq!((e.line, e.column), (3, 1));
 
     // A second header is also "not first".
     let e = err("#mode COMP\n#mode CMPLX\n");
@@ -289,6 +311,6 @@ fn override_to_base_also_validates() {
 #[test]
 fn base_error_points_at_the_offending_expression() {
     let e = err("#mode BASE\nlet a = 1; let b = sqrt(a);\n");
-    // `sqrt` starts at column 20 of the second line.
-    assert_eq!((e.line, e.column), (2, 20));
+    // `sqrt` starts at column 20 of the wrapped body's first line (line 3).
+    assert_eq!((e.line, e.column), (3, 20));
 }

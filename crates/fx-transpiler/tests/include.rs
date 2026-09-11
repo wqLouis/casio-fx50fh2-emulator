@@ -6,6 +6,8 @@ use std::path::{Path, PathBuf};
 use fx_transpiler::error::TranspileError;
 use fx_transpiler::{Options, transpile_file, transpile_with_base};
 
+mod common;
+
 /// A scratch directory that cleans itself up.
 struct TempDir(PathBuf);
 
@@ -49,7 +51,7 @@ fn a_fragment_is_inlined_where_it_is_included() {
     dir.write("lib/math.fxc", "let r = x * x;");
     let main = dir.write(
         "main.fxc",
-        "let x = input();\n#include \"lib/math.fxc\"\nprint(r);\n",
+        &common::wrap("let x = input();\n#include \"lib/math.fxc\"\nprint(r);\n"),
     );
 
     let prgm = build(&main).unwrap();
@@ -61,7 +63,12 @@ fn includes_nest() {
     let dir = TempDir::new("nested");
     dir.write("a/outer.fxc", "#include \"../b/inner.fxc\"\nlet y = r + 1;");
     dir.write("b/inner.fxc", "let r = 10;");
-    let main = dir.write("main.fxc", "#include \"a/outer.fxc\"\nprint(y);\n");
+    // A statement fragment must be spliced into `main`'s body, so the include
+    // sits inside it.
+    let main = dir.write(
+        "main.fxc",
+        "fn main() {\n#include \"a/outer.fxc\"\nprint(y);\n}\n",
+    );
 
     let prgm = build(&main).unwrap();
     assert_eq!(prgm, "10→A\nA+1→B\nB◢\n");
@@ -75,7 +82,10 @@ fn paths_resolve_relative_to_the_including_file() {
     dir.write("lib/one.fxc", "#include \"two.fxc\"\nlet b = a + 1;");
     dir.write("lib/two.fxc", "let a = 1;");
     // The including file is at the top level, but `one.fxc`'s sibling is found.
-    let main = dir.write("main.fxc", "#include \"lib/one.fxc\"\nprint(b);\n");
+    let main = dir.write(
+        "main.fxc",
+        "fn main() {\n#include \"lib/one.fxc\"\nprint(b);\n}\n",
+    );
 
     assert_eq!(build(&main).unwrap(), "1→A\nA+1→B\nB◢\n");
 }
@@ -86,7 +96,7 @@ fn a_fragment_may_refer_to_names_from_its_includer() {
     dir.write("square.fxc", "let squared = value * value;");
     let main = dir.write(
         "main.fxc",
-        "let value = input();\n#include \"square.fxc\"\nprint(squared);\n",
+        &common::wrap("let value = input();\n#include \"square.fxc\"\nprint(squared);\n"),
     );
 
     assert_eq!(build(&main).unwrap(), "?→A\nA×A→B\nB◢\n");
@@ -96,7 +106,10 @@ fn a_fragment_may_refer_to_names_from_its_includer() {
 fn ascii_option_applies_after_expansion() {
     let dir = TempDir::new("ascii");
     dir.write("frag.fxc", "let b = a + 1;");
-    let main = dir.write("main.fxc", "let a = 1;\n#include \"frag.fxc\"\nprint(b);\n");
+    let main = dir.write(
+        "main.fxc",
+        &common::wrap("let a = 1;\n#include \"frag.fxc\"\nprint(b);\n"),
+    );
 
     let prgm = transpile_file(
         &main,
@@ -115,12 +128,16 @@ fn ascii_option_applies_after_expansion() {
 #[test]
 fn a_missing_fragment_names_the_offending_file_and_line() {
     let dir = TempDir::new("missing");
-    let main = dir.write("main.fxc", "let a = 1;\n#include \"nope.fxc\"\n");
+    let main = dir.write(
+        "main.fxc",
+        &common::wrap("let a = 1;\n#include \"nope.fxc\"\n"),
+    );
 
     let err = build(&main).unwrap_err();
     assert!(err.message.contains("cannot include"), "{err}");
     assert!(err.message.contains("nope.fxc"), "{err}");
-    assert_eq!(err.line, 2);
+    // `common::wrap` adds the `fn main() {` line, so the include is line 3.
+    assert_eq!(err.line, 3);
     assert_eq!(err.column, 1);
     assert_eq!(err.file.as_deref(), Some(main.to_string_lossy().as_ref()));
 }
@@ -130,7 +147,7 @@ fn a_cycle_is_reported_rather_than_looping() {
     let dir = TempDir::new("cycle");
     dir.write("a.fxc", "#include \"b.fxc\"\nlet a = 1;");
     dir.write("b.fxc", "#include \"a.fxc\"\nlet b = 2;");
-    let main = dir.write("main.fxc", "#include \"a.fxc\"\n");
+    let main = dir.write("main.fxc", &common::wrap("#include \"a.fxc\"\n"));
 
     let err = build(&main).unwrap_err();
     assert!(err.message.contains("circular `#include`"), "{err}");
@@ -145,7 +162,10 @@ fn a_cycle_is_reported_rather_than_looping() {
 fn errors_inside_a_fragment_are_attributed_to_it() {
     let dir = TempDir::new("attribution");
     let fragment = dir.write("frag.fxc", "let ok = 1;\nlet bad = nope(2);\n");
-    let main = dir.write("main.fxc", "#include \"frag.fxc\"\nprint(ok);\n");
+    let main = dir.write(
+        "main.fxc",
+        "fn main() {\n#include \"frag.fxc\"\nprint(ok);\n}\n",
+    );
 
     let err = build(&main).unwrap_err();
     assert!(err.message.contains("unknown function"), "{err}");
@@ -162,10 +182,14 @@ fn errors_inside_a_fragment_are_attributed_to_it() {
 fn errors_in_the_root_are_attributed_to_the_root() {
     let dir = TempDir::new("root-error");
     dir.write("frag.fxc", "let a = 1;");
-    let main = dir.write("main.fxc", "#include \"frag.fxc\"\nlet bad = nope(1);\n");
+    let main = dir.write(
+        "main.fxc",
+        "fn main() {\n#include \"frag.fxc\"\nlet bad = nope(1);\n}\n",
+    );
 
     let err = build(&main).unwrap_err();
-    assert_eq!(err.line, 2);
+    // `common::wrap` adds the `fn main() {` line, so the error is on line 3.
+    assert_eq!(err.line, 3);
     assert_eq!(err.file.as_deref(), Some(main.to_string_lossy().as_ref()));
 }
 
@@ -174,7 +198,10 @@ fn errors_in_the_root_are_attributed_to_the_root() {
 fn a_fragment_may_not_declare_a_mode() {
     let dir = TempDir::new("fragment-mode");
     let fragment = dir.write("frag.fxc", "#mode CMPLX\nlet a = 1;");
-    let main = dir.write("main.fxc", "#include \"frag.fxc\"\nprint(a);\n");
+    let main = dir.write(
+        "main.fxc",
+        &common::wrap("#include \"frag.fxc\"\nprint(a);\n"),
+    );
 
     let err = build(&main).unwrap_err();
     assert!(err.message.contains("may only appear"), "{err}");
@@ -191,7 +218,7 @@ fn the_root_file_may_declare_a_mode_alongside_includes() {
     dir.write("frag.fxc", "let b = a + 1;");
     let main = dir.write(
         "main.fxc",
-        "#mode SD\nlet a = 1;\n#include \"frag.fxc\"\nprint(b);\n",
+        &common::wrap("#mode SD\nlet a = 1;\n#include \"frag.fxc\"\nprint(b);\n"),
     );
 
     let prgm = build(&main).unwrap();
@@ -203,14 +230,18 @@ fn an_include_directive_needs_to_start_the_line() {
     let dir = TempDir::new("not-first");
     dir.write("frag.fxc", "let a = 1;");
     // Mid-line, the `#` is not an include directive and the lexer rejects it.
-    let main = dir.write("main.fxc", "let a = 1 + #include \"frag.fxc\";\n");
+    let main = dir.write(
+        "main.fxc",
+        &common::wrap("let a = 1 + #include \"frag.fxc\";\n"),
+    );
 
     let err = build(&main).unwrap_err();
     assert!(
         err.message.contains("`#` directive"),
         "unexpected message: {err}"
     );
-    assert_eq!(err.line, 1);
+    // `common::wrap` adds the `fn main() {` line, so the error is on line 2.
+    assert_eq!(err.line, 2);
 }
 
 // ---------------------------------------------------------------------------
@@ -222,7 +253,7 @@ fn base_dir_lets_inline_text_find_its_includes() {
     dir.write("frag.fxc", "let b = a * 3;");
 
     let prgm = transpile_with_base(
-        "let a = 1;\n#include \"frag.fxc\"\nprint(b);\n",
+        &common::wrap("let a = 1;\n#include \"frag.fxc\"\nprint(b);\n"),
         Options::default(),
         &dir.0,
     )
@@ -233,7 +264,12 @@ fn base_dir_lets_inline_text_find_its_includes() {
 #[test]
 fn text_without_an_include_is_unaffected() {
     // The common case must not regress: no include, no change.
-    let prgm = transpile_with_base("print(1);", Options::default(), Path::new(".")).unwrap();
+    let prgm = transpile_with_base(
+        &common::wrap("print(1);"),
+        Options::default(),
+        Path::new("."),
+    )
+    .unwrap();
     assert_eq!(prgm, "1◢\n");
 }
 
@@ -249,7 +285,7 @@ fn a_test_suite_can_test_a_program_that_uses_includes() {
     dir.write("lib/double.fxc", "// doubles a into b\nlet b = a * 2;");
     dir.write(
         "prog.fxc",
-        "let a = input();\n#include \"lib/double.fxc\"\nprint(b);\n",
+        &common::wrap("let a = input();\n#include \"lib/double.fxc\"\nprint(b);\n"),
     );
     let suite = dir.write(
         "prog.tests.json",

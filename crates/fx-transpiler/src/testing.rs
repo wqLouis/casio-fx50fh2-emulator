@@ -752,7 +752,28 @@ mod tests {
     use super::*;
 
     fn suite(json: &str) -> TestSuite {
-        parse_suite(json, "inline", Path::new("."), None).unwrap()
+        parse_suite(&with_main(json), "inline", Path::new("."), None).unwrap()
+    }
+
+    /// Wrap a suite's inline `"source"` value in its required `fn main()`.
+    ///
+    /// These tests exercise the suite *runner*, so they keep writing bare
+    /// statement lists; this inserts the entry point the language now needs.
+    /// `#data`/`#include` are resolved before lexing, so leaving one inside the
+    /// wrapper is harmless — it is blanked or spliced either way.
+    fn with_main(json: &str) -> String {
+        const KEY: &str = "\"source\": \"";
+        let Some(start) = json.find(KEY) else {
+            return json.to_string();
+        };
+        let value_start = start + KEY.len();
+        let Some(relative_end) = json[value_start..].find('"') else {
+            return json.to_string();
+        };
+        let value_end = value_start + relative_end;
+        let source = &json[value_start..value_end];
+        let wrapped = format!("fn main() {{\\n{source}\\n}}");
+        format!("{}{wrapped}{}", &json[..value_start], &json[value_end..])
     }
 
     #[test]

@@ -34,7 +34,9 @@
 //! accessor  := '.' NAME | '[' INTEGER ']'
 //! ```
 
-use crate::ast::{Accessor, BinOp, Expr, ForStmt, MemOp, Program, Setup, StatVar, Stmt, UnOp};
+use crate::ast::{
+    Accessor, BinOp, Expr, FnDef, ForStmt, MemOp, Program, Setup, StatVar, Stmt, UnOp,
+};
 use crate::builtins;
 use crate::error::TranspileError;
 use crate::lexer::{Tok, Token};
@@ -169,6 +171,8 @@ impl<'a> Parser<'a> {
                 })
             }
             Tok::Print => self.print_statement(),
+            Tok::Fn => self.fn_statement(),
+            Tok::Return => self.return_statement(),
             Tok::If => self.if_statement(),
             Tok::While => self.while_statement(),
             Tok::For => self.for_statement(),
@@ -508,6 +512,60 @@ impl<'a> Parser<'a> {
         }
         self.expect(&Tok::Semi, "`;` after expression")?;
         Ok(Stmt::ExprStmt(value))
+    }
+
+    /// `fn name(a, b) = expr;` or `fn name(a, b) { … }`.
+    fn fn_statement(&mut self) -> Result<Stmt, TranspileError> {
+        let pos = self.position();
+        self.advance();
+        let (name, _) = self.expect_ident("a function name after `fn`")?;
+        self.expect(&Tok::LParen, "`(` after the function name")?;
+        let mut params = Vec::new();
+        if !self.check(&Tok::RParen) {
+            loop {
+                let (param, _) = self.expect_ident("a parameter name")?;
+                params.push(param);
+                if !self.matches(&Tok::Comma) {
+                    break;
+                }
+            }
+        }
+        self.expect(&Tok::RParen, "`)` after the parameters")?;
+
+        if self.matches(&Tok::Assign) {
+            let value = self.expression()?;
+            self.expect(&Tok::Semi, "`;` after the function")?;
+            return Ok(Stmt::Function(FnDef {
+                name,
+                params,
+                expr: Some(value),
+                body: Vec::new(),
+                pos,
+            }));
+        }
+        let body = self.body()?;
+        // A trailing `;` after the block is accepted and discarded.
+        self.matches(&Tok::Semi);
+        Ok(Stmt::Function(FnDef {
+            name,
+            params,
+            expr: None,
+            body,
+            pos,
+        }))
+    }
+
+    /// `return;` or `return expr;`.
+    fn return_statement(&mut self) -> Result<Stmt, TranspileError> {
+        let pos = self.position();
+        self.advance();
+        let value = if self.check(&Tok::Semi) {
+            None
+        } else {
+            Some(self.expression()?)
+        };
+        self.expect(&Tok::Semi, "`;` after `return`")?;
+        Ok(Stmt::Return { value, pos })
     }
 
     fn print_statement(&mut self) -> Result<Stmt, TranspileError> {
@@ -859,10 +917,13 @@ impl<'a> Parser<'a> {
             return Ok(Expr::Input(pos));
         }
 
-        let Some(builtin) = builtins::lookup(&name) else {
-            return Err(self.error_at(format!("unknown function `{name}`"), pos));
-        };
-        if args.len() < builtin.min_args || args.len() > builtin.max_args {
+        // A known built-in is arity-checked here. Any other name is accepted
+        // provisionally: it may be a user `fn`, which the function-expansion
+        // pass resolves, or it may be genuinely unknown, which that pass
+        // reports with the same position.
+        if let Some(builtin) = builtins::lookup(&name)
+            && (args.len() < builtin.min_args || args.len() > builtin.max_args)
+        {
             let expected = if builtin.min_args == builtin.max_args {
                 format!("{}", builtin.min_args)
             } else {

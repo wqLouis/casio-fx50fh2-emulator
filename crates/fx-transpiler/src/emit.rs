@@ -223,6 +223,21 @@ impl Emitter<'_> {
             Stmt::Goto(label, _) => self.line(format!("Goto {label}")),
             Stmt::Label(label, _) => self.line(format!("Lbl {label}")),
             Stmt::Block(stmts) => self.stmts(stmts)?,
+            // Function expansion removes these before emission.
+            Stmt::Function(def) => {
+                return Err(TranspileError::at(
+                    self.source,
+                    format!("internal error: `fn {}` was not expanded", def.name),
+                    def.pos,
+                ));
+            }
+            Stmt::Return { pos, .. } => {
+                return Err(TranspileError::at(
+                    self.source,
+                    "internal error: `return` outside a function after expansion",
+                    *pos,
+                ));
+            }
             Stmt::Empty => {}
         }
         Ok(())
