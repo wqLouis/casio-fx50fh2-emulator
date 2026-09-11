@@ -213,7 +213,7 @@ fn main() {
 | Document | What it covers |
 | --- | --- |
 | [`docs/LANGUAGE.md`](docs/LANGUAGE.md) | **Language manual — PRGM**: tokens, modes, priority, runtime semantics, precision, base-n |
-| [`docs/FXC.md`](docs/FXC.md) | **Language manual — `.fxc`**: grammar, statements, the memory model and `free`, compile-time data, `#include`, `#tests` |
+| [`docs/FXC.md`](docs/FXC.md) | **Language manual — `.fxc`**: grammar, statements, the memory model and `free`, functions, arrays, the optimiser, compile-time data, `#include`, `#tests` |
 | [`docs/AI-AGENTS.md`](docs/AI-AGENTS.md) | Rule-oriented authoring guide for `.fxc`, written for AI agents (and a good checklist for anyone) |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Workspace layout, interpreter and transpiler pipelines, feature matrix |
 | [`docs/DECISIONS.md`](docs/DECISIONS.md) | Design decisions and the alternatives rejected (ADRs) |
@@ -231,7 +231,8 @@ fn main() {
 * **`.fxc`** (`fx50 run` / `build` / `test`): `factorial.fxc`, `quadratic.fxc`,
   `constants.fxc` (the 40 scientific constants), `compiletime.fxc` (`#data`,
   `const`, `free`), `arrays.fxc` (one memory per element), `determinant.fxc`
-  (a 3x3 determinant against the seven-memory limit), and `include.fxc`, which
+  (a 3x3 determinant against the seven-memory limit), `functions.fxc`
+  (user-defined functions, inlined at each call), and `include.fxc`, which
   splits its work across [`examples/lib/`](examples/lib).
 
 The `.fxc` examples carry their own test cases, so they can be checked with:
