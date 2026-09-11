@@ -356,10 +356,11 @@ fn test_command(_file: &Path, _filter: Option<&str>, _as_json: bool) -> Result<(
 
 /// `fx50 regs FILE` — show how a program would use the seven memories.
 ///
-/// This is the allocation report: which variable gets which memory, which
-/// memories are deliberately pinned with `#reg`, and how many are left. Values
-/// that need no memory at all (`const` and `#data`) are listed too, because
-/// they are the reason a program fits.
+/// This is the allocation report: which variable (or array element) gets which
+/// memory, which memories are released and re-used with `free`, and how many
+/// are left. Values that need no memory at all (`const` and `#data`) are listed
+/// too, because they are the reason a program fits — an array element is one
+/// memory and no program bytes, since `a[0]` is resolved while transpiling.
 #[cfg(feature = "transpiler")]
 fn regs_command(file: &Path) -> Result<(), Fail> {
     let source = read_source(file)?;
@@ -387,20 +388,25 @@ fn print_memory_plan(file: &Path, analysis: &fx_transpiler::Analysis) {
     let width = allocation
         .bindings
         .iter()
-        .map(|binding| binding.name.chars().count())
+        .map(|binding| binding.label().chars().count())
         .max()
         .unwrap_or(0);
-    for (memory, names) in &allocation.registers {
-        if names.is_empty() {
+    for (memory, occupants) in &allocation.registers {
+        if occupants.is_empty() {
             continue;
         }
-        let timeline = names
+        let timeline = occupants
             .iter()
-            .map(|name| format!("{name:<width$}"))
+            .map(|binding| format!("{:<width$}", binding.label()))
             .collect::<Vec<_>>()
             .join(" → ");
-        let note = if names.len() > 1 {
-            let released = &names[..names.len() - 1];
+        // Name the whole array, not its element: an array is released at once
+        // with `free v;`, never element by element.
+        let note = if occupants.len() > 1 {
+            let released = occupants[..occupants.len() - 1]
+                .iter()
+                .map(|binding| binding.name.clone())
+                .collect::<Vec<_>>();
             format!("   (reused after `free {}`)", released.join("`, `free "))
         } else {
             String::new()

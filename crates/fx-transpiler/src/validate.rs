@@ -47,7 +47,16 @@ fn validate_stmt(stmt: &Stmt, source: &str) -> Result<(), TranspileError> {
         Stmt::Let { value, .. }
         | Stmt::Const { value, .. }
         | Stmt::Assign { value, .. }
+        | Stmt::AssignElement { value, .. }
         | Stmt::ExprStmt(value) => validate_expr(value, source),
+        // Every element's initialiser is still an expression that has to obey
+        // the mode; an array of numbers is fine in BASE.
+        Stmt::LetArray { values, .. } => {
+            for value in values {
+                validate_expr(value, source)?;
+            }
+            Ok(())
+        }
         // `free` names a variable, not a value; the allocator checks the name.
         Stmt::Free { .. } => Ok(()),
         Stmt::Print(expr) => validate_expr(expr, source),

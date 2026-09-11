@@ -4,10 +4,11 @@ Tree-sitter grammar for the **CASIO fx-50FH II C-like** language (`.fxc`).
 
 `.fxc` is a small C-like language that transpiles to PRGM. It has `//` and
 `/* */` comments, the directives `#mode`, `#include` and `#data`/`#tests`, the
-statements `let`/`const`/assignment/`free`/`unsafe_free`/`print`, `if`/`while`/
-`for` with optional braces, `break`/`goto`/`label`, data paths (`config.size`,
-`weights[0]`), and arithmetic/comparison expressions with `^`/`**`
-exponentiation. Scientific constants are reached through the `phys.` namespace.
+statements `let`/array declarations/`const`/assignment/`free`/`unsafe_free`/
+`print`, `if`/`while`/`for` with optional braces, `break`/`goto`/`label`, data
+paths (`config.size`, `weights[0]`), and arithmetic/comparison expressions with
+`^`/`**` exponentiation. Scientific constants are reached through the `phys.`
+namespace.
 
 The language itself is documented in [`docs/FXC.md`](../../docs/FXC.md); this
 README covers only the grammar.
@@ -46,7 +47,9 @@ tree-sitter parse ../../examples/factorial.fxc
   and `#tests = <json>;` (the JSON is parsed by the grammar so the rest of the
   file still highlights).
 * Statements: `let NAME = expr;`, `const NAME = expr;`, `NAME = expr;`,
-  `free NAME;`, `unsafe_free NAME;`, `print(expr);`, `print expr;`, expression
+  `NAME[i] = expr;`, array declarations `let NAME[N];`,
+  `let NAME[N] = {e0, e1, …};` and `let NAME[] = {…};`, `free NAME;`,
+  `unsafe_free NAME;`, `print(expr);`, `print expr;`, expression
   statements, `if (e) … else …` (braces optional), `while (e) …`,
   `for (let i = 0; i < 5; i = i + 1) …`, `break;`, `goto N;`, `label N;`,
   blocks and stray `;`.

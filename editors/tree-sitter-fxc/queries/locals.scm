@@ -11,6 +11,7 @@
 ] @local.scope
 
 (let_statement (identifier) @local.definition)
+(array_declaration (identifier) @local.definition)
 (for_init (identifier) @local.definition)
 
 (identifier) @local.reference

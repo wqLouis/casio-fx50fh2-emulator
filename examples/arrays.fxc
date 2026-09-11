@@ -1,0 +1,42 @@
+// Arrays: a group of values, one memory per element.
+//
+// PRGM has no indirect addressing, so `v[k]` cannot be looked up from a
+// variable index at run time — the index has to be known while transpiling.
+// That restriction is the feature: `v[0]` compiles to a single memory letter,
+// so indexing costs **no program bytes**, only memories. With 680 bytes of
+// program storage shared by all four program areas, that trade is the point.
+//
+//   fx50 build examples/arrays.fxc
+//   fx50 regs  examples/arrays.fxc
+//   fx50 test  examples/arrays.fxc
+//
+// The three-element array fills A B C; after `free data` the next array reuses
+// those same three memories, and the last pair takes D and X.
+
+#mode COMP
+
+// An initialiser list fills consecutive memories, A B C.
+let data[3] = {4, 8, 15};
+
+// Elements are read and written by a literal index.
+print(data[0] + data[1] + data[2]);
+data[1] = 16;
+print(data[1]);
+
+// An array can be released as a whole, after which the memories are free for
+// the next declaration. `free data[1];` is deliberately an error: the elements
+// after it would be stranded in memories nothing can hand out again.
+free data;
+let again[3] = {1, 2, 3};
+print(again[2]);
+
+// A size may be inferred from the initialiser list, and an array may be
+// declared without one and filled in later.
+let sums[] = {1, 2};
+sums[0] = sums[0] + sums[1];
+print(sums[0]);
+
+// The cases travel with the program: `fx50 test examples/arrays.fxc`.
+#tests = [
+  { "name": "sum, overwrite, reuse, and a declared-later element", "output": ["27", "16", "3", "3"] }
+];

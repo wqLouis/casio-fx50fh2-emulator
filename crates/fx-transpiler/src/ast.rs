@@ -24,6 +24,10 @@ pub enum UnOp {
 }
 
 /// One step of a compile-time data path, as in `config.size` or `weights[0]`.
+///
+/// The same type also describes an array element reference (`a[0]`): the
+/// parser cannot tell the two apart, so the allocator and emitter decide by
+/// whether the name is a declared array or a `#data` table.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Accessor {
     /// `.field`
@@ -79,6 +83,18 @@ pub enum Stmt {
         value: Expr,
         pos: usize,
     },
+    /// `let name[size];` or `let name[size] = {…};` — a fixed-size array whose
+    /// elements each occupy one memory.
+    ///
+    /// `values` is empty when the declaration has no initialiser list, in
+    /// which case every element starts out undefined. The parser guarantees
+    /// `values.len() == size` when `values` is non-empty.
+    LetArray {
+        name: String,
+        size: usize,
+        values: Vec<Expr>,
+        pos: usize,
+    },
     /// `const name = value;` — a compile-time constant, inlined at each use
     /// and never given a register.
     Const {
@@ -89,6 +105,16 @@ pub enum Stmt {
     /// `name = value;`
     Assign {
         name: String,
+        value: Expr,
+        pos: usize,
+    },
+    /// `name[index] = value;` — assign to one element of an array.
+    ///
+    /// `index` must be a compile-time constant: PRGM has no indirect
+    /// addressing, so an element is a fixed memory chosen while transpiling.
+    AssignElement {
+        name: String,
+        index: usize,
         value: Expr,
         pos: usize,
     },

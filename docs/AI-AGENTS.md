@@ -59,8 +59,10 @@ directive  := '#mode' MODENAME             -- must be first if present
             | '#data' NAME '=' JSON ';'    -- may appear anywhere
             | '#tests' '=' JSON ';'        -- sugar for `#data tests = ...`
 stmt       := 'let' NAME '=' expr ';'
+            | 'let' NAME '[' INTEGER? ']' ('=' '{' expr (',' expr)* '}')? ';'
             | 'const' NAME '=' expr ';'
             | NAME '=' expr ';'
+            | NAME '[' INTEGER ']' '=' expr ';'    -- array element
             | 'free' NAME ';'
             | 'unsafe_free' NAME ';'      -- `free` without the jump check
             | 'print' [ '(' expr ')' | expr ] ';'   -- parens optional
@@ -82,6 +84,7 @@ accessor   := '.' NAME | '[' INTEGER ']'
 
 primary    := NUMBER | 'pi' | 'e' | 'input()' | NAME | dataref
             | NAME '(' [expr (',' expr)*] ')' | '(' expr ')'
+```
 
 **Binding strength, tightest first:** `(...)` / calls → `^ **` → unary `-` →
 `* /` → `+ -` → `< <= > >=` → `== !=` (loosest).
@@ -98,7 +101,7 @@ not `(-2) ^ 2`.
 | Identifiers | `[A-Za-z_][A-Za-z0-9_]*`. Keywords are reserved. |
 | Numbers | Decimal only: `123`, `1.5`, `.5`, `1e10`, `2.5E-2`. **No** hex/binary literals. |
 | Keywords | `let if else while for break goto label print` |
-| Punctuation | `+ - * / ^ ** = == != < <= > >= ( ) { } ; ,` |
+| Punctuation | `+ - * / ^ ** = == != < <= > >= ( ) { } [ ] ; ,` |
 | Not available | `% & | ~ ! ++ -- += -= *= /= && || << >> ?:` |
 
 ---
@@ -108,13 +111,55 @@ not `(-2) ^ 2`.
 ### Assignment and input
 
 ```c
-let a = 1;        //  1→A          first assignment; `let` is conventional
-a = a + 1;        //  A+1→A
+let a = 1;        //  1→A          declaration
+let v[3] = {1,2,3}; //  1→A 2→B 3→C  an array: one memory per element
+v[1] = 9;         //  9→B          write one element
+a = a + 1;        //  A+1→A        assignment to a declared name
 let b = input();  //  ?→B          prompt for a number
 ```
 
-`let` and plain `=` behave identically at runtime; `let` is only a readability
-signal. There is no block scoping — a name means the same memory everywhere.
+`let` **declares** — it introduces the name and allocates its memory. A plain
+`=` assigns to a name that already exists and never declares one. Declaring a
+live name twice is an error; after `free` it can be declared again. See
+[Variables](#5-variables-seven-memories) below for the full rules.
+
+### Arrays
+
+An array gives a group of values one memory each. **The index must be a
+literal**, because PRGM has no indirect addressing — `v[k]` cannot be looked up
+from a variable at run time, so `k` has to be known while transpiling.
+
+```c
+let v[3];                 // declare 3 elements (A B C)
+let w[3] = {4, 8, 15};    // declare and initialise
+let u[] = {1, 2, 3};      // size inferred from the list
+print(w[0] + w[2]);       // read an element
+w[1] = 16;                // write an element
+free w;                   // release every element at once
+```
+
+The payoff is that an element reference is **free**: `w[1]` emits the single
+memory letter `B`, with no instructions at all. The cost is that you cannot walk
+an array in a loop — unroll it instead:
+
+```c
+// Not `for (i…) print(v[i]);` — `i` is not a constant.
+print(v[0]);
+print(v[1]);
+print(v[2]);
+```
+
+Rules that will bite you:
+
+* **Seven memories is the whole budget**, shared with everything else. `let v[5]`
+  plus a loop counter and an accumulator fills all seven. Prefer `#data` for a
+  constant table — it costs no memory.
+* **An array is freed as a whole.** `free v[0];` is an error on purpose: the
+  elements after it would be stranded in memories nothing can reuse.
+* **A declaration with no initialiser emits nothing.** `let v[3];` just reserves
+  the memories; the values are whatever you write there.
+* **`const` cannot declare an array** (it is inlined, so it has no memory).
+* **A name is either a scalar or an array**, not both, while it is live.
 
 ### Display
 
@@ -310,6 +355,9 @@ In this order of preference:
    ```
 
 2. **Use `#data` for values that come from JSON.** Those become literals too.
+   An array is the other option for a table of values, but each element costs a
+   memory, so `#data` is preferable for anything fixed. See
+   [Arrays](#arrays).
 3. **`free` a variable when you are done with it.** The memory is handed to the
    next new variable:
 
@@ -670,8 +718,10 @@ hand when the values are already available as JSON.
       `free` alongside `goto`/`label` (use `unsafe_free` if you have verified
       the jumps).
 - [ ] `input()` appears only as a complete assignment right-hand side.
-- [ ] No `%`, `&&`, `||`, `!`, `++`, `--`, `+=`, hex literals, arrays, or
-      strings.
+- [ ] No `%`, `&&`, `||`, `!`, `++`, `--`, `+=`, hex literals, or strings.
+- [ ] Every array index is a **literal** (never a variable), in range, and the
+      array plus everything else fits in seven memories — `fx50 regs` shows the
+      plan. Arrays are freed whole (`free v;`), never element by element.
 - [ ] Only built-ins from the table in §4 are called, with the right arity
       (`log` takes 1 or 2 arguments; everything else takes 1).
 - [ ] `goto`/`label` use a single digit `0`–`9`.
@@ -684,9 +734,6 @@ hand when the values are already available as JSON.
       as a bare name, which would become a variable.
 - [ ] `#include` paths exist, start the line, and contain no `#mode`; the
       seven-memory budget is respected *after* expansion.
-- [ ] If you can run commands, a `.tests.json` suite covers the happy path
-      **and** at least one error case, and `fx50 test` reports `0 failed`.
-
 - [ ] If you can run commands, a `#tests` table (or a `.tests.json` suite)
       covers the happy path **and** at least one error case, and `fx50 test`
       reports `0 failed`.

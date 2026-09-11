@@ -29,8 +29,11 @@ directive  := '#mode' MODENAME             -- must be first if present
             | '#data' NAME '=' JSON ';'    -- may appear anywhere
             | '#tests' '=' JSON ';'        -- sugar for `#data tests = ...`
 stmt       := 'let' NAME '=' expr ';'      -- declaration
+            | 'let' NAME '[' INTEGER? ']'  -- array declaration
+              ('=' '{' expr (',' expr)* '}')? ';'
             | 'const' NAME '=' expr ';'    -- compile-time constant
             | NAME '=' expr ';'            -- assignment
+            | NAME '[' INTEGER ']' '=' expr ';'   -- element assignment
             | 'free' NAME ';'              -- release a memory
             | 'unsafe_free' NAME ';'       -- release it without the jump check
             | 'print' [ '(' expr ')' | expr ] ';'
@@ -72,8 +75,7 @@ Notes:
   only directly after `phys.` — a bare `π` is rejected rather than silently
   becoming a variable.
 * There is no `%`, no `&&`/`||`/`!`, no `++`/`--`/`+=`, no bitwise operators,
-  no arrays, no strings, and no user-defined functions. Comparisons produce `1`
-  or `0`.
+  no strings, and no user-defined functions. Comparisons produce `1` or `0`.
 * There is one numeric type: an `f64`, the same as the calculator computes with.
 
 ## Statements
@@ -82,6 +84,8 @@ Notes:
 // line comment, and /* block comments */
 let a = input();          // read a number
 let b = 2;                // declaration
+let v[3] = {1, 2, 3};     // array: three elements, one memory each
+v[1] = 9;                 // write one element
 a = a + b * 2;            // assignment
 print(a);                 // display with ◢
 if (a > 0) { print(1); } else { print(0); }
@@ -95,6 +99,9 @@ goto 1;
 * **`let` declares.** It introduces a name and allocates its memory. Declaring a
   name that is still live is an error, but after a `free` the name can be
   declared again — see [Memory and `free`](#memory-and-free).
+* **Arrays** are declared with a size in brackets and indexed with a literal:
+  `let v[3];`, `let v[] = {1, 2, 3};`, `v[0] = 7;`. See
+  [Arrays](#arrays) for why the index has to be a constant.
 * **`input()`** is only legal as the entire right-hand side of an assignment.
   `let a = input();` is fine; `print(input());` and `let a = input() + 1;` are
   errors.
@@ -104,6 +111,100 @@ Expressions support `+ - * /`, `^` / `**` (power), unary `-`, comparisons
 `== != < <= > >=`, parentheses, the constants `pi` and `e`, and the built-ins
 `sqrt cbrt abs sin cos tan asin acos atan sinh cosh tanh asinh acosh atanh log
 ln rnd` (`log` accepts one or two arguments). Values are real numbers.
+
+## Arrays
+
+An array is a group of values that each take **one memory**. Declare one with a
+size in brackets, then index it with a **literal**:
+
+```c
+let v[3];                 // three elements, no values yet
+let w[3] = {4, 8, 15};    // three elements, initialised (A B C)
+let u[] = {1, 2, 3};      // size inferred from the list
+
+print(w[0] + w[2]);       // read an element
+w[1] = 16;                // write an element
+free w;                   // release the whole array at once
+```
+
+`v[0]`, `v[1]`, … are ordinary memories; the report shows which:
+
+```console
+$ fx50 regs examples/arrays.fxc
+Memory plan for examples/arrays.fxc
+  A  data[0]  → again[0]   (reused after `free data`)
+  B  data[1]  → again[1]   (reused after `free data`)
+  C  data[2]  → again[2]   (reused after `free data`)
+  D  sums[0]
+  X  sums[1]
+
+  5 of 7 memories used; free: Y M
+```
+
+### Why the index must be a constant
+
+**PRGM has no indirect addressing.** There is no way to say "the memory whose
+number is in `X`" — a memory can only be named literally, `A`, `B`, `C`. So
+`v[k]` cannot be a run-time lookup: the transpiler has to know `k` while it is
+translating.
+
+That restriction buys the thing this language is for. An element reference
+compiles to **a single memory letter and no instructions at all**:
+
+```c
+let v[3] = {10, 20, 30};
+print(v[1]);
+```
+
+```text
+10→A
+20→B
+30→C
+B◢
+```
+
+The alternative — a run-time index — would need an `If`/`Else` chain over every
+element, and the machine has only **680 bytes of program memory shared by all
+four program areas**. On a machine that small, `v[0]` being free and `v[i]`
+costing a dozen bytes per lookup is the right trade. To walk an array, unroll the
+loop:
+
+```c
+// Instead of `for (i…) print(v[i]);`:
+print(v[0]);
+print(v[1]);
+print(v[2]);
+```
+
+### What the transpiler checks
+
+| Mistake | Message |
+| --- | --- |
+| Index past the end | ``index 3 is out of range for `v` (length 3)`` |
+| Indexing a scalar | `` `x` is not an array; it holds a single value`` |
+| Using an array bare | `` `v` is an array; index it, as in `v[0]` `` |
+| Assigning the name | `` `v` is an array; assign to an element, as in `v[0] = ...` `` |
+| Wrong initialiser count | `` `v` is declared with 3 element(s) but has 2 initialiser(s)`` |
+| No size and no list | `` `v[]` needs a size or an initialiser list…`` |
+| `const v[3]` | `` `const` cannot declare an array; use `let v[…]` instead`` |
+| Freeing one element | `` `free v[…]` releases one element, which would strand the others…`` |
+| Not enough memories | ``no room for array `w`: it needs 3 memories but only 2 are free (Y M)…`` |
+
+Notes:
+
+* **The budget is seven memories including everything else.** `let v[5]` plus a
+  loop counter plus an accumulator fills all seven. A `#data` table is often the
+  better home for a constant table, since it costs no memory at all.
+* **An array is released as a whole.** There is deliberately no `free v[0];`:
+  releasing one element would strand the others in memories nothing can hand out
+  again.
+* **An array with no initialiser list emits nothing**, like an unassigned
+  variable. The memories exist from the declaration; the values are whatever you
+  put there.
+* **A `const` cannot be an array**, because a `const` is inlined and has no
+  memory. Use `#data` for a fixed table of values.
+* **A name cannot be both.** `let x = 1; let x[2] = {1,2};` is an error; use a
+  fresh name, or `free` first.
 
 ## Scientific constants
 

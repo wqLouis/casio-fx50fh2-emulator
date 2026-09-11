@@ -5,10 +5,12 @@
 //! ```text
 //! program   := stmt*
 //! stmt      := 'let' NAME '=' expr ';'
+//!            | 'let' NAME '[' INTEGER? ']' ('=' '{' (expr (',' expr)*)? '}')? ';'
 //!            | 'const' NAME '=' expr ';'
 //!            | 'free' NAME ';'
 //!            | 'unsafe_free' NAME ';'
 //!            | NAME '=' expr ';'
+//!            | NAME '[' INTEGER ']' '=' expr ';'
 //!            | 'print' '(' expr ')' ';'
 //!            | 'if' '(' expr ')' block ('else' block)?
 //!            | 'while' '(' expr ')' block
@@ -19,6 +21,7 @@
 //!            | '{' stmt* '}'
 //!            | ';'
 //!            | expr ';'
+//! forinit   := ['let'] NAME '=' expr
 //! expr      := equality
 //! equality  := comparison (('==' | '!=') comparison)*
 //! comparison:= additive (('<' | '<=' | '>' | '>=') additive)*
@@ -28,7 +31,7 @@
 //! power     := primary (('^' | '**') unary)?
 //! primary   := NUMBER | NAME | NAME '(' args ')' | 'pi' | 'e' | 'input()'
 //!            | 'phys' '.' NAME | NAME accessor+ | '(' expr ')'
-//! accessor  := '.' NAME | '[' NUMBER ']'
+//! accessor  := '.' NAME | '[' INTEGER ']'
 //! ```
 
 use crate::ast::{Accessor, BinOp, Expr, ForStmt, Program, Stmt, UnOp};
@@ -147,6 +150,17 @@ impl<'a> Parser<'a> {
                 let pos = self.position();
                 self.advance();
                 let (name, _) = self.expect_ident("a variable name after `free`")?;
+                // `free a[0]` would strand the rest of the array in memories
+                // the allocator can never hand out again.
+                if self.check(&Tok::LBracket) {
+                    return Err(self.error_at(
+                        format!(
+                            "`free {name}[…]` releases one element, which would strand the others; \
+                             `free {name};` releases the whole array"
+                        ),
+                        self.position(),
+                    ));
+                }
                 self.expect(&Tok::Semi, "`;` after `free`")?;
                 Ok(Stmt::Free {
                     name,
@@ -200,15 +214,91 @@ impl<'a> Parser<'a> {
     fn let_statement(&mut self) -> Result<Stmt, TranspileError> {
         self.advance();
         let (name, pos) = self.expect_ident("a variable name after `let`")?;
+        if self.check(&Tok::LBracket) {
+            return self.array_declaration(name, pos);
+        }
         self.expect(&Tok::Assign, "`=` in `let`")?;
         let value = self.expression()?;
         self.expect(&Tok::Semi, "`;` after `let`")?;
         Ok(Stmt::Let { name, value, pos })
     }
 
+    /// `let name[size];` and `let name[size] = {e0, e1, …};`.
+    ///
+    /// The `[` has not been consumed. The size may be omitted when an
+    /// initialiser list is present, in which case it is the number of values.
+    fn array_declaration(&mut self, name: String, pos: usize) -> Result<Stmt, TranspileError> {
+        self.expect(&Tok::LBracket, "`[` after the array name")?;
+        let declared = if self.check(&Tok::RBracket) {
+            None
+        } else {
+            Some(self.bracket_index()?)
+        };
+        self.expect(&Tok::RBracket, "`]` after the array size")?;
+
+        let mut values = Vec::new();
+        if self.matches(&Tok::Assign) {
+            self.expect(&Tok::LBrace, "`{` to begin the initialiser list")?;
+            if !self.check(&Tok::RBrace) {
+                loop {
+                    values.push(self.expression()?);
+                    if !self.matches(&Tok::Comma) {
+                        break;
+                    }
+                }
+            }
+            self.expect(&Tok::RBrace, "`}` after the initialiser list")?;
+        }
+        self.expect(&Tok::Semi, "`;` after the array declaration")?;
+
+        let size = match declared {
+            Some(size) => {
+                if !values.is_empty() && values.len() != size {
+                    return Err(self.error_at(
+                        format!(
+                            "`{name}` is declared with {size} element(s) but has {} initialiser(s)",
+                            values.len()
+                        ),
+                        pos,
+                    ));
+                }
+                size
+            }
+            None => {
+                if values.is_empty() {
+                    return Err(self.error_at(
+                        format!(
+                            "`{name}[]` needs a size or an initialiser list, as in `let {name}[3];` \
+                             or `let {name}[] = {{1, 2, 3}};`"
+                        ),
+                        pos,
+                    ));
+                }
+                values.len()
+            }
+        };
+        if size == 0 {
+            return Err(self.error_at(format!("`{name}` must have at least one element"), pos));
+        }
+        Ok(Stmt::LetArray {
+            name,
+            size,
+            values,
+            pos,
+        })
+    }
+
     fn const_statement(&mut self) -> Result<Stmt, TranspileError> {
         self.advance();
         let (name, pos) = self.expect_ident("a name after `const`")?;
+        // A `const` is inlined at each use and has no memory, so it cannot
+        // hold a group of values.
+        if self.check(&Tok::LBracket) {
+            return Err(self.error_at(
+                format!("`const` cannot declare an array; use `let {name}[…]` instead"),
+                self.position(),
+            ));
+        }
         self.expect(&Tok::Assign, "`=` in `const`")?;
         let value = self.expression()?;
         self.expect(&Tok::Semi, "`;` after `const`")?;
@@ -226,6 +316,32 @@ impl<'a> Parser<'a> {
             return Ok(Stmt::Assign { name, value, pos });
         }
         let value = self.expression()?;
+        // `a[i] = expr;` parses as an indexed expression followed by `=`. Only
+        // a single `[index]` can be an assignment target: `a.b` is a value and
+        // `a[0][1]` is two levels of storage.
+        if self.check(&Tok::Assign) {
+            if let Expr::Data {
+                name,
+                accessors,
+                pos,
+            } = value
+                && let [Accessor::Index { index, .. }] = accessors.as_slice()
+            {
+                let index = *index;
+                self.advance();
+                let value = self.expression()?;
+                self.expect(&Tok::Semi, "`;` after assignment")?;
+                return Ok(Stmt::AssignElement {
+                    name,
+                    index,
+                    value,
+                    pos,
+                });
+            }
+            return Err(self.error(
+                "the left-hand side of `=` must be a variable or an array element such as `a[0]`",
+            ));
+        }
         self.expect(&Tok::Semi, "`;` after expression")?;
         Ok(Stmt::ExprStmt(value))
     }

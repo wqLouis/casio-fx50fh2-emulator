@@ -10,6 +10,11 @@
 //!
 //! * **`const` and `#data` use no memory at all.** Their values are inlined, so
 //!   they never reach this module.
+//! * **An array element uses one memory per element.** PRGM has no indirect
+//!   addressing, so `a[k]` must name a fixed memory while transpiling; that is
+//!   why an array index has to be a literal. The payoff is that indexing costs
+//!   *no program bytes* — only memories — which matters because the whole
+//!   machine has 680 bytes of program storage shared by all four programs.
 //! * **`free name;` releases a memory** so a later variable — including the same
 //!   name declared again — can use it. Nothing is released implicitly: a
 //!   memory's final value is observable (PRGM leaves its answer in one, a later
@@ -45,7 +50,11 @@
 //! * **Double free** — `free x; free x;`
 //! * **Freeing what holds no memory** — a `const`, a `#data` table, or an
 //!   unknown name
-//! * **Running out of memories** — reported with the registers in use
+//! * **Running out of memories** — reported with the registers in use; an array
+//!   reports how many memories it needs and how many are free
+//! * **Array misuse** — indexing something that is not an array, using an array
+//!   without an index, assigning to the array name instead of an element, and
+//!   an index outside `0..size`
 //!
 //! ## `free` and jumps: `unsafe_free`
 //!
@@ -70,7 +79,7 @@
 
 use std::collections::BTreeSet;
 
-use crate::ast::{Expr, Program, Stmt};
+use crate::ast::{Accessor, Expr, Program, Stmt};
 use crate::data::Data;
 use crate::error::TranspileError;
 
@@ -85,6 +94,8 @@ pub const VARIABLES: [char; 7] = ['A', 'B', 'C', 'D', 'X', 'Y', 'M'];
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Binding {
     pub name: String,
+    /// `Some(k)` when this binding is element `k` of the array called `name`.
+    pub element: Option<usize>,
     pub memory: char,
     /// Byte offset of the declaration, or of the first use when a name is used
     /// before it is declared.
@@ -93,16 +104,30 @@ pub struct Binding {
     pub to: Option<usize>,
 }
 
+impl Binding {
+    /// How this binding is written in reports: `a[0]` for an array element.
+    pub fn label(&self) -> String {
+        match self.element {
+            Some(index) => format!("{}[{index}]", self.name),
+            None => self.name.clone(),
+        }
+    }
+}
+
 /// Where every variable ended up.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Allocation {
     /// Every binding, in program order. A name freed and declared again appears
-    /// more than once.
+    /// more than once, and an array appears once per element.
     pub bindings: Vec<Binding>,
     /// Each memory's occupants over time, in calculator order. A memory with
     /// more than one entry was released with `free` and handed on.
-    pub registers: Vec<(char, Vec<String>)>,
-    /// Names released with `free`, in source order.
+    ///
+    /// The full [`Binding`] is kept rather than just a label so a report can
+    /// show `v[0]` for the occupant while still naming `v` in a
+    /// "reused after `free v`" note.
+    pub registers: Vec<(char, Vec<Binding>)>,
+    /// Names released with `free`, in source order, each listed once.
     pub freed: Vec<String>,
 }
 
@@ -111,7 +136,7 @@ impl Allocation {
     pub fn used(&self) -> usize {
         self.registers
             .iter()
-            .filter(|(_, names)| !names.is_empty())
+            .filter(|(_, occupants)| !occupants.is_empty())
             .count()
     }
 
@@ -119,14 +144,16 @@ impl Allocation {
     pub fn free(&self) -> Vec<char> {
         self.registers
             .iter()
-            .filter(|(_, names)| names.is_empty())
+            .filter(|(_, occupants)| occupants.is_empty())
             .map(|(memory, _)| *memory)
             .collect()
     }
 
     /// Whether any memory was released and given to another variable.
-    pub fn reuses(&self) -> impl Iterator<Item = &(char, Vec<String>)> {
-        self.registers.iter().filter(|(_, names)| names.len() > 1)
+    pub fn reuses(&self) -> impl Iterator<Item = &(char, Vec<Binding>)> {
+        self.registers
+            .iter()
+            .filter(|(_, occupants)| occupants.len() > 1)
     }
 }
 
@@ -147,6 +174,7 @@ impl Allocator {
             data,
             consts: BTreeSet::new(),
             vars: Vec::new(),
+            arrays: Vec::new(),
             bindings: Vec::new(),
             occupants: [None; VARIABLES.len()],
             declaring: None,
@@ -158,16 +186,27 @@ impl Allocator {
         scanner.finish()
     }
 
-    /// The memory for `name` at byte offset `offset`.
+    /// The memory for the scalar `name` at byte offset `offset`.
     ///
     /// This is how the emitter resolves a reference: a name can have held more
     /// than one memory over the program's life, and the binding in force is the
     /// one whose byte range contains the reference.
     pub fn register_at(&self, name: &str, offset: usize) -> Option<char> {
+        self.binding_at(name, None, offset)
+    }
+
+    /// The memory for element `element` of the array `name` at byte offset
+    /// `offset`.
+    pub fn element_at(&self, name: &str, element: usize, offset: usize) -> Option<char> {
+        self.binding_at(name, Some(element), offset)
+    }
+
+    fn binding_at(&self, name: &str, element: Option<usize>, offset: usize) -> Option<char> {
         self.bindings
             .iter()
             .filter(|binding| {
                 binding.name == name
+                    && binding.element == element
                     && binding.from <= offset
                     && binding.to.is_none_or(|to| offset < to)
             })
@@ -182,7 +221,17 @@ impl Allocator {
         self.bindings
             .iter()
             .rev()
-            .find(|binding| binding.name == name)
+            .find(|binding| binding.name == name && binding.element.is_none())
+            .map(|binding| binding.memory)
+    }
+
+    /// The memory of the last binding of element `element` of `name`.
+    #[allow(dead_code)] // exercised by the unit tests
+    pub fn lookup_element(&self, name: &str, element: usize) -> Option<char> {
+        self.bindings
+            .iter()
+            .rev()
+            .find(|binding| binding.name == name && binding.element == Some(element))
             .map(|binding| binding.memory)
     }
 
@@ -206,17 +255,19 @@ impl Allocator {
                     .bindings
                     .iter()
                     .filter(|binding| binding.memory == VARIABLES[register])
-                    .map(|binding| binding.name.clone())
+                    .cloned()
                     .collect();
                 (VARIABLES[register], names)
             })
             .collect();
-        let freed = self
-            .bindings
-            .iter()
-            .filter(|binding| binding.to.is_some())
-            .map(|binding| binding.name.clone())
-            .collect();
+        // An array contributes one binding per element, so dedupe the names to
+        // report `free a;` once rather than once per element.
+        let mut freed = Vec::new();
+        for binding in &self.bindings {
+            if binding.to.is_some() && !freed.contains(&binding.name) {
+                freed.push(binding.name.clone());
+            }
+        }
         Allocation {
             bindings: self.bindings.clone(),
             registers,
@@ -228,6 +279,8 @@ impl Allocator {
 /// A variable and its current binding.
 struct Var {
     name: String,
+    /// `Some(k)` when this is element `k` of the array called `name`.
+    element: Option<usize>,
     /// Index into [`VARIABLES`].
     register: usize,
     /// Index into the scanner's `bindings`.
@@ -244,6 +297,16 @@ struct Var {
     explicit: bool,
 }
 
+/// A declared array and the variables holding its elements.
+struct ArrayVar {
+    name: String,
+    size: usize,
+    /// Indices into [`Scanner::vars`], element 0 first.
+    elements: Vec<usize>,
+    /// Cleared by `free`, which releases every element at once.
+    live: bool,
+}
+
 struct Scanner<'a> {
     source: &'a str,
     data: &'a Data,
@@ -252,6 +315,8 @@ struct Scanner<'a> {
     /// Variables in declaration order. A name freed and declared again gets a
     /// second entry.
     vars: Vec<Var>,
+    /// Arrays in declaration order.
+    arrays: Vec<ArrayVar>,
     bindings: Vec<Binding>,
     /// The register table: which variable occupies each memory, if any.
     occupants: [Option<usize>; VARIABLES.len()],
@@ -267,16 +332,30 @@ struct Scanner<'a> {
 impl Scanner<'_> {
     // -- lookups ------------------------------------------------------------
 
-    /// The live variable called `name`, if there is one.
+    /// The live scalar called `name`, if there is one.
     fn live_var(&self, name: &str) -> Option<usize> {
         self.vars
             .iter()
-            .rposition(|var| var.name == name && var.live)
+            .rposition(|var| var.name == name && var.element.is_none() && var.live)
     }
 
-    /// Whether `name` has ever been declared, live or released.
+    /// Whether `name` has ever been a scalar, live or released.
     fn seen_var(&self, name: &str) -> bool {
-        self.vars.iter().any(|var| var.name == name)
+        self.vars
+            .iter()
+            .any(|var| var.name == name && var.element.is_none())
+    }
+
+    /// The live array called `name`, if there is one.
+    fn live_array(&self, name: &str) -> Option<usize> {
+        self.arrays
+            .iter()
+            .rposition(|array| array.name == name && array.live)
+    }
+
+    /// Whether `name` has ever been an array, live or released.
+    fn seen_array(&self, name: &str) -> bool {
+        self.arrays.iter().any(|array| array.name == name)
     }
 
     fn reject_compile_time(&self, name: &str, pos: usize) -> Result<(), TranspileError> {
@@ -299,7 +378,7 @@ impl Scanner<'_> {
 
     // -- binding ------------------------------------------------------------
 
-    /// Give `name` a memory, starting at `pos`.
+    /// Give the scalar `name` a memory, starting at `pos`.
     fn allocate(&mut self, name: &str, pos: usize, explicit: bool) -> Result<(), TranspileError> {
         // The lowest free memory keeps the allocation deterministic and easy to
         // read, and naturally re-uses one that was just released.
@@ -308,6 +387,7 @@ impl Scanner<'_> {
             .ok_or_else(|| self.out_of_memory(name, pos))?;
         self.bindings.push(Binding {
             name: name.to_string(),
+            element: None,
             memory: VARIABLES[register],
             from: pos,
             to: None,
@@ -315,6 +395,7 @@ impl Scanner<'_> {
         self.occupants[register] = Some(self.vars.len());
         self.vars.push(Var {
             name: name.to_string(),
+            element: None,
             register,
             binding: self.bindings.len() - 1,
             live: true,
@@ -323,7 +404,55 @@ impl Scanner<'_> {
         Ok(())
     }
 
-    /// Resolve a *read* of `name`.
+    /// Give the array `name` `size` consecutive memories, starting at `pos`.
+    ///
+    /// Memories are chosen low-first, like a scalar's, so a program that
+    /// declares an array before anything else sees it occupy `A B C …`. The
+    /// first memory in use is the first error in `out_of_memory`, so this is
+    /// easy to explain in a report.
+    fn allocate_array(
+        &mut self,
+        name: &str,
+        size: usize,
+        pos: usize,
+    ) -> Result<(), TranspileError> {
+        let available: Vec<usize> = (0..VARIABLES.len())
+            .filter(|register| self.occupants[*register].is_none())
+            .collect();
+        if available.len() < size {
+            return Err(self.no_room_for_array(name, size, pos, &available));
+        }
+        let mut elements = Vec::with_capacity(size);
+        for (element, register) in available.iter().enumerate().take(size) {
+            let register = *register;
+            self.bindings.push(Binding {
+                name: name.to_string(),
+                element: Some(element),
+                memory: VARIABLES[register],
+                from: pos,
+                to: None,
+            });
+            self.occupants[register] = Some(self.vars.len());
+            self.vars.push(Var {
+                name: name.to_string(),
+                element: Some(element),
+                register,
+                binding: self.bindings.len() - 1,
+                live: true,
+                explicit: true,
+            });
+            elements.push(self.vars.len() - 1);
+        }
+        self.arrays.push(ArrayVar {
+            name: name.to_string(),
+            size,
+            elements,
+            live: true,
+        });
+        Ok(())
+    }
+
+    /// Resolve a *read* of the scalar `name`.
     ///
     /// Reading a `const` or `#data` name is fine — the emitter replaces it with
     /// its value — so only real variables reach the register table. A name seen
@@ -334,20 +463,25 @@ impl Scanner<'_> {
             return Ok(());
         }
         if self.declaring.as_deref() == Some(name) {
-            return Err(TranspileError::at(
-                self.source,
-                format!(
-                    "`{name}` cannot be used in its own initializer; a declaration does not \
-                     take effect until after the value is computed"
-                ),
-                pos,
-            ));
+            return Err(own_initializer(self.source, name, pos));
         }
         if self.live_var(name).is_some() {
             return Ok(());
         }
-        if self.seen_var(name) {
-            return Err(use_after_free(self.source, name, pos));
+        if self.live_array(name).is_some() {
+            return Err(TranspileError::at(
+                self.source,
+                format!("`{name}` is an array; index it, as in `{name}[0]`"),
+                pos,
+            ));
+        }
+        if self.seen_var(name) || self.seen_array(name) {
+            return Err(use_after_free(
+                self.source,
+                name,
+                pos,
+                self.seen_array(name) && !self.seen_var(name),
+            ));
         }
         self.allocate(name, pos, false)
     }
@@ -359,11 +493,26 @@ impl Scanner<'_> {
     /// declares it, as `.fxc` has always allowed.
     fn assign(&mut self, name: &str, pos: usize) -> Result<(), TranspileError> {
         self.reject_compile_time(name, pos)?;
+        if self.declaring.as_deref() == Some(name) {
+            return Err(own_initializer(self.source, name, pos));
+        }
         if self.live_var(name).is_some() {
             return Ok(());
         }
-        if self.seen_var(name) {
-            return Err(use_after_free(self.source, name, pos));
+        if self.live_array(name).is_some() {
+            return Err(TranspileError::at(
+                self.source,
+                format!("`{name}` is an array; assign to an element, as in `{name}[0] = ...`"),
+                pos,
+            ));
+        }
+        if self.seen_var(name) || self.seen_array(name) {
+            return Err(use_after_free(
+                self.source,
+                name,
+                pos,
+                self.seen_array(name) && !self.seen_var(name),
+            ));
         }
         self.allocate(name, pos, false)
     }
@@ -381,17 +530,13 @@ impl Scanner<'_> {
     /// this `let` is its declaration and adopts that binding.
     fn begin_declaration(&mut self, name: &str, pos: usize) -> Result<(), TranspileError> {
         self.reject_compile_time(name, pos)?;
+        if self.live_array(name).is_some() {
+            return Err(already_declared(self.source, name, pos));
+        }
         match self.live_var(name) {
             Some(index) => {
                 if self.vars[index].explicit {
-                    return Err(TranspileError::at(
-                        self.source,
-                        format!(
-                            "`{name}` is already declared; `free {name};` first if you mean \
-                             to reuse the name, or pick a different one"
-                        ),
-                        pos,
-                    ));
+                    return Err(already_declared(self.source, name, pos));
                 }
                 self.vars[index].explicit = true;
             }
@@ -402,13 +547,157 @@ impl Scanner<'_> {
         Ok(())
     }
 
+    /// Start a `let name[size]` declaration.
+    ///
+    /// Unlike a scalar, an array must not adopt an existing implicit variable:
+    /// `print(a); let a[3];` would silently change what `a` means. And the
+    /// entire array is allocated before its initialisers are walked, so a
+    /// literal table ends up in consecutive memories (`A B C …`).
+    fn begin_array_declaration(
+        &mut self,
+        name: &str,
+        size: usize,
+        pos: usize,
+    ) -> Result<(), TranspileError> {
+        self.reject_compile_time(name, pos)?;
+        if self.live_array(name).is_some() {
+            return Err(already_declared(self.source, name, pos));
+        }
+        if self.live_var(name).is_some() {
+            return Err(TranspileError::at(
+                self.source,
+                format!(
+                    "`{name}` is already declared as a single variable; an array needs a \
+                     fresh name, or `free {name};` first"
+                ),
+                pos,
+            ));
+        }
+        self.allocate_array(name, size, pos)?;
+        self.declaring = Some(name.to_string());
+        Ok(())
+    }
+
     /// Finish a declaration, after its initializer has been walked.
     fn end_declaration(&mut self, _name: &str, _pos: usize) -> Result<(), TranspileError> {
         self.declaring = None;
         Ok(())
     }
 
+    /// Resolve `name[index] = ...`.
+    fn assign_element(
+        &mut self,
+        name: &str,
+        index: usize,
+        pos: usize,
+    ) -> Result<(), TranspileError> {
+        self.reject_compile_time(name, pos)?;
+        if self.declaring.as_deref() == Some(name) {
+            return Err(own_initializer(self.source, name, pos));
+        }
+        let Some(array) = self.live_array(name) else {
+            return Err(self.instead_of_array(name, pos));
+        };
+        self.check_bounds(name, index, array, pos)
+    }
+
+    /// Resolve a *read* of `name[index]` (or any other indexed path).
+    ///
+    /// `a[0]` is an array element. `c.a`, `c.list[0]` and `c[0][1]` are
+    /// compile-time `#data` paths, which the emitter resolves to a number. The
+    /// two share one syntax and one AST node, so the distinction is made here,
+    /// where the declared arrays and the data tables are both known.
+    fn indexed(
+        &mut self,
+        name: &str,
+        accessors: &[Accessor],
+        pos: usize,
+    ) -> Result<(), TranspileError> {
+        // A `#data` table wins: it is resolved to a number, not a memory.
+        if self.data.contains(name) {
+            return Ok(());
+        }
+        if let [Accessor::Index { index, pos: at }] = accessors {
+            let index = *index;
+            let at = *at;
+            if self.declaring.as_deref() == Some(name) {
+                return Err(own_initializer(self.source, name, at));
+            }
+            let Some(array) = self.live_array(name) else {
+                return Err(self.instead_of_array(name, pos));
+            };
+            return self.check_bounds(name, index, array, at);
+        }
+        // Not a plain element reference. An array has no fields, and a scalar
+        // has nothing to index at all.
+        if self.live_var(name).is_some() || self.seen_var(name) {
+            return Err(self.not_an_array(name, pos));
+        }
+        if self.live_array(name).is_some() || self.seen_array(name) {
+            return Err(TranspileError::at(
+                self.source,
+                format!(
+                    "array elements are numbers, so `{name}[…]` cannot be followed by `.field` \
+                     or a second index; only a `#data` table has nested values"
+                ),
+                pos,
+            ));
+        }
+        Err(TranspileError::at(
+            self.source,
+            format!("unknown data table `{name}`"),
+            pos,
+        ))
+    }
+
+    /// Report an index outside `0..size`.
+    fn check_bounds(
+        &self,
+        name: &str,
+        index: usize,
+        array: usize,
+        pos: usize,
+    ) -> Result<(), TranspileError> {
+        let size = self.arrays[array].size;
+        if index >= size {
+            return Err(TranspileError::at(
+                self.source,
+                format!("index {index} is out of range for `{name}` (length {size})"),
+                pos,
+            ));
+        }
+        Ok(())
+    }
+
+    /// Report indexing a name that is not a declared array.
+    fn instead_of_array(&self, name: &str, pos: usize) -> TranspileError {
+        if self.live_array(name).is_some() {
+            // Unreachable: the caller checked. Kept for totality's sake.
+            return TranspileError::at(self.source, format!("`{name}` is an array"), pos);
+        }
+        if self.seen_array(name) {
+            return use_after_free(self.source, name, pos, true);
+        }
+        self.not_an_array(name, pos)
+    }
+
+    fn not_an_array(&self, name: &str, pos: usize) -> TranspileError {
+        let message = if self.live_var(name).is_some() || self.seen_var(name) {
+            format!("`{name}` is not an array; it holds a single value")
+        } else {
+            format!(
+                "`{name}` is not declared; declare it with `let {name}[N]` to index it, or use \
+                 a `#data` table"
+            )
+        };
+        TranspileError::at(self.source, message, pos)
+    }
+
     /// `free name;` and `unsafe_free name;`.
+    ///
+    /// Freeing an array releases every element at once. There is deliberately
+    /// no way to free one element: the memories in the middle of an array would
+    /// be stranded, since the elements after it still need their own.
     fn free(&mut self, name: &str, pos: usize, is_unsafe: bool) -> Result<(), TranspileError> {
         if self.consts.contains(name) {
             return Err(TranspileError::at(
@@ -427,30 +716,42 @@ impl Scanner<'_> {
             ));
         }
 
-        let Some(index) = self.live_var(name) else {
-            let message = if self.seen_var(name) {
-                format!(
-                    "`free {name}`: `{name}` was already freed (double free); its memory has \
-                     been given to another variable"
-                )
-            } else {
-                format!("`free {name}`: `{name}` is not a variable")
+        if let Some(array) = self.live_array(name) {
+            let elements = self.arrays[array].elements.clone();
+            for var in elements {
+                let register = self.vars[var].register;
+                let binding = self.vars[var].binding;
+                self.vars[var].live = false;
+                self.occupants[register] = None;
+                self.bindings[binding].to = Some(pos);
+            }
+            self.arrays[array].live = false;
+        } else {
+            let Some(index) = self.live_var(name) else {
+                let message = if self.seen_var(name) || self.seen_array(name) {
+                    format!(
+                        "`free {name}`: `{name}` was already freed (double free); its memory has \
+                         been given to another variable"
+                    )
+                } else {
+                    format!("`free {name}`: `{name}` is not a variable")
+                };
+                return Err(TranspileError::at(self.source, message, pos));
             };
-            return Err(TranspileError::at(self.source, message, pos));
-        };
+            let register = self.vars[index].register;
+            let binding = self.vars[index].binding;
+            self.vars[index].live = false;
+            self.occupants[register] = None;
+            self.bindings[binding].to = Some(pos);
+        }
 
-        let register = self.vars[index].register;
-        let binding = self.vars[index].binding;
-        self.vars[index].live = false;
-        self.occupants[register] = None;
-        self.bindings[binding].to = Some(pos);
         if !is_unsafe {
             self.first_checked_release.get_or_insert(pos);
         }
         Ok(())
     }
 
-    /// No memory is available for `name`.
+    /// No memory is available for the scalar `name`.
     fn out_of_memory(&self, name: &str, pos: usize) -> TranspileError {
         let holders: Vec<String> = self
             .vars
@@ -471,6 +772,82 @@ impl Scanner<'_> {
         )
     }
 
+    /// Not enough memories for an array that needs `size` of them.
+    fn no_room_for_array(
+        &self,
+        name: &str,
+        size: usize,
+        pos: usize,
+        available: &[usize],
+    ) -> TranspileError {
+        let free_text = if available.is_empty() {
+            "none are free".to_string()
+        } else {
+            format!(
+                "only {} {} free ({})",
+                available.len(),
+                if available.len() == 1 { "is" } else { "are" },
+                available
+                    .iter()
+                    .map(|register| VARIABLES[*register].to_string())
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            )
+        };
+        let holders = self.holders();
+        // Avoid a dangling "are in use by ." when nothing is actually taken.
+        let occupied = if holders.is_empty() {
+            String::new()
+        } else {
+            let used = self.occupants.iter().filter(|o| o.is_some()).count();
+            format!("; {used} of 7 are in use by {holders}")
+        };
+        TranspileError::at(
+            self.source,
+            format!(
+                "no room for array `{name}`: it needs {size} memories but {free_text}{occupied}. \
+                 Use `const` for fixed values, or `free` a variable you no longer need — \
+                 `fx50 regs` shows the plan",
+            ),
+            pos,
+        )
+    }
+
+    /// The live occupants of each memory, for an out-of-memory message.
+    ///
+    /// An array is listed once, as `A B C (`v[…]`)`, rather than once per
+    /// element, so a full memory does not produce seven near-identical clauses.
+    fn holders(&self) -> String {
+        let mut holders: Vec<String> = Vec::new();
+        let mut grouped: BTreeSet<String> = BTreeSet::new();
+        for (register, occupant) in self.occupants.iter().enumerate() {
+            let Some(var) = occupant.map(|index| &self.vars[index]) else {
+                continue;
+            };
+            match var.element {
+                None => holders.push(format!("{} (`{}`)", VARIABLES[register], var.name)),
+                Some(_) => {
+                    if grouped.insert(var.name.clone()) {
+                        let memories: Vec<String> = self
+                            .occupants
+                            .iter()
+                            .enumerate()
+                            .filter(|(_, occupant)| {
+                                occupant.is_some_and(|index| {
+                                    let other = &self.vars[index];
+                                    other.name == var.name && other.element.is_some()
+                                })
+                            })
+                            .map(|(register, _)| VARIABLES[register].to_string())
+                            .collect();
+                        holders.push(format!("{} (`{}[…]`)", memories.join(" "), var.name));
+                    }
+                }
+            }
+        }
+        holders.join(", ")
+    }
+
     // -- walking ------------------------------------------------------------
 
     fn stmts(&mut self, stmts: &[Stmt]) -> Result<(), TranspileError> {
@@ -487,9 +864,30 @@ impl Scanner<'_> {
                 self.expr(value)?;
                 self.end_declaration(name, *pos)
             }
+            Stmt::LetArray {
+                name,
+                size,
+                values,
+                pos,
+            } => {
+                self.begin_array_declaration(name, *size, *pos)?;
+                for value in values {
+                    self.expr(value)?;
+                }
+                self.end_declaration(name, *pos)
+            }
             Stmt::Const { value, .. } => self.expr(value),
             Stmt::Assign { name, value, pos } => {
                 self.assign(name, *pos)?;
+                self.expr(value)
+            }
+            Stmt::AssignElement {
+                name,
+                index,
+                value,
+                pos,
+            } => {
+                self.assign_element(name, *index, *pos)?;
                 self.expr(value)
             }
             Stmt::Free {
@@ -539,8 +937,13 @@ impl Scanner<'_> {
     fn expr(&mut self, expr: &Expr) -> Result<(), TranspileError> {
         match expr {
             Expr::Name(name, pos) => self.read(name, *pos),
-            // A data path is a compile-time number, not a variable.
-            Expr::Data { .. } => Ok(()),
+            // A data path is a compile-time number; an indexed name may be
+            // either that or an array element, which `indexed` decides.
+            Expr::Data {
+                name,
+                accessors,
+                pos,
+            } => self.indexed(name, accessors, *pos),
             Expr::Unary(_, inner) => self.expr(inner),
             Expr::Binary(_, left, right) => {
                 self.expr(left)?;
@@ -577,12 +980,44 @@ impl Scanner<'_> {
 }
 
 /// A reference to a name whose memory has already been released.
-fn use_after_free(source: &str, name: &str, pos: usize) -> TranspileError {
+///
+/// `was_array` picks the hint: an array is declared again with a size, a
+/// scalar without one.
+fn use_after_free(source: &str, name: &str, pos: usize, was_array: bool) -> TranspileError {
+    let redeclare = if was_array {
+        format!("`let {name}[N] = ...`")
+    } else {
+        format!("`let {name} = ...`")
+    };
     TranspileError::at(
         source,
         format!(
             "`{name}` is not defined here: it was freed, and its memory may now hold another \
-             variable. Use `let {name} = ...` to declare it again"
+             variable. Use {redeclare} to declare it again"
+        ),
+        pos,
+    )
+}
+
+/// A name used inside its own declaration.
+fn own_initializer(source: &str, name: &str, pos: usize) -> TranspileError {
+    TranspileError::at(
+        source,
+        format!(
+            "`{name}` cannot be used in its own initializer; a declaration does not \
+             take effect until after the value is computed"
+        ),
+        pos,
+    )
+}
+
+/// Declaring a name that is still live.
+fn already_declared(source: &str, name: &str, pos: usize) -> TranspileError {
+    TranspileError::at(
+        source,
+        format!(
+            "`{name}` is already declared; `free {name};` first if you mean to reuse the \
+             name, or pick a different one"
         ),
         pos,
     )
@@ -609,7 +1044,9 @@ fn collect_consts(stmts: &[Stmt], out: &mut BTreeSet<String>) {
             Stmt::For(for_stmt) => collect_consts(&for_stmt.body, out),
             Stmt::Block(stmts) => collect_consts(stmts, out),
             Stmt::Let { .. }
+            | Stmt::LetArray { .. }
             | Stmt::Assign { .. }
+            | Stmt::AssignElement { .. }
             | Stmt::Free { .. }
             | Stmt::Print(_)
             | Stmt::ExprStmt(_)
@@ -766,9 +1203,10 @@ mod tests {
         assert_eq!(a.allocation().used(), 1);
         assert_eq!(a.allocation().freed, vec!["t"]);
         let allocation = a.allocation();
-        let reuses: Vec<&(char, Vec<String>)> = allocation.reuses().collect();
+        let reuses: Vec<&(char, Vec<Binding>)> = allocation.reuses().collect();
         assert_eq!(reuses.len(), 1);
-        assert_eq!(reuses[0].1, vec!["t", "u"]);
+        let names: Vec<&str> = reuses[0].1.iter().map(|b| b.name.as_str()).collect();
+        assert_eq!(names, vec!["t", "u"]);
     }
 
     #[test]
@@ -868,6 +1306,214 @@ mod tests {
     fn free_inside_a_loop_body_is_allowed() {
         let a = alloc("while (1 < 2) { let t = 1; print(t); free t; }").unwrap();
         assert_eq!(a.lookup("t"), Some('A'));
+    }
+
+    // -- arrays -------------------------------------------------------------
+
+    #[test]
+    fn an_array_occupies_consecutive_memories() {
+        let a = alloc("let v[3] = {1, 2, 3};").unwrap();
+        assert_eq!(a.lookup_element("v", 0), Some('A'));
+        assert_eq!(a.lookup_element("v", 1), Some('B'));
+        assert_eq!(a.lookup_element("v", 2), Some('C'));
+        assert_eq!(a.allocation().used(), 3);
+        assert_eq!(a.len(), 3, "one binding per element");
+    }
+
+    #[test]
+    fn an_array_declared_late_starts_at_the_first_free_memory() {
+        let a = alloc("let x = 1; let v[2] = {1, 2};").unwrap();
+        assert_eq!(a.lookup("x"), Some('A'));
+        assert_eq!(a.lookup_element("v", 0), Some('B'));
+        assert_eq!(a.lookup_element("v", 1), Some('C'));
+    }
+
+    #[test]
+    fn a_single_element_uses_one_memory() {
+        let a = alloc("let v[1] = {7}; print(v[0]);").unwrap();
+        assert_eq!(a.lookup_element("v", 0), Some('A'));
+        assert_eq!(a.allocation().used(), 1);
+    }
+
+    #[test]
+    fn a_seven_element_array_fills_every_memory() {
+        let a = alloc("let v[7] = {1,2,3,4,5,6,7}; print(v[6]);").unwrap();
+        assert_eq!(a.lookup_element("v", 6), Some('M'));
+        assert!(a.allocation().free().is_empty());
+    }
+
+    #[test]
+    fn eight_elements_do_not_fit() {
+        let err = alloc("let v[8] = {1,2,3,4,5,6,7,8};").unwrap_err();
+        assert!(err.message.contains("needs 8 memories"), "{}", err.message);
+        assert!(err.message.contains("only 7"), "{}", err.message);
+    }
+
+    #[test]
+    fn an_array_that_does_not_fit_reports_how_many_are_free() {
+        let err =
+            alloc("let a=1; let b=1; let c=1; let d=1; let e=1; let v[3] = {1,2,3};").unwrap_err();
+        assert!(
+            err.message.contains("no room for array `v`"),
+            "{}",
+            err.message
+        );
+        assert!(err.message.contains("only 2 are free"), "{}", err.message);
+        assert!(err.message.contains("(Y M)"), "{}", err.message);
+    }
+
+    #[test]
+    fn an_index_out_of_range_is_an_error() {
+        let err = alloc("let v[3] = {1,2,3}; print(v[3]);").unwrap_err();
+        assert!(
+            err.message
+                .contains("index 3 is out of range for `v` (length 3)"),
+            "{}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn an_index_out_of_range_is_an_error_when_assigning() {
+        let err = alloc("let v[2] = {1,2}; v[2] = 9;").unwrap_err();
+        assert!(err.message.contains("out of range"), "{}", err.message);
+    }
+
+    #[test]
+    fn indexing_a_scalar_is_an_error() {
+        let err = alloc("let x = 1; print(x[0]);").unwrap_err();
+        assert!(err.message.contains("is not an array"), "{}", err.message);
+    }
+
+    #[test]
+    fn indexing_an_undeclared_name_suggests_let() {
+        let err = alloc("print(v[0]);").unwrap_err();
+        assert!(err.message.contains("`let v[N]`"), "{}", err.message);
+    }
+
+    #[test]
+    fn using_an_array_without_an_index_is_an_error() {
+        let err = alloc("let v[3] = {1,2,3}; print(v);").unwrap_err();
+        assert!(
+            err.message.contains("is an array; index it"),
+            "{}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn assigning_to_the_array_name_is_an_error() {
+        let err = alloc("let v[3] = {1,2,3}; v = 1;").unwrap_err();
+        assert!(
+            err.message.contains("assign to an element"),
+            "{}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn an_element_can_be_assigned_after_declaration() {
+        let a = alloc("let v[2] = {1,2}; v[1] = 9; print(v[1]);").unwrap();
+        assert_eq!(a.lookup_element("v", 1), Some('B'));
+        assert_eq!(a.allocation().used(), 2);
+    }
+
+    #[test]
+    fn an_element_reference_uses_the_binding_in_force() {
+        // `v` is freed and declared again; `v[0]` resolves through the live
+        // binding at each point.
+        let source = "let v[2] = {1,2}; free v; let w[2] = {3,4}; print(v[0]);";
+        let err = alloc(source).unwrap_err();
+        assert!(err.message.contains("not defined here"), "{}", err.message);
+    }
+
+    #[test]
+    fn freeing_an_array_releases_every_element() {
+        let a = alloc("let v[3] = {1,2,3}; free v; let w[3] = {4,5,6};").unwrap();
+        assert_eq!(a.lookup_element("w", 0), Some('A'));
+        assert_eq!(a.lookup_element("w", 1), Some('B'));
+        assert_eq!(a.lookup_element("w", 2), Some('C'));
+        assert_eq!(a.allocation().used(), 3);
+        assert_eq!(
+            a.allocation().freed,
+            vec!["v"],
+            "reported once, not per element"
+        );
+    }
+
+    #[test]
+    fn an_array_can_be_redeclared_after_a_free() {
+        let a = alloc("let v[2] = {1,2}; free v; let v[2] = {3,4}; print(v[1]);").unwrap();
+        assert_eq!(a.lookup_element("v", 1), Some('B'));
+        assert_eq!(a.len(), 4, "two lives, two bindings each");
+    }
+
+    #[test]
+    fn double_free_of_an_array_is_an_error() {
+        let err = alloc("let v[2] = {1,2}; free v; free v;").unwrap_err();
+        assert!(err.message.contains("double free"), "{}", err.message);
+    }
+
+    #[test]
+    fn use_after_free_of_an_array_is_an_error() {
+        let err = alloc("let v[2] = {1,2}; free v; print(v[0]);").unwrap_err();
+        assert!(err.message.contains("not defined here"), "{}", err.message);
+    }
+
+    #[test]
+    fn an_array_needs_a_fresh_name_after_a_scalar() {
+        let err = alloc("let x = 1; let x[2] = {1,2};").unwrap_err();
+        assert!(err.message.contains("single variable"), "{}", err.message);
+    }
+
+    #[test]
+    fn a_scalar_needs_a_free_after_an_array() {
+        let err = alloc("let v[2] = {1,2}; let v = 1;").unwrap_err();
+        assert!(err.message.contains("already declared"), "{}", err.message);
+    }
+
+    #[test]
+    fn an_element_cannot_be_used_in_its_own_initializer() {
+        let err = alloc("let v[2] = {v[0], 2};").unwrap_err();
+        assert!(
+            err.message.contains("its own initializer"),
+            "{}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn a_field_of_an_array_element_is_an_error() {
+        let err = alloc("let v[2] = {1,2}; print(v[0].size);").unwrap_err();
+        assert!(
+            err.message.contains("array elements are numbers"),
+            "{}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn array_element_bindings_report_their_element() {
+        let a = alloc("let v[2] = {1,2};").unwrap();
+        let allocation = a.allocation();
+        assert_eq!(allocation.bindings[0].element, Some(0));
+        assert_eq!(allocation.bindings[1].element, Some(1));
+        assert_eq!(allocation.registers[0].1[0].label(), "v[0]");
+        assert_eq!(allocation.registers[1].1[0].label(), "v[1]");
+    }
+
+    #[test]
+    fn a_checked_free_of_an_array_with_a_jump_is_rejected() {
+        let err = alloc("let v[2] = {1,2}; free v; goto 1; label 1;").unwrap_err();
+        assert!(err.message.contains("unsafe_free"), "{}", err.message);
+    }
+
+    #[test]
+    fn unsafe_free_releases_a_whole_array() {
+        let a =
+            alloc("let v[2] = {1,2}; unsafe_free v; let w[2] = {3,4}; goto 1; label 1;").unwrap();
+        assert_eq!(a.lookup_element("w", 0), Some('A'));
+        assert_eq!(a.allocation().freed, vec!["v"]);
     }
 
     // -- reports ------------------------------------------------------------

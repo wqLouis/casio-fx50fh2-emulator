@@ -532,3 +532,84 @@ heuristic, so anyone hacking on this repository needs no install at all. When a
 release pipeline exists, the download becomes a further fallback and the install
 step becomes optional. The user-facing instructions live in
 [`editors/README.md`](../editors/README.md) and each editor's README.
+
+## ADR 0018 — Arrays use one memory per element, with compile-time indices
+
+`.fxc` gained arrays (`let v[3] = {4, 8, 15};`, `v[1] = 16;`, `print(v[0]);`).
+
+**Elements occupy memories, and the index must be a literal.** The calculator has
+no indirect addressing: a memory is named by the keystroke that selects it, so
+there is no way to express "the memory whose number is in `X`". A run-time index
+would have to be compiled to an `If`/`IfEnd` chain over the elements.
+
+We rejected the run-time form for a measured reason. The fx-50FH II has **680
+bytes of program memory, shared by all four program areas** (P1–P4). An
+`If`/`Else` chain over an array of `n` elements costs roughly `n` comparisons
+plus the branch overhead *at every access*, and a loop that indexes an array pays
+it on every iteration. Against a 680-byte budget that is unaffordable. With
+compile-time indices the cost is the opposite: an element reference compiles to
+**one memory letter and no instructions at all**. So the restriction is the
+feature — the programmer gives up run-time indexing and gets zero-byte access,
+which is the trade that matters on this machine.
+
+The consequences, all deliberate:
+
+* `let v[N]` takes `N` of the seven memories, chosen as the first `N` free ones,
+  so a five-element array plus a loop counter plus an accumulator exactly fills
+  the machine.
+* The whole array is released at once by `free v;`. `free v[0];` is an error
+  rather than allowed: the elements after it would be stranded in memories the
+  allocator could never hand out again.
+* An array and a scalar cannot share a name while it is live (in either
+  direction), because the two would allocate different numbers of memories and a
+  later reference could not tell them apart. `free` first.
+* `const` cannot declare an array. A `const` is inlined and has no memory, which
+  is precisely what an array is not; `#data` is the right home for a fixed table.
+* Bounds are checked at transpile time, since the index is known there.
+
+`a[i]` and `#data`'s `c.list[0]` share one syntax, one AST node
+(`Expr::Data { accessors }`) and one parser rule; the allocator and emitter
+decide between them by consulting the declared arrays and the data tables. A
+`#data` table of the same name wins, preserving the existing behaviour.
+
+## ADR 0019 — No register packing: the machine has no integer or fractional part
+
+A natural response to "seven memories" is to pack two variables into one, using
+the 15 significant digits the machine keeps internally. This is not
+implementable, for a reason worth recording so it is not re-proposed.
+
+**Precision is 15 significant digits** (mantissa `A.BCDEFGHIJKLMNO`), with
+exponent `10^±99`, displayed to 10. That part was right. But the machine applies
+**autocorrection** after *every* operation: if the last four significant digits
+fall in `0000`–`0009` it rounds down to 11 significant figures, and if they fall
+in `9991`–`9999` it rounds up to 11. Measured against this repository's own
+`precision::normalize`:
+
+| Input (15 digits) | After one operation |
+| --- | --- |
+| `1.23456789010005` | `1.23456789010000` (autocorrected) |
+| `1.23456789012345` | unchanged |
+| `1.2345678901` (11 digits) | unchanged |
+
+So values of at most 11 significant digits pass through untouched, and only those
+would be safe to pack.
+
+**The blocking problem is unpacking.** Splitting `R = hi + lo × 10^-k` needs an
+integer-part or fractional-part operation, and the fx-50FH II has neither. `Int`,
+`Intg` and `Frac` do not exist on this model: they are absent from this
+repository's token table (`src/token.rs`), from both reverse-engineering projects
+the language notes cite (`KeroppiMomo/calsimtor` claims *all* COMP-mode tokens
+and lists only `Rnd(`/`Abs(`; `throwingogo-hub/fx-50fh-ii` likewise), and from
+the official fx-50F II / fx-4650F II manual's bracketed-function list
+(`Abs(, Pol(, Rec(, arg(, Conjg(, Not(, Neg(, Rnd(`). The only rounding primitive
+is `Rnd(`, which rounds to the *display* setting, not to an integer.
+
+A narrow case does work: under `Fix 0`, with both halves non-negative integers
+small enough that `hi = Rnd(R)` and `lo = (R - hi) × 10^h` are exact, two values
+can share a memory. But it requires forcing `Fix 0` on the whole program — after
+which every display is an integer, and the setting cannot be restored because
+there is no way to query it. That is not a feature to build into the language; it
+is a trick a programmer can apply by hand in the rare program where it fits.
+
+Arrays therefore use one memory per element (ADR 0018), and the way to fit a
+program is `const`, `#data` and `free` — not packing.

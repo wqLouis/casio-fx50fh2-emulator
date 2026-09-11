@@ -15,6 +15,29 @@
     }
   },
   {
+    "type": "array_declaration",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "expression",
+          "named": true
+        },
+        {
+          "type": "identifier",
+          "named": true
+        },
+        {
+          "type": "number",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
     "type": "assignment_statement",
     "named": true,
     "fields": {},
@@ -22,6 +45,10 @@
       "multiple": true,
       "required": true,
       "types": [
+        {
+          "type": "data_reference",
+          "named": true
+        },
         {
           "type": "expression",
           "named": true
@@ -56,6 +83,10 @@
       "multiple": true,
       "required": false,
       "types": [
+        {
+          "type": "array_declaration",
+          "named": true
+        },
         {
           "type": "assignment_statement",
           "named": true
@@ -315,6 +346,10 @@
       "required": true,
       "types": [
         {
+          "type": "array_declaration",
+          "named": true
+        },
+        {
           "type": "assignment_statement",
           "named": true
         },
@@ -442,6 +477,10 @@
       "multiple": true,
       "required": true,
       "types": [
+        {
+          "type": "array_declaration",
+          "named": true
+        },
         {
           "type": "assignment_statement",
           "named": true
@@ -699,6 +738,10 @@
       "required": false,
       "types": [
         {
+          "type": "array_declaration",
+          "named": true
+        },
+        {
           "type": "assignment_statement",
           "named": true
         },
@@ -811,6 +854,10 @@
       "multiple": true,
       "required": true,
       "types": [
+        {
+          "type": "array_declaration",
+          "named": true
+        },
         {
           "type": "assignment_statement",
           "named": true

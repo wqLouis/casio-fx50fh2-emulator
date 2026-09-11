@@ -464,6 +464,35 @@ fn fxc_document_symbols_list_labels_and_variables() {
 }
 
 #[test]
+fn fxc_document_symbols_list_arrays_with_their_size() {
+    let source = "let v[3] = {1, 2, 3};\nlet total = v[0] + v[1];\n";
+    let symbols = document_symbols(source, Language::Fxc);
+    let array = symbols
+        .iter()
+        .find(|symbol| symbol.name == "v")
+        .expect("the array should be a symbol");
+    assert_eq!(array.detail.as_deref(), Some("array of 3"));
+    assert!(
+        symbols.iter().any(|symbol| symbol.name == "total"),
+        "a scalar alongside the array should still be listed"
+    );
+}
+
+#[test]
+fn fxc_array_diagnostics_are_reported_against_the_document() {
+    // The index is out of range, which the transpiler catches while building.
+    let source = "let v[3] = {1, 2, 3};\nprint(v[3]);\n";
+    let diagnostics = diagnostics(source, Language::Fxc, Some(Path::new(".")));
+    assert_eq!(diagnostics.len(), 1, "{diagnostics:#?}");
+    let message = &diagnostics[0].message;
+    assert!(
+        message.contains("index 3 is out of range for `v` (length 3)"),
+        "{message}"
+    );
+    assert_eq!(diagnostics[0].range.start.line, 1);
+}
+
+#[test]
 fn fxc_document_symbols_deduplicate_names() {
     let symbols = document_symbols("let a = 1;\nlet a = 2;\n", Language::Fxc);
     assert_eq!(

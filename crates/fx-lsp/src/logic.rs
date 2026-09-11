@@ -1262,6 +1262,20 @@ fn collect_fxc_symbols(
                     ));
                 }
             }
+            Stmt::LetArray {
+                name, size, pos, ..
+            } => {
+                if !seen.contains(name) {
+                    seen.push(name.clone());
+                    symbols.push(fxc_symbol(
+                        name.clone(),
+                        SymbolKind::VARIABLE,
+                        &format!("array of {size}"),
+                        source,
+                        *pos,
+                    ));
+                }
+            }
             Stmt::For(for_stmt) => {
                 if !seen.contains(&for_stmt.init_name) {
                     seen.push(for_stmt.init_name.clone());

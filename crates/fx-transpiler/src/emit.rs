@@ -11,7 +11,7 @@
 
 use crate::Options;
 use crate::alloc::Allocator;
-use crate::ast::{BinOp, Expr, ForStmt, Program, Stmt, UnOp};
+use crate::ast::{Accessor, BinOp, Expr, ForStmt, Program, Stmt, UnOp};
 use crate::builtins;
 use crate::constants::Constant;
 use crate::data::Data;
@@ -99,6 +99,18 @@ impl Emitter<'_> {
         match stmt {
             Stmt::Let { name, value, pos } | Stmt::Assign { name, value, pos } => {
                 self.assignment(name, *pos, value)?;
+            }
+            Stmt::LetArray {
+                name, values, pos, ..
+            } => self.array_declaration(name, *pos, values)?,
+            Stmt::AssignElement {
+                name,
+                index,
+                value,
+                pos,
+            } => {
+                let var = self.element(name, *index, *pos)?;
+                self.assign_to(value, var)?;
             }
             Stmt::Const { name, value, pos } => self.const_declaration(name, *pos, value)?,
             // `free`/`unsafe_free` are compile-time instructions: they hand the
@@ -215,6 +227,26 @@ impl Emitter<'_> {
             .iter()
             .find(|(known, _)| known == name)
             .map(|(_, value)| value)
+    }
+
+    /// `let v[3] = {1, 2, 3};` — one PRGM assignment per element.
+    ///
+    /// An array with no initialiser list emits nothing at all: the elements
+    /// exist as memories from the moment the declaration is seen, exactly as
+    /// `let x;` would be a memory the user fills in later. Indexing is free of
+    /// program bytes, which is the whole point of requiring compile-time
+    /// indices.
+    fn array_declaration(
+        &mut self,
+        name: &str,
+        pos: usize,
+        values: &[Expr],
+    ) -> Result<(), TranspileError> {
+        for (index, value) in values.iter().enumerate() {
+            let var = self.element(name, index, pos)?;
+            self.assign_to(value, var)?;
+        }
+        Ok(())
     }
 
     /// `x = value` (and `let x = value`), including the `input()` special case.
@@ -376,8 +408,23 @@ impl Emitter<'_> {
                 accessors,
                 pos,
             } => {
-                let number = self.data.resolve(name, accessors, self.source, *pos)?;
-                Ok((format_number(number), prec::ATOM))
+                // The two meanings of `name[...]` are resolved here: a `#data`
+                // table is a compile-time number, an array element is a
+                // memory. The allocator has already checked the shape, the
+                // name and the bounds.
+                if self.data.contains(name) {
+                    let number = self.data.resolve(name, accessors, self.source, *pos)?;
+                    return Ok((format_number(number), prec::ATOM));
+                }
+                if let [Accessor::Index { index, .. }] = accessors.as_slice() {
+                    let memory = self.element(name, *index, *pos)?;
+                    return Ok((memory.to_string(), prec::ATOM));
+                }
+                Err(TranspileError::at(
+                    self.source,
+                    format!("internal error: `{name}` is neither a `#data` table nor an array"),
+                    *pos,
+                ))
             }
             Expr::Pi(_) => Ok((
                 (if self.opts.ascii { "pi" } else { "π" }).to_string(),
@@ -444,6 +491,18 @@ impl Emitter<'_> {
             TranspileError::at(
                 self.source,
                 format!("internal error: `{name}` has no memory at this point"),
+                pos,
+            )
+        })
+    }
+
+    /// Resolve element `index` of the array `name` to its memory, at this
+    /// point in the program.
+    fn element(&self, name: &str, index: usize, pos: usize) -> Result<char, TranspileError> {
+        self.allocator.element_at(name, index, pos).ok_or_else(|| {
+            TranspileError::at(
+                self.source,
+                format!("internal error: `{name}[{index}]` has no memory at this point"),
                 pos,
             )
         })

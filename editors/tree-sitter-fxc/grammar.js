@@ -3,8 +3,9 @@
  *
  * `.fxc` is a small C-like language that transpiles to PRGM.  The grammar
  * follows `docs/AI-AGENTS.md`: `//` and block comments, `#mode`/`#include`
- * directives, `#data`/`#tests` compile-time JSON, `let`/`const`/`free`
- * (and `unsafe_free`), assignment and `print` statements, `if`/`while`/`for` with optional braces,
+ * directives, `#data`/`#tests` compile-time JSON, `let` (scalar and array),
+ * `const`, `free` (and `unsafe_free`), assignment and `print` statements,
+ * `if`/`while`/`for` with optional braces,
  * `break`/`goto`/`label`, data paths with `.field`/`[index]`, and a
  * conventional expression grammar with `^`/`**` exponentiation.  Scientific
  * constants live under the `phys.` namespace.
@@ -103,6 +104,7 @@ module.exports = grammar({
 
     _statement: $ => choice(
       $.let_statement,
+      $.array_declaration,
       $.const_statement,
       $.free_statement,
       $.assignment_statement,
@@ -119,11 +121,30 @@ module.exports = grammar({
     ),
 
     let_statement: $ => seq('let', $.identifier, '=', $.expression, ';'),
+    // `let name[size];`, `let name[size] = {e0, e1, …};` and the size-inferred
+    // form `let name[] = {…};`.  The size is optional in the grammar, but the
+    // transpiler rejects `let name[];` because there is nothing to infer from.
+    array_declaration: $ => seq(
+      'let', $.identifier, '[', optional($.number), ']',
+      optional(seq(
+        '=',
+        '{', $.expression, repeat(seq(',', $.expression)), '}',
+      )),
+      ';',
+    ),
     const_statement: $ => seq('const', $.identifier, '=', $.expression, ';'),
     // `free name;` releases the variable's memory for a later variable to use.
     // `unsafe_free name;` does the same without the jump safety check.
     free_statement: $ => seq(choice('free', 'unsafe_free'), $.identifier, ';'),
-    assignment_statement: $ => seq($.identifier, '=', $.expression, ';'),
+    // The target is a variable or an array element (`v[0] = 7;`).  Reusing
+    // `data_reference` for the element form keeps `a[0]` identical on either
+    // side of the `=`, so there is no ambiguity with `expression_statement`.
+    assignment_statement: $ => seq(
+      choice($.identifier, $.data_reference),
+      '=',
+      $.expression,
+      ';',
+    ),
     print_statement: $ => seq('print', $.expression, ';'),
 
     if_statement: $ => prec.right(seq(
