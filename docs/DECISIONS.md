@@ -810,3 +810,119 @@ arity mismatches (against the definitions' own positions, before inlining
 rewrites them), and substitutes each call. Bodies are re-positioned to the call
 site so the allocator's byte-range bindings stay valid. The existing
 `fold`/`unroll`/`alloc`/`emit` passes then see a flat, function-free program.
+
+## ADR 0023 — Optimisation passes, and the `Options::optimize` switch
+
+Three optional passes now run between parsing and emission, on top of the
+required `fold` (ADR 0020) and `unroll`:
+
+* **`simplify`** removes operators that provably cannot change a result —
+  `x + 0`, `x - 0`, `x * 1`, `x / 1`, `x ^ 1`, `-(-x)`, `x == x`, and (when the
+  operand cannot raise) `x * 0`, `x - x`, `x ^ 0`.
+* **`propagate`** replaces a *read* of a name that is initialised to a constant
+  and never assigned with that constant, which lets `fold` collapse the
+  surrounding arithmetic (`let n = 3; … i < n` becomes `To 3`). It also decides
+  a constant `if`/`while`, drops code after an unconditional `goto`, and — see
+  below — removes stores nothing reads.
+* **`size`** is not a pass but the metric: it counts the keys a listing costs,
+  because the machine stores one byte per key out of a 680-byte budget shared by
+  all four program areas.
+
+They are on by default: the machine is too small for a program to be left
+unoptimised. `Options::optimize = false` turns off `simplify` and `propagate`
+only — **not** `fold` and `unroll`, since folding a `const`'s value is required
+for the emitter and unrolling is required for an array element to name a memory
+at all. The CLI spells this `--no-optimize`.
+
+### Why the switch exists at all
+
+Without it the golden tests would stop testing what they were written to test.
+Measured on the real output:
+
+| construct | unoptimised | optimised |
+| --- | --- | --- |
+| `print(a != b)` | `A≠B◢` | `1◢` |
+| `if (1) {…} else {…}` | `If 1 / Then / … / Else / … / IfEnd` | the taken branch only |
+| `print(sqr(a + 1))` | `(A+1)²◢` | `2²◢` |
+| `print(-(-a))` | `-(-A)◢` | `A◢` |
+
+`A≠B` and the `If`/`Else` chain are exactly what those tests exist to check, and
+folding erases them. So the golden tests pin the **translation** with
+`optimize: false`, and the optimiser is tested on its own terms in
+`tests/simplify.rs` and `tests/propagate.rs`. `tests/optimize.rs` checks the
+switch itself and, end to end, that both forms compute the same thing.
+
+### A store is kept unless nothing reads it
+
+Memory is observable: a memory's final value can be read by a later program or
+by the user, so an optimiser may not quietly delete stores (ADR 0016). The one
+exception is a store to a name that is **never read anywhere in the program** —
+it cannot affect the output, which is a program's contract. Measured, that is
+worth a lot: a corpus of ten programs that declare values they do not use goes
+from 90 keys to 55 (−38%).
+
+Getting this sound took four rules, each found by a failing test rather than by
+inspection, and each worth recording because the tidy version of the pass is
+wrong:
+
+1. **No reads anywhere.** A name read only inside a loop or a branch still
+   counts as read.
+2. **Side-effect-free initialisers only.** `input()` (the prompt is observable),
+   `ran()` (it advances the sequence), `mplus`/`mminus`, and any call that can
+   raise `Math ERROR` keep their store even if nothing reads it.
+3. **Never remove a declaration that is freed, or declared more than once.**
+   This is about *diagnostics*, not size. `let t = 1; free t; free t;` is a
+double-free error and `let x = 1; let x = 2;` a re-declaration error, yet in both
+cases the name is never read, so the tidy pass removes the declaration — and then
+the `free`s, since `free` is name-based and would otherwise dangle — leaving a
+program with no error at all. The first version of this pass did exactly that and
+turned three language-server diagnostics into silence. This pass runs *after*
+checking, so it must never delete the thing a diagnostic is about.
+4. **Nothing that `ans` could see, and nothing that could be displayed.** Two
+non-reads are still observable. Evaluating any expression updates the hidden
+result memory that `ans()` reads, so removing `6*7→A` changes what a later
+`ans()` returns. And a program that ends without `◢` displays the last value it
+computed, so a store in that position is visible — `let a = 1;` on its own
+displays `1`. Either one disables the pass for the whole program.
+
+The last two rules are the reason this pass is off in the golden tests even
+though it is on by default: `Options::optimize = false` documents the
+translation, and `tests/propagate.rs` tests the optimiser's own behaviour
+including every one of these refusals.
+
+Measured effect of the passes as a whole, in keys:
+
+| program | raw | optimised |
+| --- | --- | --- |
+| `let n = 3; print(n + 1);` | 7 | 5 |
+| `let a = input(); print(a * 1); print(a + 0);` | 11 | 7 |
+| `if (1) { print(9); } else { print(8); }` | 9 | 2 |
+| `while (0) { print(1); } print(2);` | 7 | 2 |
+| a corpus of ten such programs | 90 | 62 (−31%) |
+| `examples/functions.fxc` | 62 | 50 (−19%) |
+
+The examples that are dominated by `input()` and loops (`determinant`, `arrays`,
+`quadratic`) gain nothing, which is the honest result: there is no constant in
+them to find.
+
+## ADR 0024 — Program size is measured in keys, not characters
+
+`Size::measure` counts the keys a PRGM listing costs, because that is what the
+machine stores: **one byte per key** against a 680-byte budget shared by all
+four program areas (P1–P4). Character count would be wrong in both directions —
+`log(` is one key but four characters, while `10` is two keys but two
+characters.
+
+The consequence that matters is that a multi-character token costs one key. The
+scan mirrors the interpreter's own lexer (`src/lexer.rs`), which is the
+authority on the key set, but reimplements it rather than depending on that
+crate, so `fx-transpiler` still builds with `--no-default-features` and zero
+dependencies. Where the machine's accounting is genuinely ambiguous we chose the
+reading that matches the manual and documented it: a statement separator is
+free for a newline (listings emit one statement per line) but costs a key for a
+literal `:`; the `#mode` header is free, since the MODE key would have been
+pressed before typing the program rather than stored in it.
+
+`fx50 size FILE` prints the total, the statement count, the largest single
+statement, and whether it fits — and always prints what the optimiser saved, so
+the number is meaningful next to what it would have been.

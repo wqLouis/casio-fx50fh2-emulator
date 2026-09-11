@@ -147,6 +147,9 @@ impl Checker {
             ),
             Setup::Dec | Setup::Hex | Setup::Bin | Setup::Oct => self.base("a number base"),
             Setup::ComplexCartesian | Setup::ComplexPolar => self.complex("a complex format"),
+            Setup::ReIm => self.complex("`Re⇔Im`"),
+            Setup::Reg(_) => self.regression("a regression model"),
+            Setup::Sexagesimal => self.float_math("`°′″`"),
         }
     }
 
@@ -174,6 +177,13 @@ impl Checker {
                 self.float_math(what)
             }
             Expr::StatVar(var) => self.check_stat_var(*var),
+            Expr::Sexagesimal(value, pos) => {
+                self.float_math("`°′″`")?;
+                if !value.is_finite() {
+                    return Err(CalcError::syntax("invalid sexagesimal literal", *pos));
+                }
+                Ok(())
+            }
 
             Expr::Unary { op, expr } => {
                 use crate::ast::UnaryOp;
@@ -301,6 +311,7 @@ fn is_regression_var(var: StatVar) -> bool {
             | StatVar::MaxY
             | StatVar::RegA
             | StatVar::RegB
+            | StatVar::RegC
             | StatVar::RegR
     )
 }
@@ -326,6 +337,7 @@ fn stat_var_name(var: StatVar) -> &'static str {
         MaxY => "maxY",
         RegA => "regA",
         RegB => "regB",
+        RegC => "regC",
         RegR => "regR",
     }
 }

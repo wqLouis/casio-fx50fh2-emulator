@@ -420,6 +420,21 @@ fn prgm_completion_items() -> Vec<CompletionItem> {
         ("Fix", "fixed decimal display"),
         ("Sci", "scientific display"),
         ("Norm", "normal display"),
+        ("Lin", "linear regression model (REG)"),
+        ("Log", "logarithmic regression model (REG)"),
+        ("Exp", "exponential regression model (REG)"),
+        ("Pwr", "power regression model (REG)"),
+        ("Inv", "inverse regression model (REG)"),
+        ("Quad", "quadratic regression model (REG)"),
+        ("AB-Exp", "AB exponential regression model (REG)"),
+        (
+            "Re⇔Im",
+            "toggle the displayed part of a complex result (CMPLX)",
+        ),
+        (
+            "°′″",
+            "sexagesimal conversion (decimal ⇄ degrees/minutes/seconds)",
+        ),
     ];
     for (label, detail) in keywords {
         push(
@@ -708,6 +723,29 @@ fn fxc_completion_items() -> Vec<CompletionItem> {
             "▶a+b𝑖 — complex results in cartesian form (CMPLX)",
         ),
         ("to_polar(", "▶r∠θ — complex results in polar form (CMPLX)"),
+        (
+            "re_im(",
+            "Re⇔Im — show the real/imaginary part of a complex result (CMPLX)",
+        ),
+        ("reg_lin(", "Lin — linear regression y = a + b·x (REG)"),
+        (
+            "reg_log(",
+            "Log — logarithmic regression y = a + b·ln x (REG)",
+        ),
+        (
+            "reg_exp(",
+            "Exp — exponential regression y = a·e^(b·x) (REG)",
+        ),
+        ("reg_pwr(", "Pwr — power regression y = a·x^b (REG)"),
+        ("reg_inv(", "Inv — inverse regression y = a + b/x (REG)"),
+        (
+            "reg_quad(",
+            "Quad — quadratic regression y = a + b·x + c·x² (REG)",
+        ),
+        (
+            "reg_abexp(",
+            "AB-Exp — exponential regression y = a·b^x (REG)",
+        ),
     ];
     for (label, detail) in statements {
         push(&mut items, function(label, &format!("{label}$0)"), detail));
@@ -1063,6 +1101,18 @@ fn describe_token(kind: &TokenKind) -> Option<String> {
         TokenKind::Norm => "**`Norm`** — normal display".to_string(),
         TokenKind::DT => "**`DT`** — statistics data entry".to_string(),
         TokenKind::Ran => "**`Ran#`** — pseudo-random number".to_string(),
+        TokenKind::ReIm => {
+            "**`Re⇔Im`** — toggle which part of a complex result is displayed (CMPLX)".to_string()
+        }
+        TokenKind::Regression(reg) => {
+            format!("**`{}`** — regression model (REG mode)", reg.glyph())
+        }
+        TokenKind::Sexagesimal(_) => {
+            "**`d°m′s″`** — a sexagesimal (degrees/minutes/seconds) value".to_string()
+        }
+        TokenKind::DmsToggle => {
+            "**`°′″`** — convert the displayed value between decimal and sexagesimal".to_string()
+        }
         TokenKind::Eof => return None,
         _ => return None,
     };
@@ -1227,6 +1277,15 @@ fn fxc_description(source: &str, word: &str, start: usize) -> String {
         "oct" => "**`oct()`** — octal base (BASE mode)".to_string(),
         "to_cartesian" => "**`to_cartesian()`** — complex results as `a+b𝑖` (CMPLX)".to_string(),
         "to_polar" => "**`to_polar()`** — complex results as `r∠θ` (CMPLX)".to_string(),
+        "re_im" => "**`re_im()`** — toggle between the real and imaginary parts of a complex result (CMPLX)".to_string(),
+        "reg_lin" => "**`reg_lin()`** — linear regression `y = a + b·x` (REG)".to_string(),
+        "reg_log" => "**`reg_log()`** — logarithmic regression `y = a + b·ln x` (REG)".to_string(),
+        "reg_exp" => "**`reg_exp()`** — exponential regression `y = a·e^(b·x)` (REG)".to_string(),
+        "reg_pwr" => "**`reg_pwr()`** — power regression `y = a·x^b` (REG)".to_string(),
+        "reg_inv" => "**`reg_inv()`** — inverse regression `y = a + b/x` (REG)".to_string(),
+        "reg_quad" => "**`reg_quad()`** — quadratic regression `y = a + b·x + c·x²` (REG)".to_string(),
+        "reg_abexp" => "**`reg_abexp()`** — exponential regression `y = a·b^x` (REG)".to_string(),
+        "dms" => "**`dms(deg, min, sec)`** — a sexagesimal literal, displayed `d°m′s″`\n\nWith no arguments, **`dms()`** is the bare `°′″` key, which converts the displayed value between decimal and sexagesimal.".to_string(),
         "and" | "or" | "xor" | "xnor" => {
             format!("**`{word}`** — bitwise operator (BASE mode)")
         }

@@ -55,3 +55,311 @@ fn literals_are_not_autocorrected() {
     interp.run().unwrap();
     assert_eq!(interp.environment().ans(), 123456789.010005);
 }
+
+// ---------------------------------------------------------------------------
+// Reference oracle and differential corpus tests
+// ---------------------------------------------------------------------------
+//
+// The functions below are verbatim copies of the original, allocation-heavy
+// `precision.rs` implementation.  They are *the* specification: the optimised
+// production code must agree with them bit for bit.
+
+fn oracle_round15(x: f64) -> f64 {
+    if !x.is_finite() || x == 0.0 {
+        return x;
+    }
+    let text = format!("{:.14e}", x);
+    text.parse().unwrap_or(x)
+}
+
+fn oracle_autocorrect(x: f64) -> f64 {
+    if !x.is_finite() || x == 0.0 {
+        return x;
+    }
+    let negative = x < 0.0;
+    let magnitude = x.abs();
+    let text = format!("{magnitude:.14e}");
+    let Some((mantissa, exp_text)) = text.split_once('e') else {
+        return x;
+    };
+    let exp: i32 = exp_text.parse().unwrap_or(0);
+
+    let mut digits = [0u8; 15];
+    let mut count = 0;
+    for ch in mantissa.chars() {
+        if let Some(d) = ch.to_digit(10)
+            && count < digits.len()
+        {
+            digits[count] = d as u8;
+            count += 1;
+        }
+    }
+    if count != digits.len() {
+        return x;
+    }
+
+    if digits[..13].iter().all(|&d| d == 0) {
+        return 0.0;
+    }
+
+    let lmno = digits[11] as u32 * 1000
+        + digits[12] as u32 * 100
+        + digits[13] as u32 * 10
+        + digits[14] as u32;
+
+    let corrected = if lmno <= 9 {
+        digits[11..].fill(0);
+        Some(exp)
+    } else if (9991..=9999).contains(&lmno) {
+        digits[11..].fill(0);
+        let mut i = 10i32;
+        while i >= 0 {
+            if digits[i as usize] == 9 {
+                digits[i as usize] = 0;
+                i -= 1;
+            } else {
+                digits[i as usize] += 1;
+                break;
+            }
+        }
+        if i < 0 {
+            return oracle_signed(negative, format!("1e{}", exp + 1));
+        }
+        Some(exp)
+    } else {
+        None
+    };
+
+    match corrected {
+        Some(exp) => {
+            let mantissa = format!(
+                "{}.{}{}{}{}{}{}{}{}{}{}{}{}{}{}",
+                digits[0],
+                digits[1],
+                digits[2],
+                digits[3],
+                digits[4],
+                digits[5],
+                digits[6],
+                digits[7],
+                digits[8],
+                digits[9],
+                digits[10],
+                digits[11],
+                digits[12],
+                digits[13],
+                digits[14]
+            );
+            oracle_signed(negative, format!("{mantissa}e{exp}"))
+        }
+        None => x,
+    }
+}
+
+fn oracle_signed(negative: bool, text: String) -> f64 {
+    let value: f64 = text.parse().unwrap_or(0.0);
+    if negative { -value } else { value }
+}
+
+fn oracle_normalize(x: f64) -> f64 {
+    oracle_autocorrect(oracle_round15(x))
+}
+
+/// A tiny deterministic xorshift PRNG so the corpus is reproducible without
+/// pulling in `rand`.
+struct Rng(u64);
+
+impl Rng {
+    fn new(seed: u64) -> Self {
+        Self(seed | 1)
+    }
+
+    fn next_u64(&mut self) -> u64 {
+        let mut x = self.0;
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        self.0 = x;
+        x
+    }
+
+    fn next_f64_unit(&mut self) -> f64 {
+        // Uniform in [0, 1).
+        (self.next_u64() >> 11) as f64 / (1u64 << 53) as f64
+    }
+}
+
+/// Assert that all three optimised functions agree with the oracle on `x`.
+fn agree(x: f64) -> Result<(), String> {
+    let r = round15(x);
+    let or = oracle_round15(x);
+    if r.to_bits() != or.to_bits() {
+        return Err(format!(
+            "round15({x:?}): got {:?} ({:#018x}), want {:?} ({:#018x})",
+            r,
+            r.to_bits(),
+            or,
+            or.to_bits()
+        ));
+    }
+
+    let a = autocorrect(x);
+    let oa = oracle_autocorrect(x);
+    if a.to_bits() != oa.to_bits() {
+        return Err(format!(
+            "autocorrect({x:?}): got {:?} ({:#018x}), want {:?} ({:#018x})",
+            a,
+            a.to_bits(),
+            oa,
+            oa.to_bits()
+        ));
+    }
+
+    let n = normalize(x);
+    let on = oracle_normalize(x);
+    if n.to_bits() != on.to_bits() {
+        return Err(format!(
+            "normalize({x:?}): got {:?} ({:#018x}), want {:?} ({:#018x})",
+            n,
+            n.to_bits(),
+            on,
+            on.to_bits()
+        ));
+    }
+    Ok(())
+}
+
+/// Build a decimal value from a 15-to-17 digit mantissa string and an
+/// exponent, e.g. `(prefix=12345678901, tail=9995, extra=None, exp=-3)`
+/// represents `1.23456789019995e-3`.
+fn decimal(prefix: u128, tail: u32, extra: &[u8], exp: i32) -> f64 {
+    let mut mantissa = format!("{prefix}{tail:04}");
+    for &e in extra {
+        mantissa.push(char::from(b'0' + e));
+    }
+    let value = format!("{}.{}e{}", &mantissa[0..1], &mantissa[1..], exp);
+    value.parse().unwrap()
+}
+
+#[test]
+fn fast_path_matches_oracle_bit_for_bit() {
+    let mut rng = Rng::new(0x9E37_79B9_7F4A_7C15);
+    let mut checked = 0u64;
+
+    // 1. Random raw f64 bit patterns: covers every exponent, subnormals,
+    //    infinities and NaNs.
+    for _ in 0..150_000 {
+        let x = f64::from_bits(rng.next_u64());
+        agree(x).unwrap();
+        checked += 1;
+    }
+
+    // 2. Random values spread over the machine's working range ±1e-99..1e99.
+    for _ in 0..150_000 {
+        let exp = (rng.next_u64() % 199) as i32 - 99;
+        let unit = rng.next_f64_unit();
+        let sign = if rng.next_u64() & 1 == 0 { 1.0 } else { -1.0 };
+        let x = sign * unit * 10f64.powi(exp);
+        agree(x).unwrap();
+        checked += 1;
+    }
+
+    // 3. Values whose 15th significant digits sit near the autocorrect
+    //    boundaries, with 15, 16 and 17 significant digits.
+    let tails: [u32; 16] = [
+        0, 1, 5, 9, 10, 11, 9990, 9991, 9992, 9995, 9998, 9999, 1234, 5000, 9000, 9500,
+    ];
+    for &tail in &tails {
+        for _ in 0..2_500 {
+            let prefix = 10_000_000_000u128 + (rng.next_u64() as u128 % 90_000_000_000);
+            let exp = (rng.next_u64() % 199) as i32 - 99;
+            let x = decimal(prefix, tail, &[], exp);
+            agree(x).unwrap();
+            checked += 1;
+
+            for extra in 0..=9u8 {
+                let x = decimal(prefix, tail, &[extra], exp);
+                agree(x).unwrap();
+                checked += 1;
+            }
+
+            // 17 significant digits as well.
+            let extra2 = (rng.next_u64() % 100) as u8;
+            let x = decimal(prefix, tail, &[extra2 / 10, extra2 % 10], exp);
+            agree(x).unwrap();
+            checked += 1;
+        }
+    }
+
+    // 4. Exact powers of ten across the whole exponent range, plus their
+    //    neighbours.
+    for n in -323..=308i32 {
+        let parsed: f64 = format!("1e{n}").parse().unwrap();
+        agree(parsed).unwrap();
+        checked += 1;
+        agree(f64::from_bits(parsed.to_bits().wrapping_add(1))).unwrap();
+        checked += 1;
+        if parsed > 0.0 {
+            agree(-parsed).unwrap();
+            checked += 1;
+        }
+    }
+
+    // 5. Hand-picked special values, including the narrow band around
+    //    MIN_POSITIVE where the intermediate `round15` result can be subnormal.
+    let specials = [
+        0.0,
+        -0.0,
+        f64::MIN_POSITIVE,
+        -f64::MIN_POSITIVE,
+        f64::from_bits(1),
+        -f64::from_bits(1),
+        f64::from_bits(0x000F_FFFF_FFFF_FFFF),
+        -f64::from_bits(0x000F_FFFF_FFFF_FFFF),
+        f64::MAX,
+        -f64::MAX,
+        f64::MIN,
+        f64::INFINITY,
+        f64::NEG_INFINITY,
+        f64::NAN,
+        -f64::NAN,
+        2.2250738585072e-308,
+        2.22507385850719e-308,
+        2.2250738585072014e-308,
+        1e-300,
+        1e-301,
+        9.99999999999999e-301,
+        1e99,
+        -1e99,
+        1e-99,
+        9.99999999999999e99,
+    ];
+    for x in specials {
+        agree(x).unwrap();
+        checked += 1;
+    }
+    // Walk one ulp at a time through the subnormal-adjacent band.
+    let base = f64::MIN_POSITIVE.to_bits();
+    for delta in 0..64u64 {
+        agree(f64::from_bits(base + delta)).unwrap();
+        agree(f64::from_bits(base - delta)).unwrap();
+        agree(-f64::from_bits(base + delta)).unwrap();
+        agree(-f64::from_bits(base - delta)).unwrap();
+        checked += 4;
+    }
+
+    // 6. Every f64 with a 15-digit decimal mantissa and small exponent is
+    //    covered by steps 2-3; additionally stress the tie-to-even rounding of
+    //    `round15` with 16-digit midpoints.
+    for _ in 0..100_000 {
+        let prefix = 10_000_000_000u128 + (rng.next_u64() as u128 % 90_000_000_000);
+        let tail = (rng.next_u64() % 10_000) as u32;
+        let final_digit = (rng.next_u64() % 10) as u8;
+        let exp = (rng.next_u64() % 199) as i32 - 99;
+        agree(decimal(prefix, tail, &[final_digit], exp)).unwrap();
+        checked += 1;
+    }
+
+    assert!(checked >= 500_000, "corpus too small: {checked}");
+    eprintln!("differential corpus: {checked} values, all bit-for-bit equal");
+}

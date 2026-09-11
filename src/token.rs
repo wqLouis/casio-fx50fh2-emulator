@@ -7,7 +7,7 @@
 use std::fmt;
 
 use crate::mode::Mode;
-use crate::stats::StatVar;
+use crate::stats::{RegType, StatVar};
 use crate::value::ComplexFormat;
 
 /// The eight addressable memories of the calculator.
@@ -300,6 +300,16 @@ pub enum TokenKind {
     Oct,
     /// `▶a+b𝑖` / `▶r∠θ`
     ComplexFormat(ComplexFormat),
+    /// `Re⇔Im` — toggle which part of a complex result is displayed.
+    ReIm,
+    /// A regression model selected in REG mode (`Lin`, `Log`, …).
+    Regression(RegType),
+    /// A sexagesimal (degrees/minutes/seconds) literal such as `2°15′18″`,
+    /// already reduced to `deg + min/60 + sec/3600`.
+    Sexagesimal(f64),
+    /// The bare `°′″` key: toggle a displayed value between decimal and
+    /// sexagesimal.
+    DmsToggle,
     /// `;` used by `x,y;f DT`
     Semicolon,
     DT,
@@ -358,6 +368,10 @@ impl TokenKind {
             TokenKind::Bin => "Bin",
             TokenKind::Oct => "Oct",
             TokenKind::ComplexFormat(_) => "complex format",
+            TokenKind::ReIm => "Re⇔Im",
+            TokenKind::Regression(_) => "regression model",
+            TokenKind::Sexagesimal(_) => "sexagesimal value",
+            TokenKind::DmsToggle => "°′″",
             TokenKind::Semicolon => ";",
             TokenKind::StatVar(_) => "statistical variable",
             TokenKind::DT => "DT",

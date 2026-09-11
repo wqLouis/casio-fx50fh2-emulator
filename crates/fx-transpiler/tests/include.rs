@@ -39,8 +39,17 @@ impl Drop for TempDir {
     }
 }
 
+/// The *unoptimised* translation. These tests are about `#include` resolution —
+/// which file a fragment came from — so each construct is asserted as written;
+/// the optimiser is covered by `tests/simplify.rs` and `tests/propagate.rs`.
+const RAW: Options = Options {
+    ascii: false,
+    mode: None,
+    optimize: false,
+};
+
 fn build(path: &Path) -> Result<String, TranspileError> {
-    transpile_file(path, Options::default())
+    transpile_file(path, RAW)
 }
 
 // ---------------------------------------------------------------------------
@@ -111,14 +120,7 @@ fn ascii_option_applies_after_expansion() {
         &common::wrap("let a = 1;\n#include \"frag.fxc\"\nprint(b);\n"),
     );
 
-    let prgm = transpile_file(
-        &main,
-        Options {
-            ascii: true,
-            ..Default::default()
-        },
-    )
-    .unwrap();
+    let prgm = transpile_file(&main, Options { ascii: true, ..RAW }).unwrap();
     assert_eq!(prgm, "1->A\nA+1->B\nBdisp\n");
 }
 
@@ -254,7 +256,7 @@ fn base_dir_lets_inline_text_find_its_includes() {
 
     let prgm = transpile_with_base(
         &common::wrap("let a = 1;\n#include \"frag.fxc\"\nprint(b);\n"),
-        Options::default(),
+        RAW,
         &dir.0,
     )
     .unwrap();

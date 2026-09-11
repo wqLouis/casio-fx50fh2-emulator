@@ -411,6 +411,49 @@ fn prgm_completion_is_unchanged() {
     }
 }
 
+#[test]
+fn fxc_completion_offers_the_new_calculator_keys() {
+    let labels = labels(Language::Fxc);
+    for expected in ["re_im(", "reg_quad(", "dms(", "stat.regc"] {
+        assert!(
+            labels.iter().any(|label| label == expected),
+            "missing `{expected}` in {labels:?}"
+        );
+    }
+}
+
+#[test]
+fn prgm_completion_offers_the_new_tokens() {
+    let labels = labels(Language::Prgm);
+    for expected in ["Re⇔Im", "Quad", "AB-Exp", "°′″"] {
+        assert!(labels.contains(&expected.to_string()), "missing {expected}");
+    }
+}
+
+#[test]
+fn fxc_hover_describes_a_regression_model() {
+    let src = wrap("#mode REG\nreg_quad();");
+    let hover = hover(&src, Position::new(2, 1), Language::Fxc).expect("reg_quad");
+    assert!(markup(&hover).contains("quadratic regression"), "{hover:?}");
+}
+
+#[test]
+fn prgm_hover_describes_re_im_and_a_regression_model() {
+    let re_im = "#mode CMPLX\n2+3i: Re⇔Im";
+    let re_im_hover = hover(re_im, Position::new(1, 8), Language::Prgm).expect("Re⇔Im");
+    assert!(
+        markup(&re_im_hover).contains("complex result"),
+        "{re_im_hover:?}"
+    );
+
+    let quad = "#mode REG\nClrStat: Quad";
+    let quad_hover = hover(quad, Position::new(1, 11), Language::Prgm).expect("Quad");
+    assert!(
+        markup(&quad_hover).contains("regression model"),
+        "{quad_hover:?}"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Hover
 

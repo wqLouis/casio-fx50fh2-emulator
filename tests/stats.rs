@@ -26,6 +26,10 @@ fn value(source: &str) -> f64 {
     evaluate(&format!("{REG}{source}")).unwrap()
 }
 
+fn value_err(source: &str) -> CalcError {
+    evaluate(&format!("{REG}{source}")).unwrap_err()
+}
+
 fn assert_close(actual: f64, expected: f64) {
     assert!(
         (actual - expected).abs() < 1e-9,
@@ -74,6 +78,83 @@ fn two_variable_regression() {
         value(&format!("{setup}sumxy")),
         1.0 * 3.0 + 2.0 * 5.0 + 3.0 * 7.0
     );
+}
+
+// -- the seven regression models -------------------------------------------
+//
+// Each model is fitted on data generated from that model exactly, so the
+// coefficients are the generating parameters (up to floating point) and the
+// correlation coefficient is 1.
+
+/// y = 3 + 2·ln x, with x = 1, 2, 4.
+#[test]
+fn logarithmic_regression_model() {
+    let setup = "ClrStat: Log: 1,3 DT: 2,4.386294361119891 DT: 4,5.772588722239781 DT: ";
+    assert_close(value(&format!("{setup}rega")), 3.0);
+    assert_close(value(&format!("{setup}regb")), 2.0);
+    assert_close(value(&format!("{setup}regr")), 1.0);
+}
+
+/// y = 2·e^(0.5x), with x = 0, 1, 2.
+#[test]
+fn exponential_regression_model() {
+    let setup = "ClrStat: Exp: 0,2 DT: 1,3.297442541400256 DT: 2,5.43656365691809 DT: ";
+    assert_close(value(&format!("{setup}rega")), 2.0);
+    assert_close(value(&format!("{setup}regb")), 0.5);
+    assert_close(value(&format!("{setup}regr")), 1.0);
+}
+
+/// y = 3·x², with x = 1, 2, 3.
+#[test]
+fn power_regression_model() {
+    let setup = "ClrStat: Pwr: 1,3 DT: 2,12 DT: 3,27 DT: ";
+    assert_close(value(&format!("{setup}rega")), 3.0);
+    assert_close(value(&format!("{setup}regb")), 2.0);
+    assert_close(value(&format!("{setup}regr")), 1.0);
+}
+
+/// y = 1 + 2/x, with x = 1, 2, 4.
+#[test]
+fn inverse_regression_model() {
+    let setup = "ClrStat: Inv: 1,3 DT: 2,2 DT: 4,1.5 DT: ";
+    assert_close(value(&format!("{setup}rega")), 1.0);
+    assert_close(value(&format!("{setup}regb")), 2.0);
+    assert_close(value(&format!("{setup}regr")), 1.0);
+}
+
+/// y = 1 + 2x + 3x², with x = 0, 1, 2, 3.
+#[test]
+fn quadratic_regression_model() {
+    let setup = "ClrStat: Quad: 0,1 DT: 1,6 DT: 2,17 DT: 3,34 DT: ";
+    assert_close(value(&format!("{setup}rega")), 1.0);
+    assert_close(value(&format!("{setup}regb")), 2.0);
+    assert_close(value(&format!("{setup}regc")), 3.0);
+    assert_close(value(&format!("{setup}regr")), 1.0);
+}
+
+/// y = 2·3^x, with x = 0, 1, 2.
+#[test]
+fn ab_exponential_regression_model() {
+    let setup = "ClrStat: AB-Exp: 0,2 DT: 1,6 DT: 2,18 DT: ";
+    assert_close(value(&format!("{setup}rega")), 2.0);
+    assert_close(value(&format!("{setup}regb")), 3.0);
+    assert_close(value(&format!("{setup}regr")), 1.0);
+}
+
+/// The model selector is a statement, so it takes effect for later data and
+/// accessors, and `regc` is zero outside Quad.
+#[test]
+fn switching_the_regression_model() {
+    let source =
+        "ClrStat: Lin: 0,1 DT: 1,2 DT: rega◢: ClrStat: Quad: 0,1 DT: 1,6 DT: 2,17 DT: regc◢";
+    assert_eq!(output(source), vec!["1", "3"]);
+}
+
+/// `Log` (and `Pwr`) need positive `x`; a non-positive one is a `Math ERROR`.
+#[test]
+fn logarithmic_regression_rejects_non_positive_x() {
+    let err = value_err("ClrStat: Log: 0,1 DT: 1,2 DT: rega");
+    assert!(matches!(err, CalcError::Math(_)), "{err:?}");
 }
 
 #[test]

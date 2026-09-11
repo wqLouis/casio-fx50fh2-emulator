@@ -661,6 +661,7 @@ fn prepare(suite: &TestSuite) -> Prepared {
     let options = Options {
         ascii: suite.ascii,
         mode: suite.mode,
+        ..Default::default()
     };
     // Resolve the program's `#include` directives relative to wherever the
     // program actually lives, not the process's working directory.

@@ -72,6 +72,12 @@ struct Cli {
     #[arg(short = 'b', long = "build", value_name = "FILE")]
     build: Option<PathBuf>,
 
+    /// Emit the unoptimised translation: no algebraic simplification and no
+    /// constant propagation, so each construct appears as written. Mostly
+    /// useful for seeing what a construct compiles to on its own.
+    #[arg(long, global = true)]
+    no_optimize: bool,
+
     /// Start the language server (flag form of `lsp`)
     #[arg(short = 'l', long = "lsp")]
     lsp: bool,
@@ -129,6 +135,12 @@ enum Command {
     },
     /// Show how a program uses the calculator's seven memories
     Regs {
+        /// A `.fxc` program
+        #[arg(value_name = "FILE")]
+        file: PathBuf,
+    },
+    /// Show how many of the 680 program bytes a program needs
+    Size {
         /// A `.fxc` program
         #[arg(value_name = "FILE")]
         file: PathBuf,
@@ -209,23 +221,24 @@ fn dispatch(cli: Cli) -> Result<(), Fail> {
         return eval(&expr, mode);
     }
     if let Some(file) = cli.build {
-        return build(&file, cli.ascii, mode);
+        return build(&file, cli.ascii, mode, cli.no_optimize);
     }
 
     match cli.command {
         Some(Command::Lsp) => start_lsp(),
         Some(Command::Eval { expression }) => eval(&expression.join(" "), mode),
-        Some(Command::Build { file }) => build(&file, cli.ascii, mode),
+        Some(Command::Build { file }) => build(&file, cli.ascii, mode, cli.no_optimize),
         Some(Command::Test { file, filter, json }) => test_command(&file, filter.as_deref(), json),
         Some(Command::Regs { file }) => regs_command(&file),
-        Some(Command::Run { file }) => run_file(&file, cli.ascii, mode),
+        Some(Command::Size { file }) => size_command(&file, cli.ascii, mode, cli.no_optimize),
+        Some(Command::Run { file }) => run_file(&file, cli.ascii, mode, cli.no_optimize),
         Some(Command::Constants) => list_constants(),
         Some(Command::Completions { shell }) => {
             write_completions(shell);
             Ok(())
         }
         None => match cli.file {
-            Some(file) => run_file(&file, cli.ascii, mode),
+            Some(file) => run_file(&file, cli.ascii, mode, cli.no_optimize),
             None if io::stdin().is_terminal() => repl(),
             None => run_stdin(mode),
         },
@@ -266,19 +279,19 @@ fn eval(source: &str, mode: Option<Mode>) -> Result<(), Fail> {
     Ok(())
 }
 
-fn build(file: &Path, ascii: bool, mode: Option<Mode>) -> Result<(), Fail> {
-    let prgm = transpile_file(file, ascii, mode)?;
+fn build(file: &Path, ascii: bool, mode: Option<Mode>, no_optimize: bool) -> Result<(), Fail> {
+    let prgm = transpile_file(file, transpiler_options(ascii, mode, no_optimize))?;
     print!("{prgm}");
     Ok(())
 }
 
-fn run_file(file: &Path, ascii: bool, mode: Option<Mode>) -> Result<(), Fail> {
+fn run_file(file: &Path, ascii: bool, mode: Option<Mode>, no_optimize: bool) -> Result<(), Fail> {
     let name = file.display().to_string();
     let is_c_like = file
         .extension()
         .is_some_and(|ext| ext.eq_ignore_ascii_case("fxc"));
     let prgm = if is_c_like {
-        transpile_file(file, ascii, mode)?
+        transpile_file(file, transpiler_options(ascii, mode, no_optimize))?
     } else {
         read_source(file)?
     };
@@ -373,6 +386,84 @@ fn regs_command(file: &Path) -> Result<(), Fail> {
 
 #[cfg(not(feature = "transpiler"))]
 fn regs_command(_file: &Path) -> Result<(), Fail> {
+    Err(Fail::Message(
+        "the transpiler is not compiled in (rebuild with `--features transpiler`)".to_string(),
+    ))
+}
+
+// ---------------------------------------------------------------------------
+// Program size
+
+/// `fx50 size FILE` — how many of the 680 program bytes a program needs.
+///
+/// The machine stores one byte per key, and all four program areas (`P1`–`P4`)
+/// share a single 680-byte store, so the key count *is* the number the memory
+/// display counts down. This is the measurement every optimisation is judged
+/// by, and the answer to "will it fit?".
+#[cfg(feature = "transpiler")]
+fn size_command(
+    file: &Path,
+    ascii: bool,
+    mode: Option<Mode>,
+    no_optimize: bool,
+) -> Result<(), Fail> {
+    let optimized = transpile_file(file, transpiler_options(ascii, mode, no_optimize))?;
+    let size = fx_transpiler::size::measure(&optimized);
+
+    println!("Program size for {}", file.display());
+    println!(
+        "  {} key(s) in {} statement(s){}",
+        size.keys,
+        size.statements,
+        if size.largest > 0 {
+            format!(", largest statement {} keys", size.largest)
+        } else {
+            String::new()
+        }
+    );
+    match size.remaining() {
+        Some(left) => println!(
+            "  fits: {} of {} bytes used, {left} left",
+            size.keys,
+            fx_transpiler::Size::CAPACITY
+        ),
+        None => println!(
+            "  does not fit: {} bytes needed, {} over the {} available",
+            size.keys,
+            size.keys - fx_transpiler::Size::CAPACITY,
+            fx_transpiler::Size::CAPACITY
+        ),
+    }
+
+    // Always report what the optimiser saved, so the number is meaningful: a
+    // program's size is only interesting next to what it would have been.
+    if !no_optimize {
+        let raw = transpile_file(file, transpiler_options(ascii, mode, true))?;
+        let raw_size = fx_transpiler::size::measure(&raw);
+        let saved = raw_size.keys.saturating_sub(size.keys);
+        if saved > 0 {
+            println!(
+                "  optimiser: {saved} key(s) saved ({} without it, {:.0}% smaller)",
+                raw_size.keys,
+                100.0 * saved as f64 / raw_size.keys.max(1) as f64
+            );
+        } else {
+            println!(
+                "  optimiser: nothing to remove ({} keys either way)",
+                raw_size.keys
+            );
+        }
+    }
+    Ok(())
+}
+
+#[cfg(not(feature = "transpiler"))]
+fn size_command(
+    _file: &Path,
+    _ascii: bool,
+    _mode: Option<Mode>,
+    _no_optimize: bool,
+) -> Result<(), Fail> {
     Err(Fail::Message(
         "the transpiler is not compiled in (rebuild with `--features transpiler`)".to_string(),
     ))
@@ -576,16 +667,26 @@ fn write_completions(shell: Shell) {
 
 /// Transpile a `.fxc` file, resolving `#include` relative to that file.
 #[cfg(feature = "transpiler")]
-fn transpile_file(file: &Path, ascii: bool, mode: Option<Mode>) -> Result<String, Fail> {
-    let options = fx_transpiler::Options {
-        ascii,
-        mode: mode.map(to_transpiler_mode),
-    };
+fn transpile_file(file: &Path, options: fx_transpiler::Options) -> Result<String, Fail> {
     fx_transpiler::transpile_file(file, options).map_err(|e| Fail::Message(e.to_string()))
 }
 
+/// Build the transpiler options the CLI's flags describe.
+#[cfg(feature = "transpiler")]
+fn transpiler_options(
+    ascii: bool,
+    mode: Option<Mode>,
+    no_optimize: bool,
+) -> fx_transpiler::Options {
+    fx_transpiler::Options {
+        ascii,
+        mode: mode.map(to_transpiler_mode),
+        optimize: !no_optimize,
+    }
+}
+
 #[cfg(not(feature = "transpiler"))]
-fn transpile_file(_file: &Path, _ascii: bool, _mode: Option<Mode>) -> Result<String, Fail> {
+fn transpile_file(_file: &Path, _options: fx_transpiler::Options) -> Result<String, Fail> {
     Err(Fail::Message(
         "transpiler support is not compiled in (rebuild with `--features transpiler`)".to_string(),
     ))

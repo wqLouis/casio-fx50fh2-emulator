@@ -158,6 +158,7 @@ fn transpiler_mode_acceptance_implies_interpreter_acceptance() {
             let options = Options {
                 ascii: false,
                 mode: Some(mode),
+                ..Default::default()
             };
             // Only the accepted cases matter: a rejection in both places is
             // also consistent, and is covered by the transpiler's own tests.

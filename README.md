@@ -72,6 +72,9 @@ fx50 test examples/factorial.fxc
 # show how a program uses the seven memories (A B C D X Y M)
 fx50 regs examples/compiletime.fxc
 
+# show how many of the 680 program bytes it needs
+fx50 size examples/determinant.fxc
+
 # language server over stdio, and shell completions
 fx50 lsp
 fx50 completions bash

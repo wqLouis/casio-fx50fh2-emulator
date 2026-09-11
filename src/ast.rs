@@ -2,7 +2,7 @@
 
 use crate::bases::Base;
 use crate::mode::Mode;
-use crate::stats::StatVar;
+use crate::stats::{RegType, StatVar};
 use crate::token::{BinOp, ConstName, FuncName, VarName};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -61,6 +61,9 @@ pub enum Expr {
         func: FuncName,
         args: Vec<Expr>,
     },
+    /// A sexagesimal literal such as `2°15′18″`, already reduced to
+    /// `deg + min/60 + sec/3600`.  The offset is that of the first digit.
+    Sexagesimal(f64, usize),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -89,6 +92,13 @@ pub enum Setup {
     ComplexCartesian,
     /// `▶r∠θ`
     ComplexPolar,
+    /// `Re⇔Im`
+    ReIm,
+    /// A regression model in REG mode (`Lin`, `Log`, …).
+    Reg(RegType),
+    /// The `°′″` key: toggle a displayed value between decimal and
+    /// sexagesimal.
+    Sexagesimal,
 }
 
 #[derive(Debug, Clone, PartialEq)]

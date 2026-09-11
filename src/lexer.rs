@@ -8,7 +8,7 @@
 use crate::bases::Base;
 use crate::error::CalcError;
 use crate::mode::Mode;
-use crate::stats::StatVar as SV;
+use crate::stats::{RegType, StatVar as SV};
 use crate::token::{BinOp, ConstName, FuncName, Postfix, Token, TokenKind, VarName};
 use crate::value::ComplexFormat;
 
@@ -114,6 +114,19 @@ impl Lexer {
             return Ok(Some(TokenKind::Func(FuncName::TenPow)));
         }
 
+        // The `Re⇔Im` display toggle for complex results.
+        if self.looking_at("Re\u{21d4}Im") {
+            self.consume_str("Re\u{21d4}Im");
+            return Ok(Some(TokenKind::ReIm));
+        }
+
+        // The bare `°′″` key (decimal ⇄ sexagesimal conversion).  The literal
+        // form, `2°15′18″`, is handled with the number below.
+        if self.looking_at("\u{00b0}\u{2032}\u{2033}") {
+            self.consume_str("\u{00b0}\u{2032}\u{2033}");
+            return Ok(Some(TokenKind::DmsToggle));
+        }
+
         // Complex-format setup keys (`▶a+b𝑖`, `▶r∠θ`, `>a+bi`, `>rangle`).
         for (text, format) in [
             ("▶a+b𝑖", ComplexFormat::Cartesian),
@@ -156,6 +169,11 @@ impl Lexer {
         }
 
         if c.is_ascii_digit() || (c == '.' && self.peek_at(1).is_some_and(|d| d.is_ascii_digit())) {
+            // A sexagesimal literal starts like a number but continues with
+            // `°`/`′`/`″`; try it before the ordinary number scanner.
+            if let Some(kind) = self.try_sexagesimal() {
+                return Ok(Some(kind));
+            }
             self.scan_number();
             let lexeme: String = self.chars[start..self.i].iter().collect();
             return Ok(Some(TokenKind::Number(lexeme)));
@@ -424,6 +442,64 @@ impl Lexer {
             }
         }
     }
+
+    /// Try to read a sexagesimal literal such as `2°15′18″`.
+    ///
+    /// Degrees, minutes and seconds are all required: the manual insists that
+    /// zero degrees and minutes are entered too, as in `0°0′30″`.  Returns
+    /// `None` (leaving the cursor where it was) when the input is an ordinary
+    /// number, so `2.5` still lexes as a decimal.
+    fn try_sexagesimal(&mut self) -> Option<TokenKind> {
+        let save_i = self.i;
+        let save_byte = self.byte;
+        let parsed = self.sexagesimal_parts();
+        if parsed.is_none() {
+            self.i = save_i;
+            self.byte = save_byte;
+        }
+        parsed
+    }
+
+    /// The body of [`Lexer::try_sexagesimal`], with the cursor free to move.
+    fn sexagesimal_parts(&mut self) -> Option<TokenKind> {
+        let degrees = self.dms_component()?;
+        if self.peek() != Some('\u{00b0}') {
+            return None;
+        }
+        self.advance();
+        let minutes = self.dms_component()?;
+        if self.peek() != Some('\u{2032}') {
+            return None;
+        }
+        self.advance();
+        let seconds = self.dms_component()?;
+        if self.peek() != Some('\u{2033}') {
+            return None;
+        }
+        self.advance();
+        Some(TokenKind::Sexagesimal(
+            degrees + minutes / 60.0 + seconds / 3600.0,
+        ))
+    }
+
+    /// One `[0-9]+(\.[0-9]+)?` component of a sexagesimal literal.
+    fn dms_component(&mut self) -> Option<f64> {
+        let start = self.i;
+        if !self.peek().is_some_and(|c| c.is_ascii_digit()) {
+            return None;
+        }
+        while self.peek().is_some_and(|c| c.is_ascii_digit()) {
+            self.advance();
+        }
+        if self.peek() == Some('.') {
+            self.advance();
+            while self.peek().is_some_and(|c| c.is_ascii_digit()) {
+                self.advance();
+            }
+        }
+        let text: String = self.chars[start..self.i].iter().collect();
+        text.parse().ok()
+    }
 }
 
 fn word_kind(word: &str) -> Option<TokenKind> {
@@ -487,6 +563,7 @@ fn word_kind(word: &str) -> Option<TokenKind> {
         "maxy" | "maxY" => StatVar(SV::MaxY),
         "rega" | "regA" => StatVar(SV::RegA),
         "regb" | "regB" => StatVar(SV::RegB),
+        "regc" | "regC" => StatVar(SV::RegC),
         "regr" | "regR" => StatVar(SV::RegR),
         "Σx" => StatVar(SV::SumX),
         "Σx²" => StatVar(SV::SumX2),
@@ -532,9 +609,19 @@ fn word_kind(word: &str) -> Option<TokenKind> {
         "Norm" => Norm,
         "DT" => DT,
         "Ran" => Ran,
-        // Anything else that is not a keyword may be one of the calculator's
-        // scientific constants, which are matched by ASCII name or by the
-        // symbol on the display.
-        _ => Const(ConstName::Physical(crate::constants::lookup(word)?.code)),
+        // Re⇔Im is offered with its glyph; the ASCII spelling is emitted by
+        // the transpiler's `--ascii` mode.
+        "re_im" | "reim" => ReIm,
+        // ASCII spelling the transpiler emits for the bare `°′″` key.
+        "dms" => DmsToggle,
+        // Anything else that is not a keyword may be a regression model or one
+        // of the calculator's scientific constants, which are matched by ASCII
+        // name or by the symbol on the display.
+        _ => {
+            if let Some(reg) = RegType::parse(word) {
+                return Some(Regression(reg));
+            }
+            Const(ConstName::Physical(crate::constants::lookup(word)?.code))
+        }
     })
 }

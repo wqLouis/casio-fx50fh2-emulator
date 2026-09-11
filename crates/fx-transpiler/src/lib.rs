@@ -30,6 +30,7 @@ pub mod json;
 pub mod lexer;
 pub mod mode;
 pub mod parser;
+pub mod size;
 #[cfg(feature = "testing")]
 pub mod testing;
 
@@ -37,19 +38,22 @@ mod alloc;
 mod emit;
 mod fold;
 mod functions;
+mod propagate;
+mod simplify;
 mod unroll;
 mod validate;
 
 pub use alloc::Allocation;
 pub use data::{Data, DataTable};
 pub use mode::Mode;
+pub use size::Size;
 
 use std::path::Path;
 
 use error::TranspileError;
 
 /// Output-style knobs for [`transpile_with`].
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Options {
     /// Emit ASCII aliases (`->`, `disp`, `<>`, `<=`, `>=`, `*`, `/`, `pi`)
     /// instead of the calculator's unicode glyphs.
@@ -58,6 +62,32 @@ pub struct Options {
     /// (the transpiler's equivalent of the CLI's `--mode` flag). `None` means
     /// "use the header, or [`Mode::Comp`] when there is no header either".
     pub mode: Option<Mode>,
+    /// Run the optional size optimisations: [`simplify`] (algebraic identities)
+    /// and [`propagate`] (constant propagation, constant `if`/`while`, and
+    /// removal of stores nothing reads). **On by default**, because the machine
+    /// has only 680 bytes of program storage shared by all four program areas
+    /// and a smaller program is always the goal.
+    ///
+    /// Setting this to `false` gives the *unoptimised* translation, which is
+    /// what the golden tests pin: a construct's own spelling (`A≠B`, an
+    /// `If`/`Else` chain, `A+1`) is what those tests exist to check, and
+    /// constant folding would replace it with a value and test nothing.
+    ///
+    /// Note that [`fold`] and [`unroll`] are **not** covered by this flag:
+    /// folding a `const`'s value is required for the emitter, and unrolling is
+    /// required for an array element to name a memory at all.
+    pub optimize: bool,
+}
+
+impl Default for Options {
+    fn default() -> Self {
+        Options {
+            ascii: false,
+            mode: None,
+            // Optimisation is on unless a caller asks for the raw translation.
+            optimize: true,
+        }
+    }
 }
 
 /// Transpile `.fxc` `source` into PRGM using the default (glyph) output.
@@ -159,7 +189,15 @@ fn transpile_expanded(
     // unroll the loops that need it, so the emitter sees plain literal array
     // indices.
     program = functions::expand(program, &text, &data)?;
+    // `fold` always runs: a `const` is inlined by the emitter and its value must
+    // be pre-calculated, and the optional passes below create new constant
+    // subexpressions that `unroll` needs as literal bounds.
     fold::fold_program(&mut program);
+    if opts.optimize {
+        simplify::simplify_program(&mut program);
+        propagate::propagate_program(&mut program);
+        fold::fold_program(&mut program);
+    }
     unroll::unroll_program(&mut program);
     validate::validate(&program, effective, &text)?;
     let body = emit::emit(&program, &text, opts, &data)?;
@@ -207,6 +245,9 @@ fn analyze_expanded(
     // Mirror the transpiler front end, so `fx50 regs` and `fx50 build` never
     // disagree about the memory plan.
     program = functions::expand(program, &text, &data)?;
+    fold::fold_program(&mut program);
+    simplify::simplify_program(&mut program);
+    propagate::propagate_program(&mut program);
     fold::fold_program(&mut program);
     unroll::unroll_program(&mut program);
     let allocator = alloc::Allocator::collect(&program, &text, &data)?;

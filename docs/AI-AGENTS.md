@@ -85,7 +85,10 @@ stmt       := 'let' NAME '=' expr ';'
             | 'mplus' | 'mminus' '(' expr ')' ';'  -- expr M+ / M-
             | 'clrmemory' | 'clrstat' | 'freqon' | 'freqoff' '(' ')' ';'
             | 'deg' | 'rad' | 'gra' | 'dec' | 'hex' | 'bin' | 'oct'
-            | 'to_cartesian' | 'to_polar' '(' ')' ';'
+            | 'to_cartesian' | 'to_polar' | 're_im' '(' ')' ';'
+            | 'reg_lin' | 'reg_log' | 'reg_exp' | 'reg_pwr' | 'reg_inv'
+            | 'reg_quad' | 'reg_abexp' '(' ')' ';'
+            | 'dms' '(' ')' ';'              -- the bare °′″ conversion key
             | 'fix' | 'sci' | 'norm' '(' INTEGER ')' ';'
             | 'dt' '(' expr (',' expr (',' expr)?)? ')' ';'  -- statistics data
             | expr '=>' stmt                 -- conditional jump (⇒)
@@ -345,6 +348,7 @@ the machine are statements ending in `;`.
 | `pol(x, y)` / `rec(x, y)` | `Pol(x,y)` / `Rec(x,y)` | COMP or CMPLX; write `X`/`Y` |
 | `arg(x)` / `conjg(x)` | `arg(x)` / `Conjg(x)` | CMPLX |
 | `polar(r, θ)` | `r∠θ` | CMPLX |
+| `dms(deg, min, sec)` | `deg°min′sec″` | sexagesimal literal; the three arguments must be literals |
 | `not(x)` / `neg(x)` | `Not(x)` / `Neg(x)` | BASE |
 | `inv(x)` / `sqr(x)` / `cube(x)` | `x⁻¹` / `x²` / `x³` | postfix keys |
 | `fact(x)` / `pct(x)` | `x!` / `x%` | postfix keys |
@@ -360,11 +364,20 @@ Statement keys (all end in `;`): `mplus(x);`/`mminus(x);` → `x M+`/`x M-`,
 → `FreqOn`/`FreqOff`, `dt(x[; y[; f]]);` → `x DT`/`x,y DT`/`x,y;f DT`,
 `deg();`/`rad();`/`gra();` → `Deg`/`Rad`/`Gra`, `fix(n);`/`sci(n);` → `Fix n`/`Sci n`
 (`n` 0–9), `norm(n);` → `Norm n` (1–2), `dec();`/`hex();`/`bin();`/`oct();` →
-`Dec`/`Hex`/`Bin`/`Oct`, `to_cartesian();`/`to_polar();` → `▶a+b𝑖`/`▶r∠θ`.
+`Dec`/`Hex`/`Bin`/`Oct`, `to_cartesian();`/`to_polar();` → `▶a+b𝑖`/`▶r∠θ`,
+`re_im();` → `Re⇔Im`, `reg_lin();`…`reg_abexp();` → `Lin`…`AB-Exp`, and
+`dms();` → `°′″` (the bare decimal ⇄ sexagesimal conversion key).
 
 Statistical variables use the `stat.` namespace: `stat.sumx`, `stat.meanx`,
-`stat.sigmax`, `stat.regA`, … (glyph `Σx`, `x̄`, `σx`, `regA`). A bare
-`sumx` would be an ordinary variable, so always write the namespace.
+`stat.sigmax`, `stat.regA`, `stat.regC`, … (glyph `Σx`, `x̄`, `σx`, `regA`,
+`regC`). A bare `sumx` would be an ordinary variable, so always write the
+namespace.
+
+In `#mode REG`, `reg_lin()`/`reg_log()`/`reg_exp()`/`reg_pwr()`/`reg_inv()`/
+`reg_quad()`/`reg_abexp()` select one of the manual's seven regression models;
+`stat.rega`/`stat.regb` are the fitted coefficients, `stat.regc` is the
+quadratic `c`, and `stat.regr` is the correlation coefficient. `dms(deg, min,
+sec)` is a sexagesimal literal and `dms()` toggles the display.
 
 Constants: `pi` → `π` (or `pi` with `--ascii`), `e` → `e`, and the 40
 scientific constants under the `phys.` namespace (below).
@@ -473,7 +486,25 @@ predictable. It is a good habit for generated code.
 
 ### Making a program fit
 
-In this order of preference:
+**First, do not hand-optimise.** The transpiler already pre-calculates constant
+expressions, propagates a value that never changes into its uses, decides a
+constant `if`/`while`, and drops stores nothing reads. Write the program clearly
+and let it do that — `2 * 3 + 4` becomes `10`, and `let n = 3; for (…; i < n; …)`
+becomes `To 3` without help.
+
+Measure rather than guess. `fx50 size program.fxc` reports the keys a program
+costs out of the **680-byte store shared by all four program areas**, and prints
+what the optimiser saved so the number is meaningful:
+
+```console
+$ fx50 size program.fxc
+Program size for program.fxc
+  22 key(s) in 6 statement(s), largest statement 8 keys
+  fits: 22 of 680 bytes used, 658 left
+  optimiser: nothing to remove (22 keys either way)
+```
+
+When you do need to shrink a program, in this order of preference:
 
 1. **Use `const` for fixed values.** A `const` is inlined where it is used and
    consumes no memory:
@@ -601,10 +632,10 @@ with a **header directive**:
 | Name | Aliases | What it means for `.fxc` |
 | --- | --- | --- |
 | `COMP` | — | default; general real arithmetic |
-| `CMPLX` | `CPLX`, `COMPLEX` | unlocks `i()`, `arg`, `conjg`, `polar`, `to_cartesian`/`to_polar` |
+| `CMPLX` | `CPLX`, `COMPLEX` | unlocks `i()`, `arg`, `conjg`, `polar`, `to_cartesian`/`to_polar`, `re_im` |
 | `BASE` | `BASEN`, `BASE-N` | integer arithmetic; bitwise words, base literals, `dec`/`hex`/`bin`/`oct`, `not`/`neg`; **rejects every float built-in and `pi`/`e`/`phys.*`** |
 | `SD` | `STAT`, `STATS`, `STATISTICS` | unlocks `stat.*`, `dt`, `clrstat`, `freqon`/`freqoff` |
-| `REG` | `REGRESSION` | everything SD has, plus the `y`/regression stats (`stat.sumy`, `stat.regA`, …) |
+| `REG` | `REGRESSION` | everything SD has, plus the `y`/regression stats (`stat.sumy`, `stat.regA`, …) and the regression model keys (`reg_lin`…`reg_abexp`) |
 
 Rules:
 
@@ -895,8 +926,8 @@ hand when the values are already available as JSON.
       (`free v;`), never element by element.
 - [ ] Only built-ins from the table in §4 are called, with the right arity
       (`log` takes 1 or 2 arguments; `root`, `pol`, `rec`, `frac`, `npr`, `ncr`,
-      `polar` take 2; `ran`, `i`, `ans`, `mvalue` take 0; everything else
-      takes 1).
+      `polar` take 2 and `dms` takes 3; `ran`, `i`, `ans`, `mvalue` take 0;
+      everything else takes 1).
 - [ ] `goto`/`label` use a single digit `0`–`9`. A `=>` guards one statement
       only; use `if` for more.
 - [ ] Loop bodies that need more than one statement use `{ }` — braces are
@@ -905,9 +936,10 @@ hand when the values are already available as JSON.
       loop.
 - [ ] In `#mode BASE`, no float built-ins, no `pi`, no `e`, no `phys.`
       constant; base literals (`0x1F`) and the bitwise words are welcome.
-- [ ] Mode-specific keys match the mode: complex keys need CMPLX, `stat.*` and
-      `dt` need SD/REG (`stat.sumy`… need REG), base keys need BASE, setup needs
-      a non-BASE mode, `pol`/`rec` need COMP or CMPLX.
+- [ ] Mode-specific keys match the mode: complex keys (`i()`, `arg`, `conjg`,
+      `polar`, `to_cartesian`, `re_im`) need CMPLX, `stat.*` and `dt` need SD/REG
+      (`stat.sumy`… and the `reg_*` model keys need REG), base keys need BASE,
+      setup and `dms` need a non-BASE mode, `pol`/`rec` need COMP or CMPLX.
 - [ ] Scientific constants are written `phys.<name>` and statistical variables
       `stat.<name>`, always with the namespace — never as a bare name, which
       would become a variable.
@@ -916,12 +948,16 @@ hand when the values are already available as JSON.
 - [ ] If you can run commands, a `#tests` table (or a `.tests.json` suite)
       covers the happy path **and** at least one error case, and `fx50 test`
       reports `0 failed`.
+- [ ] No hand-optimising was needed: constant expressions, constant conditions
+      and unused stores are the transpiler's job, and `fx50 size` was used to
+      check the 680-byte budget rather than estimating it.
 
 If you can, verify with the compiler before declaring success:
 
 ```bash
 fx50 build your.fxc >/dev/null && echo "transpiles"
 fx50 regs  your.fxc            # check the seven-memory budget
+fx50 size  your.fxc            # check the 680-byte budget
 ```
 
 and, where inputs are known, execute it:

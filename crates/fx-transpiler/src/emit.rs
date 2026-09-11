@@ -611,6 +611,32 @@ impl Emitter<'_> {
                 let radicand = self.expr(&args[1], 0)?;
                 Ok((format!("{index}{spelling}({radicand})"), prec::ATOM))
             }
+            // `dms(deg, min, sec)` is written as a PRGM sexagesimal literal,
+            // `d°m′s″`.  The components must be literals: the machine's `°′″`
+            // key only accepts digits, so a run-time expression cannot be
+            // expressed at all.
+            "dms" => {
+                let mut components = Vec::with_capacity(args.len());
+                for arg in args {
+                    match arg {
+                        Expr::Number(value) => components.push(format_number(*value)),
+                        _ => {
+                            return Err(TranspileError::at(
+                                self.source,
+                                "`dms` needs three numeric literals, as in `dms(2, 15, 18)`",
+                                0,
+                            ));
+                        }
+                    }
+                }
+                Ok((
+                    format!(
+                        "{}\u{00b0}{}\u{2032}{}\u{2033}",
+                        components[0], components[1], components[2]
+                    ),
+                    prec::ATOM,
+                ))
+            }
             // The remaining specials are nullary and need no arguments.
             _ => Ok((spelling.to_string(), prec::ATOM)),
         }

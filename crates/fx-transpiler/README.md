@@ -14,6 +14,7 @@ fx50 build program.fxc          # print PRGM (calculator glyphs) to stdout
 fx50 build --ascii program.fxc  # print ASCII aliases instead
 fx50 run   program.fxc          # transpile, then execute (? reads from stdin)
 fx50 regs  program.fxc          # show how the seven memories are used
+fx50 size  program.fxc          # show how many of the 680 program bytes it needs
 fx50 test  program.fxc          # run the cases the program carries
 ```
 
@@ -77,6 +78,49 @@ Bdisp
 `fx50 regs` runs the same front end without emitting, so the two never disagree
 about the memory plan.
 
+## Optimisation
+
+The emitted program is optimised by default. The machine has **680 bytes of
+program storage shared by all four program areas** and stores one byte per key,
+so a smaller program is always the goal:
+
+| Pass | Does | Optional? |
+| --- | --- | --- |
+| `fold` | pre-calculates constant expressions (`2*3+4` → `10`) | no |
+| `simplify` | drops operators that cannot change a result (`a*1`, `a+0`, `-(-a)`) | yes |
+| `propagate` | replaces a read of a never-assigned constant with its value; decides a constant `if`/`while`; drops stores nothing reads | yes |
+| `unroll` | expands a constant `for` loop that indexes an array, so the index is a literal | no |
+
+`fold` and `unroll` are not optional: a `const`'s value has to be folded for the
+emitter, and an array element can only name a memory if its index is known while
+transpiling. Set `Options { optimize: false, .. }` (CLI: `--no-optimize`) to get
+the raw translation, in which each construct appears as written:
+
+```console
+$ fx50 build --no-optimize c.fxc
+If 1
+Then
+9◢
+Else
+8◢
+IfEnd
+$ fx50 build c.fxc
+9◢
+```
+
+Both forms compute the same thing; `tests/optimize.rs` checks that, and
+`tests/simplify.rs` / `tests/propagate.rs` test the passes themselves.
+
+`fx50 size` measures the result, so the saving is a number rather than a claim:
+
+```console
+$ fx50 size factorial.fxc
+Program size for factorial.fxc
+  22 key(s) in 6 statement(s), largest statement 8 keys
+  fits: 22 of 680 bytes used, 658 left
+  optimiser: nothing to remove (22 keys either way)
+```
+
 ## Library
 
 ```rust
@@ -103,6 +147,11 @@ The entry points differ only in where `#include` and `#data` paths are resolved:
 | `transpile(source)` / `transpile_with(source, opts)` | the current directory |
 | `transpile_with_base(source, opts, dir)` | `dir` |
 | `transpile_file(path, opts)` | the file's own directory |
+
+`Options` has three fields: `ascii` (glyph vs. ASCII spellings), `mode` (override
+the `#mode` header) and `optimize` (the optional passes above, **on** by
+default). `size::measure(prgm)` returns the key count `fx50 size` prints,
+including `Size::CAPACITY` (680) and `Size::fits()`.
 
 ```rust
 # use std::path::Path;

@@ -98,6 +98,9 @@ pub const BUILTINS: &[Builtin] = &[
     builtin!("conjg", 1, 1, "Conjg", "Conjg", Call),
     // `polar(r, theta)` is the `r∠θ` literal.
     builtin!("polar", 2, 2, "\u{2220}", "\u{2220}", Infix),
+    // `dms(deg, min, sec)` is a sexagesimal literal.  It is emitted as the
+    // machine's `d°m′s″` form rather than a call, so it is a special form.
+    builtin!("dms", 3, 3, "\u{00b0}\u{2032}\u{2033}", "dms", Special),
     // -- base-n -------------------------------------------------------------
     builtin!("not", 1, 1, "Not", "Not", Call),
     builtin!("neg", 1, 1, "Neg", "Neg", Call),

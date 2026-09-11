@@ -466,7 +466,9 @@ fn an_array_with_jumps_still_needs_unsafe_free() {
     let error = err("let v[2] = {1,2};\nfree v;\ngoto 1;\nlabel 1;\n");
     assert!(error.message.contains("unsafe_free"), "{}", error.message);
 
-    let prgm = out("let v[2] = {1,2};\nunsafe_free v;\nlet w[2] = {3,4};\ngoto 1;\nlabel 1;\n");
+    let prgm = out(
+        "let v[2] = {1,2};\nunsafe_free v;\nlet w[2] = {3,4};\nprint(w[0]);\ngoto 1;\nlabel 1;\n",
+    );
     assert!(prgm.contains("3→A"), "{prgm}");
 }
 

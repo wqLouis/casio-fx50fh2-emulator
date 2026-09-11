@@ -53,13 +53,14 @@ pub enum StatVar {
     MaxY,
     RegA,
     RegB,
+    RegC,
     RegR,
 }
 
 impl StatVar {
     /// Every statistical variable, in documentation order. Used by the
     /// language server to offer completions without a second list.
-    pub const ALL: [StatVar; 19] = [
+    pub const ALL: [StatVar; 20] = [
         StatVar::N,
         StatVar::SumX,
         StatVar::SumX2,
@@ -78,6 +79,7 @@ impl StatVar {
         StatVar::MaxY,
         StatVar::RegA,
         StatVar::RegB,
+        StatVar::RegC,
         StatVar::RegR,
     ];
 
@@ -103,6 +105,7 @@ impl StatVar {
             MaxY => "maxY",
             RegA => "regA",
             RegB => "regB",
+            RegC => "regC",
             RegR => "regR",
         }
     }
@@ -129,6 +132,7 @@ impl StatVar {
             MaxY => "maxy",
             RegA => "rega",
             RegB => "regb",
+            RegC => "regc",
             RegR => "regr",
         }
     }
@@ -155,9 +159,98 @@ impl StatVar {
             "maxy" | "maxY" => MaxY,
             "rega" | "regA" => RegA,
             "regb" | "regB" => RegB,
+            "regc" | "regC" => RegC,
             "regr" | "regR" => RegR,
             _ => return None,
         })
+    }
+}
+
+/// The seven regression models the fx-50FH II offers in REG mode.
+///
+/// The transpiler keeps its own copy so it stays free of the interpreter
+/// dependency; it mirrors `casio_fx50fh2::stats::RegType`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum RegType {
+    /// `y = a + b·x`
+    Lin,
+    /// `y = a + b·ln x`
+    Log,
+    /// `y = a·e^(b·x)`
+    Exp,
+    /// `y = a·x^b`
+    Pwr,
+    /// `y = a + b/x`
+    Inv,
+    /// `y = a + b·x + c·x²`
+    Quad,
+    /// `y = a·b^x`
+    ABExp,
+}
+
+impl RegType {
+    /// Every model, in the machine's menu order.
+    pub const ALL: [RegType; 7] = [
+        RegType::Lin,
+        RegType::Log,
+        RegType::Exp,
+        RegType::Pwr,
+        RegType::Inv,
+        RegType::Quad,
+        RegType::ABExp,
+    ];
+
+    /// The menu label (and the PRGM token).
+    pub fn glyph(self) -> &'static str {
+        use RegType::*;
+        match self {
+            Lin => "Lin",
+            Log => "Log",
+            Exp => "Exp",
+            Pwr => "Pwr",
+            Inv => "Inv",
+            Quad => "Quad",
+            ABExp => "AB-Exp",
+        }
+    }
+
+    /// The ASCII spelling.  The regression menu is already ASCII.
+    pub fn ascii(self) -> &'static str {
+        self.glyph()
+    }
+
+    /// Parse a regression-menu label.
+    pub fn parse(name: &str) -> Option<RegType> {
+        use RegType::*;
+        Some(match name {
+            "Lin" => Lin,
+            "Log" => Log,
+            "Exp" => Exp,
+            "Pwr" => Pwr,
+            "Inv" => Inv,
+            "Quad" => Quad,
+            "AB-Exp" | "ABExp" | "abexp" => ABExp,
+            _ => return None,
+        })
+    }
+
+    /// The `.fxc` statement that selects this model.
+    pub fn call_name(self) -> &'static str {
+        use RegType::*;
+        match self {
+            Lin => "reg_lin",
+            Log => "reg_log",
+            Exp => "reg_exp",
+            Pwr => "reg_pwr",
+            Inv => "reg_inv",
+            Quad => "reg_quad",
+            ABExp => "reg_abexp",
+        }
+    }
+
+    /// Whether this model has the third coefficient `c`.
+    pub fn has_c(self) -> bool {
+        matches!(self, RegType::Quad)
     }
 }
 
@@ -219,6 +312,13 @@ pub enum Setup {
     Cartesian,
     /// `▶r∠θ`
     Polar,
+    /// `Re⇔Im`
+    ReIm,
+    /// A regression model in REG mode (`Lin`, `Log`, …).
+    Reg(RegType),
+    /// The `°′″` key: toggle a displayed value between decimal and
+    /// sexagesimal.
+    Sexagesimal,
 }
 
 impl Setup {
@@ -237,6 +337,9 @@ impl Setup {
             Setup::Oct => "Oct".into(),
             Setup::Cartesian => "\u{25b6}a+b\u{1d456}".into(),
             Setup::Polar => "\u{25b6}r\u{2220}\u{03b8}".into(),
+            Setup::ReIm => "Re\u{21d4}Im".into(),
+            Setup::Reg(reg) => reg.glyph().into(),
+            Setup::Sexagesimal => "\u{00b0}\u{2032}\u{2033}".into(),
         }
     }
 
@@ -245,6 +348,9 @@ impl Setup {
         match self {
             Setup::Cartesian => ">a+bi".into(),
             Setup::Polar => ">rangle".into(),
+            Setup::ReIm => "re_im".into(),
+            Setup::Reg(reg) => reg.ascii().into(),
+            Setup::Sexagesimal => "dms".into(),
             other => other.glyph(),
         }
     }
@@ -272,6 +378,9 @@ impl Setup {
             Setup::Oct => "oct",
             Setup::Cartesian => "to_cartesian",
             Setup::Polar => "to_polar",
+            Setup::ReIm => "re_im",
+            Setup::Reg(reg) => reg.call_name(),
+            Setup::Sexagesimal => "dms",
         }
     }
 }

@@ -214,6 +214,18 @@ impl Parser {
                     ComplexFormat::Polar => Setup::ComplexPolar,
                 }));
             }
+            TokenKind::ReIm => {
+                self.advance();
+                return Ok(Stmt::Setup(Setup::ReIm));
+            }
+            TokenKind::Regression(reg) => {
+                self.advance();
+                return Ok(Stmt::Setup(Setup::Reg(reg)));
+            }
+            TokenKind::DmsToggle => {
+                self.advance();
+                return Ok(Stmt::Setup(Setup::Sexagesimal));
+            }
             TokenKind::Deg => {
                 self.advance();
                 return Ok(Stmt::Setup(Setup::Deg));
@@ -606,6 +618,11 @@ impl Parser {
                     Some(base) => Ok(Expr::BaseLiteral { value, base }),
                     None => Ok(Expr::Number(value)),
                 }
+            }
+            TokenKind::Sexagesimal(value) => {
+                let pos = self.peek().pos;
+                self.advance();
+                Ok(Expr::Sexagesimal(value, pos))
             }
             TokenKind::Var(v) => {
                 self.advance();

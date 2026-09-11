@@ -148,6 +148,21 @@ impl Checker<'_> {
                 "a complex format command",
                 Some(pos),
             ),
+            Setup::ReIm => {
+                self.require(self.mode.allows_complex(), "CMPLX", "`re_im()`", Some(pos))
+            }
+            Setup::Reg(reg) => self.require(
+                self.mode.allows_regression(),
+                "REG",
+                &format!("`{}()`", reg.call_name()),
+                Some(pos),
+            ),
+            Setup::Sexagesimal => self.require(
+                self.mode.allows_float_math(),
+                "COMP, CMPLX, SD or REG",
+                "`dms()`",
+                Some(pos),
+            ),
         }
     }
 
@@ -289,6 +304,7 @@ fn is_regression_var(var: StatVar) -> bool {
             | StatVar::MaxY
             | StatVar::RegA
             | StatVar::RegB
+            | StatVar::RegC
             | StatVar::RegR
     )
 }

@@ -11,22 +11,25 @@ use fx_transpiler::{
     Options, analyze, transpile, transpile_file, transpile_with, transpile_with_base,
 };
 
+/// The *unoptimised* translation, so each construct appears as written. The
+/// optimiser is covered by `tests/simplify.rs` and `tests/propagate.rs`.
+const RAW: Options = Options {
+    ascii: false,
+    mode: None,
+    optimize: false,
+};
+
 #[track_caller]
 fn glyph(source: &str, expected: &str) {
-    let got = transpile(source).unwrap_or_else(|e| panic!("transpile failed: {e}\n{source}"));
+    let got =
+        transpile_with(source, RAW).unwrap_or_else(|e| panic!("transpile failed: {e}\n{source}"));
     assert_eq!(got, expected, "glyph output for:\n{source}");
 }
 
 #[track_caller]
 fn ascii(source: &str, expected: &str) {
-    let got = transpile_with(
-        source,
-        Options {
-            ascii: true,
-            ..Default::default()
-        },
-    )
-    .unwrap_or_else(|e| panic!("transpile failed: {e}\n{source}"));
+    let got = transpile_with(source, Options { ascii: true, ..RAW })
+        .unwrap_or_else(|e| panic!("transpile failed: {e}\n{source}"));
     assert_eq!(got, expected, "ASCII output for:\n{source}");
 }
 
@@ -156,8 +159,11 @@ fn a_local_does_not_clobber_a_caller_variable_of_the_same_name() {
 #[test]
 fn two_calls_have_independent_locals() {
     // Both expansions declare a local `s`; the emitter must not merge them.
-    let prgm = transpile(
+    // Unoptimised, so the copy from the parameter (`A→B`) is visible; the
+    // optimiser would fold the literal argument through it.
+    let prgm = transpile_with(
         "fn add(a, b) { let s = a + b; return s; }\nfn main() { print(add(1, 2)); print(add(3, 4)); }",
+        RAW,
     )
     .unwrap();
     assert_eq!(prgm, "3→A\nA→B\nB◢\n7→C\nC→D\nD◢\n");

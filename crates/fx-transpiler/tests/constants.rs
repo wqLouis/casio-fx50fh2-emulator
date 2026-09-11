@@ -5,13 +5,22 @@
 //! the `execute` feature (which `testing`, on by default, implies).
 
 use fx_transpiler::error::TranspileError;
-use fx_transpiler::{Options, transpile as raw_transpile, transpile_with as raw_transpile_with};
+use fx_transpiler::{Options, transpile_with as raw_transpile_with};
 
 mod common;
 
+/// The *unoptimised* translation, so each construct appears as written (the
+/// optimiser would fold these constants into the call). The optimiser is
+/// covered by `tests/simplify.rs` and `tests/propagate.rs`.
+const RAW: Options = Options {
+    ascii: false,
+    mode: None,
+    optimize: false,
+};
+
 /// Transpile, wrapping the classic top-level statements in `fn main()`.
 fn transpile(source: &str) -> Result<String, TranspileError> {
-    raw_transpile(&common::wrap(source))
+    raw_transpile_with(&common::wrap(source), RAW)
 }
 
 /// Transpile with options, wrapping the classic top-level statements in
@@ -23,14 +32,8 @@ fn transpile_with(source: &str, options: Options) -> Result<String, TranspileErr
 /// Transpile with the ASCII output style.
 #[track_caller]
 fn ascii(source: &str) -> String {
-    transpile_with(
-        source,
-        Options {
-            ascii: true,
-            ..Default::default()
-        },
-    )
-    .unwrap_or_else(|e| panic!("transpile failed: {e}\n{source}"))
+    transpile_with(source, Options { ascii: true, ..RAW })
+        .unwrap_or_else(|e| panic!("transpile failed: {e}\n{source}"))
 }
 
 /// The glyph-mode PRGM for `print(phys.<spelling>)`.

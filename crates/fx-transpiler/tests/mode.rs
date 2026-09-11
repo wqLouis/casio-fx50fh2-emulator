@@ -1,15 +1,23 @@
 //! Tests for the `#mode` header and [`fx_transpiler::Options::mode`] override.
 
 use fx_transpiler::error::TranspileError;
-use fx_transpiler::{
-    Mode, Options, transpile as raw_transpile, transpile_with as raw_transpile_with,
-};
+use fx_transpiler::{Mode, Options, transpile_with as raw_transpile_with};
 
 mod common;
 
+/// The *unoptimised* translation, so each construct appears as written. These
+/// tests are about **mode gating** — which keys a mode permits — and the
+/// optimiser would fold an argument away before the mode check saw it. The
+/// optimiser is covered by `tests/simplify.rs` and `tests/propagate.rs`.
+const RAW: Options = Options {
+    ascii: false,
+    mode: None,
+    optimize: false,
+};
+
 /// Transpile, wrapping the classic top-level statements in `fn main()`.
 fn transpile(source: &str) -> Result<String, TranspileError> {
-    raw_transpile(&common::wrap(source))
+    raw_transpile_with(&common::wrap(source), RAW)
 }
 
 /// Transpile with options, wrapping the classic top-level statements in
@@ -32,6 +40,7 @@ fn ok_mode(source: &str, mode: Mode) -> String {
         Options {
             ascii: false,
             mode: Some(mode),
+            ..RAW
         },
     )
     .unwrap_or_else(|e| panic!("transpile failed: {e}\n{source}"))
@@ -298,6 +307,7 @@ fn override_to_base_also_validates() {
         Options {
             ascii: false,
             mode: Some(Mode::Base),
+            ..RAW
         },
     )
     .unwrap_err();

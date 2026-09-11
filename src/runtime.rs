@@ -16,7 +16,7 @@ use crate::mode::Mode;
 use crate::precision::normalize;
 use crate::stats::{StatVar, Stats};
 use crate::token::{BinOp, ConstName, FuncName, VarName};
-use crate::value::{ComplexFormat, Value, format_cartesian, format_polar};
+use crate::value::{ComplexFormat, ComplexPart, Value, format_cartesian, format_polar};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AngleMode {
@@ -48,6 +48,8 @@ pub struct Environment {
     pub base: Option<Base>,
     /// How complex results are rendered.
     pub complex_format: ComplexFormat,
+    /// Which part of a complex result the display shows (`Re⇔Im`).
+    pub complex_part: ComplexPart,
     /// The operating mode the program declared with `#mode` (default COMP).
     pub mode: Mode,
 }
@@ -62,6 +64,7 @@ impl Default for Environment {
             display: DisplayMode::Norm(1),
             base: None,
             complex_format: ComplexFormat::Cartesian,
+            complex_part: ComplexPart::Both,
             mode: Mode::default(),
         }
     }
@@ -126,8 +129,15 @@ impl Environment {
     pub fn format_value(&self, value: Value) -> String {
         match value {
             Value::Real(x) => self.format(x),
+            Value::Sexagesimal(x) => crate::value::format_sexagesimal(x),
             Value::Complex(re, im) => match self.complex_format {
-                ComplexFormat::Cartesian => format_cartesian(re, im, &|x| self.format(x)),
+                ComplexFormat::Cartesian => match self.complex_part {
+                    ComplexPart::Both => format_cartesian(re, im, &|x| self.format(x)),
+                    ComplexPart::Real => self.format(re),
+                    ComplexPart::Imaginary => {
+                        format!("{}{}", self.format(im), crate::value::IMAGINARY_UNIT)
+                    }
+                },
                 ComplexFormat::Polar => {
                     let r = (re * re + im * im).sqrt();
                     let theta = from_rad(im.atan2(re), self.angle);
@@ -582,6 +592,24 @@ impl<H: Host> Interpreter<H> {
             Setup::Oct => self.env.base = Some(Base::Oct),
             Setup::ComplexCartesian => self.env.complex_format = ComplexFormat::Cartesian,
             Setup::ComplexPolar => self.env.complex_format = ComplexFormat::Polar,
+            // `Re⇔Im`: the first press shows the imaginary part (the `𝑖`
+            // suffix the manual mentions), the next the real part, and so on.
+            Setup::ReIm => {
+                self.env.complex_part = if self.env.complex_part == ComplexPart::Imaginary {
+                    ComplexPart::Real
+                } else {
+                    ComplexPart::Imaginary
+                };
+            }
+            // Choosing a regression model is a REG-mode setting, like the
+            // number base in BASE mode.
+            Setup::Reg(reg) => self.stats.reg_type = reg,
+            // `°′″`: convert the displayed value between decimal and
+            // sexagesimal.
+            Setup::Sexagesimal => {
+                self.env.ans = self.env.ans.toggle_sexagesimal();
+                self.env.hidden = self.env.hidden.toggle_sexagesimal();
+            }
         }
     }
 
@@ -685,7 +713,7 @@ impl<H: Host> Interpreter<H> {
 
     fn truthy(&self, value: Value) -> Result<bool, CalcError> {
         match value {
-            Value::Real(x) => Ok(x != 0.0),
+            Value::Real(x) | Value::Sexagesimal(x) => Ok(x != 0.0),
             Value::Complex(..) => Err(CalcError::Math(
                 "a complex condition cannot be tested".to_string(),
             )),
@@ -709,6 +737,7 @@ impl<H: Host> Interpreter<H> {
     pub fn eval(&mut self, expr: &Expr) -> Result<Value, CalcError> {
         let value = match expr {
             Expr::Number(v) => Value::Real(*v),
+            Expr::Sexagesimal(value, _) => Value::Sexagesimal(*value),
             Expr::BaseLiteral { value, .. } => Value::Real(*value),
             Expr::Var(v) => self.env.get_value(*v),
             Expr::Const(c) => match c {
@@ -864,8 +893,8 @@ impl<H: Host> Interpreter<H> {
                 let k = require_real(r, "nCr")?;
                 Value::Real(combination(n, k)?)
             }
-            BinOp::Eq => Value::Real(bool_num(l == r)),
-            BinOp::Ne => Value::Real(bool_num(l != r)),
+            BinOp::Eq => Value::Real(bool_num(l.equals(r))),
+            BinOp::Ne => Value::Real(bool_num(!l.equals(r))),
             BinOp::Gt | BinOp::Lt | BinOp::Ge | BinOp::Le => {
                 let a = require_real(l, "comparison")?;
                 let b = require_real(r, "comparison")?;
@@ -1050,7 +1079,12 @@ impl<H: Host> Interpreter<H> {
         );
         let needs_sample = matches!(
             var,
-            StatVar::Sx | StatVar::Sy | StatVar::RegA | StatVar::RegB | StatVar::RegR
+            StatVar::Sx
+                | StatVar::Sy
+                | StatVar::RegA
+                | StatVar::RegB
+                | StatVar::RegC
+                | StatVar::RegR
         );
         if needs_data && n == 0.0 {
             return Err(CalcError::Math("no statistical data".to_string()));
@@ -1058,13 +1092,17 @@ impl<H: Host> Interpreter<H> {
         if needs_sample && n < 2.0 {
             return Err(CalcError::Math("not enough statistical data".to_string()));
         }
-        Ok(Value::Real(normalize(self.stats.value(var))))
+        let value = self.stats.value(var);
+        if !value.is_finite() {
+            return Err(CalcError::Math("no regression for this data".to_string()));
+        }
+        Ok(Value::Real(normalize(value)))
     }
 }
 
 fn require_real(value: Value, what: &str) -> Result<f64, CalcError> {
     match value {
-        Value::Real(x) => Ok(x),
+        Value::Real(x) | Value::Sexagesimal(x) => Ok(x),
         Value::Complex(..) => Err(CalcError::Math(format!("`{what}` needs a real argument"))),
     }
 }

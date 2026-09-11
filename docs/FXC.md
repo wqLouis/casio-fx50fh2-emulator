@@ -51,7 +51,10 @@ stmt       := 'let' NAME '=' expr ';'      -- declaration
             | 'mminus' '(' expr ')' ';'     -- expr M-
             | 'clrmemory' | 'clrstat' | 'freqon' | 'freqoff' '(' ')' ';'
             | 'deg' | 'rad' | 'gra' | 'dec' | 'hex' | 'bin' | 'oct'
-            | 'to_cartesian' | 'to_polar' '(' ')' ';'
+            | 'to_cartesian' | 'to_polar' | 're_im' '(' ')' ';'
+            | 'reg_lin' | 'reg_log' | 'reg_exp' | 'reg_pwr' | 'reg_inv'
+            | 'reg_quad' | 'reg_abexp' '(' ')' ';'
+            | 'dms' '(' ')' ';'               -- the bare °′″ conversion key
             | 'fix' | 'sci' | 'norm' '(' INTEGER ')' ';'
             | 'dt' '(' expr (',' expr (',' expr)?)? ')' ';'   -- x DT / x,y DT / x,y;f DT
             | expr '=>' stmt                -- conditional jump (⇒)
@@ -74,7 +77,7 @@ primary    := NUMBER | BASENUMBER | 'pi' | 'e' | 'input()' | NAME | dataref
             | NAME '(' [expr (',' expr)*] ')' | 'phys' '.' CONSTNAME
             | 'stat' '.' STATNAME | '(' expr ')'
 BASENUMBER := '0x' HEXDIGITS | '0b' BINARY | '0o' OCTAL   -- BASE mode
-STATNAME   := 'n' | 'sumx' | 'sumx2' | … | 'rega' | 'regb' | 'regr'
+STATNAME   := 'n' | 'sumx' | 'sumx2' | … | 'rega' | 'regb' | 'regc' | 'regr'
 dataref    := NAME accessor+
 accessor   := '.' NAME | '[' expr ']'
 ```
@@ -328,6 +331,7 @@ native keystroke back out, so a `.fxc` program can reach all of PRGM.
 | `pol(x, y)` / `rec(x, y)` | `Pol(x,y)` / `Rec(x,y)` | COMP or CMPLX; write into `X`/`Y` |
 | `arg(x)` / `conjg(x)` | `arg(x)` / `Conjg(x)` | CMPLX |
 | `polar(r, θ)` | `r∠θ` | CMPLX |
+| `dms(deg, min, sec)` | `deg°min′sec″` | sexagesimal literal; the three arguments must be literals |
 | `not(x)` / `neg(x)` | `Not(x)` / `Neg(x)` | BASE |
 | `ran()` | `Ran#` | pseudo-random, `[0, 1)`; deterministic from a fixed seed |
 | `i()` | `i` | CMPLX; bare `i` is still an ordinary variable |
@@ -353,6 +357,9 @@ looser).
 | `norm(n);` | `Norm n` (`n` = 1 or 2) |
 | `dec();` / `hex();` / `bin();` / `oct();` | `Dec` / `Hex` / `Bin` / `Oct` |
 | `to_cartesian();` / `to_polar();` | `▶a+b𝑖` / `▶r∠θ` |
+| `re_im();` | `Re⇔Im` |
+| `reg_lin();` … `reg_abexp();` | `Lin` … `AB-Exp` |
+| `dms();` | `°′″` |
 
 The digit of `fix`/`sci`/`norm` must be a literal; the mode each key needs is in
 the [Modes](#modes) table.
@@ -363,7 +370,7 @@ Statistical values are reached through the `stat.` namespace, mirroring `phys.`:
 `stat.n`, `stat.sumx`, `stat.sumx2`, `stat.sumy`, `stat.sumy2`, `stat.sumxy`,
 `stat.meanx`, `stat.meany`, `stat.sigmax`, `stat.sigmay`, `stat.sx`, `stat.sy`,
 `stat.minx`, `stat.maxx`, `stat.miny`, `stat.maxy`, `stat.rega`, `stat.regb`,
-`stat.regr`.
+`stat.regc`, `stat.regr`.
 
 ```c
 #mode REG
@@ -376,6 +383,28 @@ fn main() {
 Glyph output uses the display spelling (`Σx`, `x̄`, `σx`, `regA`); `--ascii` uses
 the ASCII alias (`sumx`, `meanx`, `sigmax`, `rega`). A bad name is reported by
 name rather than becoming a variable.
+
+In `#mode REG` the regression model is selected with `reg_lin()`, `reg_log()`,
+`reg_exp()`, `reg_pwr()`, `reg_inv()`, `reg_quad()` or `reg_abexp()`. The
+fitted coefficients are `stat.rega`/`stat.regb`, plus `stat.regc` for
+`reg_quad()`, and `stat.regr` is the correlation coefficient (the multiple
+correlation for `reg_quad()`).
+
+### Sexagesimal values
+
+`dms(deg, min, sec)` writes a sexagesimal literal, `deg°min′sec″`. The three
+arguments must be literals, because the machine's `°′″` key only accepts
+digits:
+
+```c
+fn main() {
+    print(dms(2, 15, 18));   // 2°15′18″◢
+}
+```
+
+With no arguments, `dms()` is the bare conversion key: it toggles the displayed
+value between decimal and sexagesimal. `dms()` belongs to every mode except
+BASE.
 
 ### The fixed `M` memory
 
@@ -438,6 +467,9 @@ calculator.
 | `i()`, `arg`, `conjg`, `polar`, `to_cartesian`/`to_polar` | CMPLX |
 | `stat.*`, `dt`, `clrstat`, `freqon`/`freqoff` | SD or REG |
 | `stat.sumy` … `stat.regr` (the `y` and regression values) | REG |
+| `reg_lin` … `reg_abexp` (the regression model) | REG |
+| `re_im()` | CMPLX |
+| `dms(deg, min, sec)`, `dms()` | anything except BASE |
 | `pol`/`rec` specifically | COMP or CMPLX |
 
 ```c
@@ -729,6 +761,9 @@ transpile errors rather than surprises on the calculator:
 | `inv(x)` / `sqr(x)` / `fact(x)`    | `x⁻¹` / `x²` / `x!` (ASCII: `x^-1` / `x^2`)            |
 | `frac(a, b)` / `ncr(n, r)`         | `a┘b` / `nnCrr`                                        |
 | `stat.NAME`                        | the statistical value (`Σx`, `x̄`, …)                   |
+| `dms(deg, min, sec)`               | `deg°min′sec″`                                         |
+| `dms();` / `re_im();`              | `°′″` / `Re⇔Im`                                        |
+| `reg_quad();`                      | `Quad`                                                 |
 | `0x1F` / `0b1010` / `0o17`         | `1Fh` / `1010b` / `17o`                                |
 | `a and b`                          | `a and b` (BASE)                                       |
 | `deg();` / `dt(x, y);`             | `Deg` / `x,y DT`                                       |
@@ -781,6 +816,81 @@ program is not corrected. So `1 / 3` and `0.1 + 0.2` are left as written — the
 machine's `0.333333333333333` and `0.3` are not the values a naive fold would
 produce. Only arithmetic whose result the machine would leave unchanged is
 folded.
+
+## Optimisation
+
+The output is optimised by default, because the machine has only **680 bytes of
+program storage shared by all four program areas** and stores one byte per key.
+You do not have to hand-optimise constant expressions — write the program clearly
+and let the transpiler do it:
+
+```c
+let n = 3;
+for (let i = 0; i < n; i = i + 1) { print(i); }
+```
+
+```text
+For 0→A To 3 Step 1
+A◢
+Next
+```
+
+What the passes do:
+
+| Pass | Does | Example |
+| --- | --- | --- |
+| constant folding | pre-calculates arithmetic on numbers | `2 * 3 + 4` → `10` |
+| constant propagation | replaces a read of a value that never changes | `i < n` → `To 3` |
+| simplification | drops operators that cannot change a result | `a * 1` → `a`, `-(-a)` → `a` |
+| constant conditions | decides an `if`/`while` whose condition is a constant | `if (1) {…} else {…}` → the taken branch |
+| dead stores | removes a store to a name that is never read | `let unused = 1;` → nothing |
+
+Three things are deliberately **not** done, and the reasons matter:
+
+* **A symbolic value is never turned into a decimal.** `2 * pi` stays `2×π`: the
+  calculator keys `π` in as its own key, so the decimal would be both less
+  precise and *more* keys (ADR 0015).
+* **A name that is read anywhere is never assumed constant**, including only
+  inside a loop or a branch. When in doubt the transpiler keeps the variable.
+* **A store whose initialiser has an effect is never removed** — `input()` shows
+  a prompt, `ran()` advances the random sequence, and a call can raise an error.
+  Such a store survives even if nothing reads it.
+
+A store to a name that is genuinely never read *is* removed, since it cannot
+affect what the program displays. Four things still block that, and they are the
+subtle part:
+
+* a name that is **freed** (`free` is a claim about a lifetime, so removing the
+declaration would legalise a double free) or **declared more than once** (which
+is a re-declaration error);
+* an initialiser with an effect (see above);
+* a program that reads **`ans`** — evaluating any expression updates the hidden
+result memory `ans` reads, so no store is purely local;
+* a store in a position where the program could **end without a `◢` and display
+it** (`let a = 1;` on its own displays `1`).
+
+Memory is otherwise left alone: a memory's final value is observable, so a store
+is not deleted merely because the name is not used again in a straight line (see
+[ADR 0023](../docs/DECISIONS.md)).
+
+### Checking the size
+
+`fx50 size` reports what a program costs, so the budget is a measurement rather
+than a guess, and it always compares against the unoptimised translation:
+
+```console
+$ fx50 size examples/functions.fxc
+Program size for examples/functions.fxc
+  50 key(s) in 15 statement(s), largest statement 9 keys
+  fits: 50 of 680 bytes used, 630 left
+  optimiser: 12 key(s) saved (62 without it, 19% smaller)
+```
+
+To see the raw translation — each construct as written, which is useful for
+understanding what one construct compiles to on its own — pass `--no-optimize`.
+Note that folding and unrolling still apply, since a `const`'s value has to be
+folded for the emitter and an array index has to be literal for the element to
+name a memory at all.
 
 ## Compile-time data
 

@@ -51,7 +51,13 @@ source ──► lexer ──► parser ──► flat Vec<Stmt> ──► tree-
   marker statements matched up into jump tables before execution.
 * **`src/value.rs`** — `Value::{Real, Complex}` and complex arithmetic.
 * **`src/precision.rs`** — 15-significant-digit rounding and the machine's
-  autocorrection, applied after every arithmetic operation.
+  autocorrection, applied after every arithmetic operation. This is the
+  interpreter's hot path, so it formats into a fixed-size stack buffer and fuses
+  the two round-trips that `autocorrect(round15(x))` implies; the fused path is
+  provably exact for normal inputs and falls back to the literal two-step
+  computation near the subnormal range. A test compares both against the
+  original implementation bit-for-bit over ~880 000 values, and the change is
+  worth about **2.6×** on arithmetic-heavy programs.
 * **`src/stats.rs`** — the SD/REG data set and the S-SUM/S-VAR accessors.
 * **`src/bases.rs`** — `Dec`/`Hex`/`Bin`/`Oct` word sizes and formatting.
 * **`src/format.rs`** — approximates the two-line display (`Norm1`/`Norm2`,
@@ -62,23 +68,44 @@ The core crate is **std-only** by policy (see [DECISIONS.md](DECISIONS.md)).
 ## The `.fxc` front end
 
 ```text
-source ─► #include ─► #data/#tests ─► lexer ─► parser ─► functions ─► fold ─► unroll ─► validate ─► emit
-         include.rs   data.rs        lexer.rs  parser.rs functions.rs fold.rs unroll.rs validate.rs emit.rs
-                                                          └── alloc.rs (memories)
+source ─► #include ─► #data/#tests ─► lexer ─► parser ─► functions
+         include.rs   data.rs        lexer.rs  parser.rs functions.rs
+  ─► fold ─► simplify ─► propagate ─► fold ─► unroll ─► validate ─► emit
+     fold.rs simplify.rs propagate.rs fold.rs unroll.rs validate.rs emit.rs
+                                     └── alloc.rs (memories)
 ```
 
 Preprocessing is textual and happens before lexing: `#include` splices files,
 then `#data`/`#tests` extract JSON and blank the directive (keeping newlines, so
 diagnostics still point at the line the user wrote). `functions.rs` then
 resolves the `fn main()` entry point and inlines every user function call (see
-ADR 0022). Two byte-saving passes follow: `fold.rs` pre-calculates constant
-expressions, and `unroll.rs` expands a constant `for` loop whose body indexes an
-array, so its indices become literals. `alloc.rs` then walks the program
-building the register table — which variable occupies each of the seven memories
-— and rejects the lifetime mistakes (`free` of an undeclared name, double free,
-use after free, running out of memory, a checked `free` under re-entrant control
-flow — inside a loop body, or in a program with `goto`/`label` — and an array
-index that is still not a literal) before anything is emitted.
+ADR 0022).
+
+The passes that follow exist because the machine has only **680 bytes of program
+storage shared by all four program areas**, and it stores one byte per key:
+
+* `fold.rs` pre-calculates constant expressions, and `unroll.rs` expands a
+  constant `for` loop whose body indexes an array, so its indices become
+  literals. These are **required**, not optional — a `const`'s value has to be
+  folded for the emitter, and an array index has to be a literal for the element
+  to name a memory at all.
+* `simplify.rs` drops operators that cannot change a result (`x * 1`, `x + 0`,
+  `-(-x)`), and `propagate.rs` replaces a read of a never-assigned constant with
+  its value — which lets `fold` collapse the arithmetic around it, decide a
+  constant `if`/`while`, and drop stores nothing reads. These are **optional**
+  and on by default; `Options::optimize = false` (CLI `--no-optimize`) turns
+  them off, which is how the golden tests pin each construct's own spelling
+  (ADR 0023).
+* `size.rs` is not a pass but the metric: it counts the keys a listing costs, so
+  an optimisation can be judged rather than assumed (ADR 0024). `fx50 size`
+  reports it, always next to what the unoptimised translation would have cost.
+
+`alloc.rs` then walks the program building the register table — which variable
+occupies each of the seven memories — and rejects the lifetime mistakes (`free`
+of an undeclared name, double free, use after free, running out of memory, a
+checked `free` under re-entrant control flow — inside a loop body, or in a
+program with `goto`/`label` — and an array index that is still not a literal)
+before anything is emitted.
 
 The language is documented in [FXC.md](FXC.md); the crate API in
 [`crates/fx-transpiler/README.md`](../crates/fx-transpiler/README.md).

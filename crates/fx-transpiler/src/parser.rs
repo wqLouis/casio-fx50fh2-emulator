@@ -35,7 +35,7 @@
 //! ```
 
 use crate::ast::{
-    Accessor, BinOp, Expr, FnDef, ForStmt, MemOp, Program, Setup, StatVar, Stmt, UnOp,
+    Accessor, BinOp, Expr, FnDef, ForStmt, MemOp, Program, RegType, Setup, StatVar, Stmt, UnOp,
 };
 use crate::builtins;
 use crate::error::TranspileError;
@@ -228,6 +228,25 @@ impl<'a> Parser<'a> {
         self.advance(); // the name
         self.expect(&Tok::LParen, "`(`")?;
 
+        // `dms()` is the `°′″` conversion key.  `dms(deg, min, sec)` is the
+        // literal form used inside expressions; on its own it computes a value
+        // that is never shown, so it is rejected with a pointer to `print`.
+        if name == "dms" {
+            if self.check(&Tok::RParen) {
+                self.advance();
+                self.expect(&Tok::Semi, "`;`")?;
+                return Ok(Some(Stmt::Setup {
+                    setup: Setup::Sexagesimal,
+                    pos,
+                }));
+            }
+            return Err(self.error_at(
+                "`dms(deg, min, sec)` is a value; use it in an expression such as\
+                 `print(dms(2, 15, 18))`",
+                pos,
+            ));
+        }
+
         let setup = match name {
             "deg" => Some(Setup::Deg),
             "rad" => Some(Setup::Rad),
@@ -238,6 +257,14 @@ impl<'a> Parser<'a> {
             "oct" => Some(Setup::Oct),
             "to_cartesian" => Some(Setup::Cartesian),
             "to_polar" => Some(Setup::Polar),
+            "re_im" => Some(Setup::ReIm),
+            "reg_lin" => Some(Setup::Reg(RegType::Lin)),
+            "reg_log" => Some(Setup::Reg(RegType::Log)),
+            "reg_exp" => Some(Setup::Reg(RegType::Exp)),
+            "reg_pwr" => Some(Setup::Reg(RegType::Pwr)),
+            "reg_inv" => Some(Setup::Reg(RegType::Inv)),
+            "reg_quad" => Some(Setup::Reg(RegType::Quad)),
+            "reg_abexp" => Some(Setup::Reg(RegType::ABExp)),
             _ => None,
         };
         if let Some(setup) = setup {
@@ -958,6 +985,15 @@ fn is_statement_builtin(name: &str) -> bool {
             | "oct"
             | "to_cartesian"
             | "to_polar"
+            | "re_im"
+            | "reg_lin"
+            | "reg_log"
+            | "reg_exp"
+            | "reg_pwr"
+            | "reg_inv"
+            | "reg_quad"
+            | "reg_abexp"
+            | "dms"
             | "clrmemory"
             | "clrstat"
             | "freqon"

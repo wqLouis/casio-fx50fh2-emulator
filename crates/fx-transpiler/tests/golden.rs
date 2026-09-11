@@ -7,11 +7,27 @@ use fx_transpiler::{Options, transpile, transpile_with};
 
 mod common;
 
+/// The *unoptimised* translation.
+///
+/// `fold` and `unroll` still run — unrolling is required for an array element
+/// to name a memory at all — but the optional simplification and constant
+/// propagation passes do not, so every construct appears as written. These
+/// golden tests pin the **translation** of each construct, and the optimiser
+/// would otherwise erase exactly what they check (`A≠B` becomes `1`, an
+/// `If`/`Else` chain disappears). The optimiser itself is covered by
+/// `tests/simplify.rs` and `tests/propagate.rs`.
+const RAW: Options = Options {
+    ascii: false,
+    mode: None,
+    optimize: false,
+};
+
 /// Assert glyph-mode output.
 #[track_caller]
 fn glyph(source: &str, expected: &str) {
     let source = &common::wrap(source);
-    let got = transpile(source).unwrap_or_else(|e| panic!("transpile failed: {e}\n{source}"));
+    let got =
+        transpile_with(source, RAW).unwrap_or_else(|e| panic!("transpile failed: {e}\n{source}"));
     assert_eq!(got, expected, "glyph output for:\n{source}");
 }
 
@@ -19,14 +35,8 @@ fn glyph(source: &str, expected: &str) {
 #[track_caller]
 fn ascii(source: &str, expected: &str) {
     let source = &common::wrap(source);
-    let got = transpile_with(
-        source,
-        Options {
-            ascii: true,
-            ..Default::default()
-        },
-    )
-    .unwrap_or_else(|e| panic!("transpile failed: {e}\n{source}"));
+    let got = transpile_with(source, Options { ascii: true, ..RAW })
+        .unwrap_or_else(|e| panic!("transpile failed: {e}\n{source}"));
     assert_eq!(got, expected, "ASCII output for:\n{source}");
 }
 

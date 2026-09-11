@@ -5,19 +5,29 @@
 //! so includes, data extraction, lexing, parsing, allocation and emission are
 //! all exercised together.
 
-use fx_transpiler::{Options, analyze, transpile};
+use fx_transpiler::{Options, analyze, transpile_with};
 
 mod common;
+
+/// The *unoptimised* translation. These tests are about the memory plan and the
+/// compile-time data facility, and `analyze` (which `fx50 regs` uses) runs the
+/// optimised pipeline — the emission assertions here pin the translation of
+/// each construct, which the optimiser would otherwise fold away.
+const RAW: Options = Options {
+    ascii: false,
+    mode: None,
+    optimize: false,
+};
 
 #[track_caller]
 fn out(source: &str) -> String {
     let source = &common::wrap(source);
-    transpile(source).unwrap_or_else(|e| panic!("transpile failed: {e}\n{source}"))
+    transpile_with(source, RAW).unwrap_or_else(|e| panic!("transpile failed: {e}\n{source}"))
 }
 
 #[track_caller]
 fn err(source: &str) -> fx_transpiler::error::TranspileError {
-    transpile(&common::wrap(source)).unwrap_err()
+    transpile_with(&common::wrap(source), RAW).unwrap_err()
 }
 
 // ---------------------------------------------------------------------------

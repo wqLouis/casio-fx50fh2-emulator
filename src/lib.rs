@@ -29,7 +29,7 @@ pub use error::CalcError;
 pub use mode::Mode;
 pub use runtime::{AngleMode, DisplayMode, Environment, Host, Interpreter, MockHost};
 pub use stats::{RegType, StatVar, Stats};
-pub use value::{ComplexFormat, Value};
+pub use value::{ComplexFormat, ComplexPart, Value};
 
 /// Lex, parse and mode-check a program into a flat list of statements.
 ///

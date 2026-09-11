@@ -44,11 +44,11 @@ fn root_pow10_and_exp() {
     glyph("print(root(3, 27));", "3x√(27)◢\n");
     glyph("print(pow10(3));", "10^(3)◢\n");
     glyph("print(exp(0));", "e^(0)◢\n");
-    // A compound index is parenthesised, the radicand is not.
-    glyph(
-        "let a = 1; print(root(a + 1, a + 2));",
-        "1→A\n(A+1)x√(A+2)◢\n",
-    );
+    // A compound index is parenthesised, the radicand is not.  `a` is used
+    // without a `let` (an implicit variable in `main`), so constant
+    // propagation cannot replace it with a literal and hide the
+    // parenthesisation.
+    glyph("print(root(a + 1, a + 2));", "(A+1)x√(A+2)◢\n");
 }
 
 #[test]
@@ -75,8 +75,9 @@ fn postfix_keys_are_one_arg_calls() {
     glyph("print(cube(x));", "A³◢\n");
     glyph("print(fact(x));", "A!◢\n");
     glyph("print(pct(x));", "A%◢\n");
-    // The operand binds tightly, so a sum is parenthesised.
-    glyph("let a = 1; print(sqr(a + 1));", "1→A\n(A+1)²◢\n");
+    // The operand binds tightly, so a sum is parenthesised.  `a` is implicit
+    // so constant propagation cannot fold the sum away.
+    glyph("print(sqr(a + 1));", "(A+1)²◢\n");
     ascii(
         "print(inv(x)); print(sqr(x)); print(cube(x));",
         "A^-1disp\nA^2disp\nA^3disp\n",
@@ -103,16 +104,16 @@ fn random_and_fixed_memories() {
     glyph("print(ans());", "Ans◢\n");
     glyph("print(mvalue());", "M◢\n");
     glyph("#mode CMPLX\nprint(i());", "#mode CMPLX\ni◢\n");
-    // `i` on its own is still a variable name.
-    glyph("let i = 1; print(i);", "1→A\nA◢\n");
+    // `i` on its own is still a variable name (the imaginary unit is `i()`).
+    glyph("print(i);", "A◢\n");
 }
 
 #[test]
 fn using_the_fixed_m_memory_reserves_it() {
     // `mplus`/`mvalue` touch the calculator's fixed `M`, so the allocator keeps
     // `M` out of the pool and the variable takes `A`.
-    let prgm = transpile(&common::wrap("let a = 1;\nmplus(a);\nprint(mvalue());")).unwrap();
-    assert_eq!(prgm, "1→A\nA M+\nM◢\n");
+    let prgm = transpile(&common::wrap("mplus(a);\nprint(mvalue());")).unwrap();
+    assert_eq!(prgm, "A M+\nM◢\n");
     assert!(
         !prgm.contains("→M"),
         "a variable must not clobber M: {prgm}"
@@ -178,6 +179,43 @@ fn complex_format_setup() {
 }
 
 #[test]
+fn re_im_display_toggle() {
+    // `Re⇔Im` belongs to CMPLX, like the other complex display keys.
+    glyph("#mode CMPLX\nre_im();", "#mode CMPLX\nRe⇔Im\n");
+    ascii("#mode CMPLX\nre_im();", "#mode CMPLX\nre_im\n");
+}
+
+#[test]
+fn regression_model_setup() {
+    glyph("#mode REG\nreg_lin();", "#mode REG\nLin\n");
+    glyph("#mode REG\nreg_log();", "#mode REG\nLog\n");
+    glyph("#mode REG\nreg_exp();", "#mode REG\nExp\n");
+    glyph("#mode REG\nreg_pwr();", "#mode REG\nPwr\n");
+    glyph("#mode REG\nreg_inv();", "#mode REG\nInv\n");
+    glyph("#mode REG\nreg_quad();", "#mode REG\nQuad\n");
+    glyph("#mode REG\nreg_abexp();", "#mode REG\nAB-Exp\n");
+    // The regression menu is already ASCII, so the alias matches the glyph.
+    ascii("#mode REG\nreg_quad();", "#mode REG\nQuad\n");
+}
+
+#[test]
+fn sexagesimal_literal_and_conversion_key() {
+    // The three components are written with the `°′″` separators.  Degrees and
+    // minutes are required even when zero.
+    glyph("print(dms(2, 15, 18));", "2°15′18″◢\n");
+    glyph("print(dms(0, 0, 30));", "0°0′30″◢\n");
+    // `dms()` with no arguments is the bare `°′″` conversion key.
+    glyph("dms();", "°′″\n");
+    ascii("dms();", "dms\n");
+}
+
+#[test]
+fn dms_requires_literal_components() {
+    let e = err("print(dms(a, 15, 18));");
+    assert!(e.message.contains("three numeric literals"), "{e}");
+}
+
+#[test]
 fn clear_and_frequency_statements() {
     glyph("#mode SD\nclrmemory();", "#mode SD\nClrMemory\n");
     glyph("#mode SD\nclrstat();", "#mode SD\nClrStat\n");
@@ -198,7 +236,7 @@ fn data_entry_statements() {
 fn memory_arithmetic_statements() {
     glyph("mplus(3);", "3 M+\n");
     glyph("mminus(3);", "3 M-\n");
-    glyph("let a = 1;\nmplus(a + 2);", "1→A\nA+2 M+\n");
+    glyph("mplus(a + 2);", "A+2 M+\n");
 }
 
 // ---------------------------------------------------------------------------
@@ -234,9 +272,9 @@ fn bitwise_operators_are_words_with_spaces() {
 
 #[test]
 fn conditional_jump() {
-    glyph("let x = 5;\nx > 0 => print(1);", "5→A\nA>0⇒1◢\n");
-    glyph("let x = 5;\nx > 0 => y = 1;", "5→A\nA>0⇒1→B\n");
-    ascii("let x = 5;\nx > 0 => print(1);", "5->A\nA>0=>1disp\n");
+    glyph("x > 0 => print(1);", "A>0⇒1◢\n");
+    glyph("x > 0 => y = 1;", "A>0⇒1→B\n");
+    ascii("x > 0 => print(1);", "A>0=>1disp\n");
 }
 
 #[test]
@@ -271,6 +309,11 @@ fn modes_reject_what_they_do_not_offer() {
     // Setup needs a non-BASE mode.
     let e = err("#mode BASE\ndeg();");
     assert!(e.message.contains("not available in BASE"), "{e}");
+    // `Re⇔Im` belongs to CMPLX and the regression models to REG.
+    let e = err("re_im();");
+    assert!(e.message.contains("not available in COMP"), "{e}");
+    let e = err("reg_quad();");
+    assert!(e.message.contains("needs REG"), "{e}");
 }
 
 #[test]
@@ -297,6 +340,10 @@ fn ascii_output_round_trips_through_the_core_lexer() {
         "#mode BASE\nprint(0b1010 and 0b1100);",
         "let x = 5;\nx > 0 => print(1);",
         "mplus(3);",
+        "#mode CMPLX\nre_im();",
+        "#mode REG\nreg_quad();",
+        "print(dms(2, 15, 18));",
+        "dms();",
     ] {
         let source = &common::wrap(source);
         let prgm = transpile_with(
@@ -461,6 +508,7 @@ fn every_prgm_statistical_variable_has_an_fxc_spelling() {
             StatVar::MaxY => "maxy",
             StatVar::RegA => "rega",
             StatVar::RegB => "regb",
+            StatVar::RegC => "regc",
             StatVar::RegR => "regr",
         };
         let src = common::wrap(&format!("#mode REG\nprint(stat.{name});\n"));

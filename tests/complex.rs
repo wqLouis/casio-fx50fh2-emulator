@@ -110,3 +110,22 @@ fn environment_complex_format_is_public() {
     let interp = run("▶r∠θ").unwrap();
     assert_eq!(interp.environment().complex_format, ComplexFormat::Polar);
 }
+
+#[test]
+fn re_im_shows_the_imaginary_part_first() {
+    // The first press shows the imaginary part (with the `𝑖` the manual
+    // describes); the next shows the real part.
+    assert_eq!(output("2+3i: Re⇔Im: Ans◢"), vec!["3𝑖"]);
+    assert_eq!(output("2+3i: Re⇔Im: Re⇔Im: Ans◢"), vec!["2"]);
+}
+
+#[test]
+fn re_im_has_an_ascii_alias() {
+    assert_eq!(output("2+3i: re_im: Ans◢"), vec!["3𝑖"]);
+}
+
+#[test]
+fn re_im_is_a_display_toggle_not_an_extraction() {
+    // The answer stays complex; only the rendered part changes.
+    assert_eq!(value("2+3i: Re⇔Im"), Value::Complex(2.0, 3.0));
+}

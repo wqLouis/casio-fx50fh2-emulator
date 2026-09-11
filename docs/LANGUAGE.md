@@ -77,8 +77,9 @@ header. In the CLI that is `fx50 --mode CMPLX '...'`; the library entry point is
 | Infix | `+ - × ÷ ┘ ∠ nPr nCr = ≠ > < ≥ ≤ and or xor xnor` |
 | Parenthetical binary | `^(`, `x√(` |
 | Program | `? → : ◢ ⇒ Goto Lbl If Then Else IfEnd For To Step Next While WhileEnd Break` |
-| Setup | `Deg Rad Gra Fix n Sci n Norm n Dec Hex Bin Oct ▶a+b𝑖 ▶r∠θ ClrMemory ClrStat FreqOn FreqOff` |
-| Statistics | `DT` and `n Σx Σx² Σy Σy² Σxy x̄ ȳ σx σy sx sy minX maxX minY maxY regA regB regR` (ASCII: `n sumx sumx2 sumy sumy2 sumxy meanx meany sigmax sigmay sx sy minx maxx miny maxy rega regb regr`) |
+| Setup | `Deg Rad Gra Fix n Sci n Norm n Dec Hex Bin Oct ▶a+b𝑖 ▶r∠θ Re⇔Im °′″ ClrMemory ClrStat FreqOn FreqOff` |
+| Statistics | `DT` and `n Σx Σx² Σy Σy² Σxy x̄ ȳ σx σy sx sy minX maxX minY maxY regA regB regC regR` (ASCII: `n sumx sumx2 sumy sumy2 sumxy meanx meany sigmax sigmay sx sy minx maxx miny maxy rega regb regc regr`) |
+| Regression models | `Lin Log Exp Pwr Inv Quad AB-Exp` (selected in REG mode) |
 
 Only `A B C D X Y M` and `Ans` exist as variables. There is no `S`, `N`, etc.;
 the lexer rejects them.
@@ -128,6 +129,11 @@ and `1┘2+1┘3` groups the fractions first.
 * The display format is selected with `▶a+b𝑖` (ASCII `>a+bi`) or `▶r∠θ`
   (ASCII `>rangle`).  Cartesian omits a zero real part and writes a negative
   imaginary part with `-`; polar renders `r∠θ`.
+* `Re⇔Im` toggles which part of a Cartesian complex result the display shows.
+  The interpreter starts with the whole number (`a+b𝑖`); the first press shows
+  the imaginary part (with the `𝑖` suffix), the next the real part, and so on.
+  The value itself is unchanged: this is a display control, not a real/imag
+  extraction function.
 * `Pol(`/`Rec(` still write real results into `X` and `Y`.
 
 ### Statistics
@@ -138,11 +144,44 @@ and `1┘2+1┘3` groups the fractions first.
 * `FreqOn`/`FreqOff` turn frequency weighting on and off; `ClrStat` clears the
   data registers.
 * `n`, `Σx`, `Σx²`, `Σy`, `Σy²`, `Σxy`, `x̄`, `ȳ`, `σx`, `σy`, `sx`, `sy`,
-  `minX`, `maxX`, `minY`, `maxY`, `regA`, `regB`, `regR` are available as
-  expressions.  `σ` is the population deviation, `s` the sample deviation.
-  For linear regression `y = regA + regB·x`.
+  `minX`, `maxX`, `minY`, `maxY`, `regA`, `regB`, `regC`, `regR` are available
+  as expressions.  `σ` is the population deviation, `s` the sample deviation.
+* The regression model is selected with `Lin`, `Log`, `Exp`, `Pwr`, `Inv`,
+  `Quad` or `AB-Exp` — the manual's *kinds of regression calculation*.  All but
+  `Quad` are fitted by transforming the data until the model is linear,
+  fitting a line, and mapping the coefficients back; `Quad` is a true
+  least-squares quadratic fit.
+
+  | Model | Formula | Transform |
+  | --- | --- | --- |
+  | `Lin` | `y = a + b·x` | — |
+  | `Log` | `y = a + b·ln x` | `(ln x, y)` |
+  | `Exp` | `y = a·e^(b·x)` | `(x, ln y)` |
+  | `Pwr` | `y = a·x^b` | `(ln x, ln y)` |
+  | `Inv` | `y = a + b/x` | `(1/x, y)` |
+  | `Quad` | `y = a + b·x + c·x²` | true least-squares |
+  | `AB-Exp` | `y = a·b^x` | `(x, ln y)` |
+
+  `regA` and `regB` are the fitted `a` and `b`; `regC` is the quadratic `c`
+  (`0` for every other model).  `regR` is the correlation coefficient, or the
+  multiple correlation coefficient for `Quad`.  `Log` and `Pwr` need positive
+  `x`, and `Exp`/`AB-Exp` need positive `y`; otherwise the result is `Math
+  ERROR`.
 * Data is always real; a complex operand raises `Math ERROR`.  At most 40 data
   points are kept, after which `Data Full` is raised.
+
+### Sexagesimal (degrees/minutes/seconds)
+
+The `°′″` key enters and converts sexagesimal values.  A literal is written
+`{deg}°{min}′{sec}″`, and **degrees and minutes must be entered even when they
+are zero** (`0°0′30″`).  The value is a single real number,
+`deg + min/60 + sec/3600`, carrying a display flag:
+
+* `2°15′18″` has the value `2.255` and displays as `2°15′18″`.
+* Adding or subtracting two sexagesimal values gives a sexagesimal result, and
+  multiplying or dividing one by a decimal does too.
+* A bare `°′″` converts the displayed value between the two forms: `2.255`
+  then `°′″` shows `2°15′18″`, and pressing it again shows `2.255`.
 
 ### Scientific constants
 
@@ -235,15 +274,11 @@ between decimal and scientific outside `[1e-2, 1e10)`; `Norm2` outside
 
 ## Known deviations / TODO
 
-* `ReP`/`ImP` are not implemented; the 40 scientific constants are (above).
 * Untagged integer literals are always read as decimal; only tagged literals
   (`1Fh`, `1010b`, …) select another base.
 * `Goto` clears the `If`/loop context, so jumping *out* of a loop works but
   jumping to a label *inside* the same loop does not (the real machine's
   behaviour here is itself subtle).
-* Sexagesimal (`°′″`) output is not implemented.
-* Statistical regression supports the linear model only; the other Casio
-  models are rejected rather than approximated.
 * `Mode ERROR` is a source-level diagnostic, not a real error screen: the
   hardware makes mode violations impossible by not offering the key. Mode
   errors therefore carry a message but usually no byte offset.
