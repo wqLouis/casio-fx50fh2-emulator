@@ -28,47 +28,49 @@
 
 #mode COMP
 
-// Row 1: the three entries every coefficient is built from.
-let m11 = input();
-let m12 = input();
-let m13 = input();
+fn main() {
+    // Row 1: the three entries every coefficient is built from.
+    let m11 = input();
+    let m12 = input();
+    let m13 = input();
 
-// Row 2, folded in one entry at a time. After each pair of products is
-// accumulated, that entry is finished with.
-let m21 = input();
-let h_coef = m13 * m21;       // cd   (a partial sum; `- af` comes with m23)
-let i_coef = -m12 * m21;      // -bd  (`+ ae` comes with m22)
-free m21;
+    // Row 2, folded in one entry at a time. After each pair of products is
+    // accumulated, that entry is finished with.
+    let m21 = input();
+    let h_coef = m13 * m21;       // cd   (a partial sum; `- af` comes with m23)
+    let i_coef = -m12 * m21;      // -bd  (`+ ae` comes with m22)
+    free m21;
 
-let m22 = input();
-let g_coef = -m13 * m22;      // -ce  (`+ bf` comes with m23)
-i_coef = i_coef + m11 * m22;  // completes i_coef = ae - bd
-free m22;
+    let m22 = input();
+    let g_coef = -m13 * m22;      // -ce  (`+ bf` comes with m23)
+    i_coef = i_coef + m11 * m22;  // completes i_coef = ae - bd
+    free m22;
 
-let m23 = input();
-g_coef = g_coef + m12 * m23;  // completes g_coef = bf - ce
-h_coef = h_coef - m11 * m23;  // completes h_coef = cd - af
-free m23;
+    let m23 = input();
+    g_coef = g_coef + m12 * m23;  // completes g_coef = bf - ce
+    h_coef = h_coef - m11 * m23;  // completes h_coef = cd - af
+    free m23;
 
-// The first row was only ever used to build the coefficients, so release those
-// three memories for the third row.
-free m11;
-free m12;
-free m13;
+    // The first row was only ever used to build the coefficients, so release those
+    // three memories for the third row.
+    free m11;
+    free m12;
+    free m13;
 
-// Row 3: each entry scales its coefficient and adds into the running total.
-let m31 = input();
-let det = m31 * g_coef;
-free m31;
+    // Row 3: each entry scales its coefficient and adds into the running total.
+    let m31 = input();
+    let det = m31 * g_coef;
+    free m31;
 
-let m32 = input();
-det = det + m32 * h_coef;
-free m32;
+    let m32 = input();
+    det = det + m32 * h_coef;
+    free m32;
 
-let m33 = input();
-det = det + m33 * i_coef;
+    let m33 = input();
+    det = det + m33 * i_coef;
 
-print(det);
+    print(det);
+}
 
 #tests = [
   { "name": "the matrix from the header comment",

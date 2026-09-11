@@ -1,0 +1,35 @@
+// User-defined functions, from an included library.
+//
+// `fn` is inlined while transpiling: a call costs its body, and a function that
+// is never called costs nothing. `examples/lib/geometry.fxc` defines the
+// functions; this file only says what to do with them.
+//
+//   fx50 build examples/functions.fxc
+//   fx50 run   examples/functions.fxc
+//   fx50 regs  examples/functions.fxc
+//   fx50 test  examples/functions.fxc
+
+#include "lib/geometry.fxc"
+
+fn main() {
+    // An expression function used as a value, with constant arguments, folds
+    // away entirely: `hypot(3, 4)` emits `√(25)`.
+    print(hypot(3, 4));
+
+    // A procedure with a loop: `total` and `i` are its own memories.
+    print(sum_to(10));
+
+    // Call by name: `small` and `big` are written back through the parameters.
+    let x = 3;
+    let y = 7;
+    let small = 0;
+    let big = 0;
+    minmax(x, y, small, big);
+    print(small);
+    print(big);
+}
+
+#tests = [
+  { "name": "hypot, sum_to and the min/max output parameters",
+    "output": ["5", "55", "3", "7"] }
+];

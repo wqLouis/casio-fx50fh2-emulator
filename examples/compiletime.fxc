@@ -21,15 +21,17 @@
 // A fixed value, inlined wherever it is used; it needs no memory.
 const scale = config.base;
 
-// `value` takes memory A.
-let value = config.offsets[0] * scale;
-print(value);
+fn main() {
+    // `value` takes memory A.
+    let value = config.offsets[0] * scale;
+    print(value);
 
-// Done with that value, so release A. The next declaration takes it, and the
-// whole program needs only one of the seven memories.
-free value;
-let value = config.offsets[2] * scale;
-print(value);
+    // Done with that value, so release A. The next declaration takes it, and the
+    // whole program needs only one of the seven memories.
+    free value;
+    let value = config.offsets[2] * scale;
+    print(value);
+}
 
 // The cases travel with the program: `fx50 test examples/compiletime.fxc`.
 #tests = [

@@ -8,8 +8,10 @@
 // namespace keeps the constant names from colliding with program variables —
 // see `fx50 test examples/constants.fxc`.
 
-let wavelength = input();
-print(phys.h * phys.C0 / wavelength);
+fn main() {
+    let wavelength = input();
+    print(phys.h * phys.C0 / wavelength);
+}
 
 #tests = [
   { "name": "500 nm photon", "input": [500e-9], "output": ["3.972891367e-19"] },

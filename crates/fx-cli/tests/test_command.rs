@@ -38,7 +38,7 @@ fn fx50() -> Command {
 #[test]
 fn passing_suite_exits_zero_and_summarises() {
     let dir = TempDir::new("pass");
-    let program = dir.write("prog.fxc", "let a = input(); print(a * 2);");
+    let program = dir.write("prog.fxc", "fn main() { let a = input(); print(a * 2); }");
     dir.write(
         "prog.tests.json",
         r#"{"cases": [{"name": "doubles", "input": [21], "output": ["42"]}]}"#,
@@ -54,7 +54,7 @@ fn passing_suite_exits_zero_and_summarises() {
 #[test]
 fn failing_suite_exits_nonzero_and_shows_both_sides() {
     let dir = TempDir::new("fail");
-    let program = dir.write("prog.fxc", "print(2+3);");
+    let program = dir.write("prog.fxc", "fn main() { print(2+3); }");
     dir.write(
         "prog.tests.json",
         r#"{"cases": [{"name": "adds", "output": ["6"]}]}"#,
@@ -75,7 +75,7 @@ fn failing_suite_exits_nonzero_and_shows_both_sides() {
 #[test]
 fn json_report_is_emitted_on_request() {
     let dir = TempDir::new("json");
-    let program = dir.write("prog.fxc", "print(1);");
+    let program = dir.write("prog.fxc", "fn main() { print(1); }");
     dir.write("prog.tests.json", r#"{"cases": [{"output": ["1"]}]}"#);
 
     let out = fx50()
@@ -92,7 +92,7 @@ fn json_report_is_emitted_on_request() {
 #[test]
 fn a_program_without_tests_is_a_clear_error() {
     let dir = TempDir::new("missing");
-    let program = dir.write("lonely.fxc", "print(1);");
+    let program = dir.write("lonely.fxc", "fn main() { print(1); }");
 
     let out = fx50().arg("test").arg(&program).output().unwrap();
     let stderr = String::from_utf8_lossy(&out.stderr);
@@ -106,7 +106,7 @@ fn a_program_may_carry_its_own_tests() {
     let dir = TempDir::new("embedded");
     let program = dir.write(
         "prog.fxc",
-        "let a = input();\nprint(a * 2);\n\n#tests = [\n  { \"name\": \"doubles\", \"input\": [21], \"output\": [\"42\"] }\n];\n",
+        "fn main() {\n    let a = input();\n    print(a * 2);\n}\n\n#tests = [\n  { \"name\": \"doubles\", \"input\": [21], \"output\": [\"42\"] }\n];\n",
     );
 
     let out = fx50().arg("test").arg(&program).output().unwrap();
@@ -121,7 +121,7 @@ fn regs_reports_the_memory_plan() {
     let dir = TempDir::new("regs");
     let program = dir.write(
         "prog.fxc",
-        "#data config = { \"n\": 3 };\nconst k = config.n;\nlet total = k;\nfree total;\nlet next = 1;\nprint(next);\n",
+        "#data config = { \"n\": 3 };\nconst k = config.n;\nfn main() {\n    let total = k;\n    free total;\n    let next = 1;\n    print(next);\n}\n",
     );
 
     let out = fx50().arg("regs").arg(&program).output().unwrap();
@@ -144,7 +144,10 @@ fn regs_reports_the_memory_plan() {
 #[test]
 fn regs_reports_a_use_after_free() {
     let dir = TempDir::new("uaf");
-    let program = dir.write("prog.fxc", "let a = 1;\nfree a;\nprint(a);\n");
+    let program = dir.write(
+        "prog.fxc",
+        "fn main() {\n    let a = 1;\n    free a;\n    print(a);\n}\n",
+    );
 
     let out = fx50().arg("regs").arg(&program).output().unwrap();
     let stderr = String::from_utf8_lossy(&out.stderr);
@@ -157,7 +160,7 @@ fn regs_reports_a_program_that_does_not_fit() {
     let dir = TempDir::new("regs-full");
     let program = dir.write(
         "prog.fxc",
-        "let a=1; let b=1; let c=1; let d=1; let x=1; let y=1; let m=1; let z=1;\n",
+        "fn main() {\n    let a=1; let b=1; let c=1; let d=1; let x=1; let y=1; let m=1; let z=1;\n}\n",
     );
 
     let out = fx50().arg("regs").arg(&program).output().unwrap();
@@ -182,7 +185,7 @@ fn an_unknown_mode_in_a_suite_is_rejected() {
     let dir = TempDir::new("badmode");
     let suite = dir.write(
         "m.tests.json",
-        r#"{"source": "print(1);", "mode": "FANCY", "cases": []}"#,
+        r#"{"source": "fn main() { print(1); }", "mode": "FANCY", "cases": []}"#,
     );
 
     let out = fx50().arg("test").arg(&suite).output().unwrap();
@@ -194,7 +197,7 @@ fn an_unknown_mode_in_a_suite_is_rejected() {
 #[test]
 fn filter_selects_a_subset_of_cases() {
     let dir = TempDir::new("filter");
-    let program = dir.write("prog.fxc", "print(1);");
+    let program = dir.write("prog.fxc", "fn main() { print(1); }");
     dir.write(
         "prog.tests.json",
         r#"{"cases": [
@@ -223,6 +226,9 @@ fn the_shipped_examples_pass_through_the_cli() {
         "include",
         "constants",
         "compiletime",
+        "arrays",
+        "determinant",
+        "functions",
     ] {
         let out = fx50()
             .arg("test")
@@ -243,7 +249,7 @@ fn includes_resolve_relative_to_the_program() {
     dir.write("lib/double.fxc", "// doubles a into b\nlet b = a * 2;");
     let program = dir.write(
         "prog.fxc",
-        "let a = input();\n#include \"lib/double.fxc\"\nprint(b);\n",
+        "fn main() {\n    let a = input();\n    #include \"lib/double.fxc\"\n    print(b);\n}\n",
     );
 
     // Build: the fragment is inlined.
@@ -289,14 +295,17 @@ fn includes_resolve_relative_to_the_program() {
 #[test]
 fn a_missing_include_is_reported_with_its_location() {
     let dir = TempDir::new("missing-include");
-    let program = dir.write("prog.fxc", "let a = 1;\n#include \"nope.fxc\"\n");
+    let program = dir.write(
+        "prog.fxc",
+        "fn main() {\n    let a = 1;\n    #include \"nope.fxc\"\n}\n",
+    );
 
     let out = fx50().arg("build").arg(&program).output().unwrap();
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(!out.status.success());
     assert!(stderr.contains("cannot include"), "{stderr}");
     assert!(stderr.contains("nope.fxc"), "{stderr}");
-    assert!(stderr.contains(":2:1"), "{stderr}");
+    assert!(stderr.contains(":3:1"), "{stderr}");
 }
 
 /// `fx50 constants` lists every entry, formatted like the calculator's display.

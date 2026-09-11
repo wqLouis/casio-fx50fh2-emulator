@@ -15,26 +15,28 @@
 
 #mode COMP
 
-// An initialiser list fills consecutive memories, A B C.
-let data[3] = {4, 8, 15};
+fn main() {
+    // An initialiser list fills consecutive memories, A B C.
+    let data[3] = {4, 8, 15};
 
-// Elements are read and written by a literal index.
-print(data[0] + data[1] + data[2]);
-data[1] = 16;
-print(data[1]);
+    // Elements are read and written by a literal index.
+    print(data[0] + data[1] + data[2]);
+    data[1] = 16;
+    print(data[1]);
 
-// An array can be released as a whole, after which the memories are free for
-// the next declaration. `free data[1];` is deliberately an error: the elements
-// after it would be stranded in memories nothing can hand out again.
-free data;
-let again[3] = {1, 2, 3};
-print(again[2]);
+    // An array can be released as a whole, after which the memories are free for
+    // the next declaration. `free data[1];` is deliberately an error: the elements
+    // after it would be stranded in memories nothing can hand out again.
+    free data;
+    let again[3] = {1, 2, 3};
+    print(again[2]);
 
-// A size may be inferred from the initialiser list, and an array may be
-// declared without one and filled in later.
-let sums[] = {1, 2};
-sums[0] = sums[0] + sums[1];
-print(sums[0]);
+    // A size may be inferred from the initialiser list, and an array may be
+    // declared without one and filled in later.
+    let sums[] = {1, 2};
+    sums[0] = sums[0] + sums[1];
+    print(sums[0]);
+}
 
 // The cases travel with the program: `fx50 test examples/arrays.fxc`.
 #tests = [

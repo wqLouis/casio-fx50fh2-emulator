@@ -1,0 +1,24 @@
+// A library of functions, pulled in with `#include`.
+//
+// Each `fn` is inlined at the call while transpiling, so a call costs whatever
+// its body costs — no memory for a call, and none for a function that is never
+// used. A parameter is substituted at each mention (call by name), so a
+// function that assigns a parameter writes back through the argument.
+
+// Expression form: no locals, usable anywhere a value is expected.
+fn square(x) = x * x;
+fn hypot(a, b) = sqrt(square(a) + square(b));
+
+// Procedure form: declares locals, ends with a single `return`.
+fn sum_to(n) {
+    let total = 0;
+    for (let i = 1; i <= n; i = i + 1) { total = total + i; }
+    return total;
+}
+
+// Call by name lets a procedure return two results through its arguments.
+fn minmax(a, b, lo, hi) {
+    lo = a;
+    hi = b;
+    if (a > b) { lo = b; hi = a; }
+}

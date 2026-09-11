@@ -4,9 +4,11 @@
 // so the calculator only ever sees one flat program. Removing the files under
 // `examples/lib/` stops this building — that is the point of the example.
 
-let n = input();
-#include "lib/squares.fxc"
-print(result);
+fn main() {
+    let n = input();
+    #include "lib/squares.fxc"
+    print(result);
+}
 
 #tests = [
   { "name": "5^2 + 1 = 26", "input": [5], "output": ["26"] },
