@@ -13,10 +13,10 @@ path = "editors/tree-sitter-fx"
 
 [grammars.fxc]
 repository = "https://github.com/wqLouis/casio-fx50fh2-emulator"
-# The commit that added `const`, `#data`/`#tests`, data paths, `free` and
-# `unsafe_free` to the grammar. Bump whenever the grammar changes; Zed clones
-# at this revision.
-rev = "5a3e1c64b8d6d0e8e4b526fc8dbf6acaf393bc35"
+# The commit that added arrays to the grammar (`array_declaration` and indexed
+# assignment targets). Bump whenever the grammar changes; Zed clones at this
+# revision.
+rev = "05060cb951e00f73a7ce85642f3edeb15b529836"
 path = "editors/tree-sitter-fxc"
 
 [language_servers.fx50]
