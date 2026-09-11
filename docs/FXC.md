@@ -650,6 +650,23 @@ The ways to fit a program, in order of preference:
 
   `free` emits nothing; it hands the memory back to the allocator. The value
   left in the memory is untouched, exactly as on the calculator.
+* **Pack two values into one memory as a complex number**, in CMPLX mode. A
+  complex value is two reals, so one memory can hold a pair — the way to fit
+  *more live values than there are memories*, which `const`, `#data` and `free`
+  cannot do:
+
+  ```c
+  let p = pack(x, y);   // one memory: x + yi
+  free x; free y;       // or the packing has bought nothing
+  print(unpack_x(p));
+  ```
+
+  See [`examples/lib/pack.fxc`](../examples/lib/pack.fxc) and
+  [`examples/packing.fxc`](../examples/packing.fxc), which keeps eight reals live
+  in four memories. The trade is bytes for memories — every `pack`/`unpack` call
+  is inlined, so it always makes the program *longer*. Unpacking uses `conjg`,
+  since this model has no `ReP`/`ImP`, and is exact for values of up to 14
+  significant digits (the display shows 10).
 
 `fx50 regs FILE` reports the plan and the memories left over:
 

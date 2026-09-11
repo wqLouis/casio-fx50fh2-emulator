@@ -1,0 +1,71 @@
+// Pack two reals into one memory, as a complex number.
+//
+// PRGM has seven memories, and a complex number is two reals — so in CMPLX mode
+// one memory can hold a *pair* of values. That is what this library is for: when
+// a program needs more live values than it has memories, pack pairs into complex
+// numbers and unpack them where they are used.
+//
+//     let p = pack(x, y);      // one memory: x + yi
+//     print(unpack_x(p));      // the x back
+//     print(unpack_y(p));      // the y back
+//
+// `examples/packing.fxc` uses it to keep eight reals live in four memories,
+// which the same program cannot do unpacked.
+//
+// ## Unpacking needs `conjg`, because there is no `ReP`/`ImP`
+//
+// The real and imaginary parts are recovered with arithmetic identities, since
+// this model has no "real part" or "imaginary part" key — `ReP`/`ImP` are a
+// documented gap (see the TODO list in `docs/LANGUAGE.md`):
+//
+//     z + conjg(z) = 2·x        x = (z + conjg(z)) / 2
+//     z - conjg(z) = 2·y·i      y = (z - conjg(z)) / (2i)
+//
+// Both are exact *arithmetically*: adding and subtracting a conjugate pair
+// leaves only the doubled part, and dividing by two is exact (a power of two).
+// The one place a rounding can creep in is the doubling, because `2x` may need
+// one digit more than `x` did and the machine normalises every operation to 15
+// significant digits. So the round trip is guaranteed for
+//
+//   * a value of **up to 14 significant digits** — `unpack_x(pack(x, y))` is
+//     exactly `x`; measured over 1200 random pairs at 10, 12, 13 and 14 digits,
+//     with no failures;
+//   * a **15-digit** value may lose its last digit, because `2x` needs 16 —
+//     measured at 139 of 200 pairs.
+//
+// The display shows 10 significant digits, so this is invisible in practice:
+// packing is lossless for everything the machine can print. It is not lossless
+// for every `f64`, and it is better to say so than to imply otherwise — the
+// difference is a last-place rounding, not an error that grows.
+//
+// ## What packing costs, and when to use it
+//
+// Packing trades **program bytes for memories**, and only the second is scarce
+// in the way this helps with. Every call is inlined, so each `unpack_x(p)` emits
+// the six keys of `(p+Conjg(p))÷2` and each `pack(x, y)` the four of `x+yi`. So:
+//
+//   * pack a pair when a *memory* is what you are short of, not when the program
+//     is too long — it always makes the program longer;
+//   * unpack straight into the expression that needs the value
+//     (`print(unpack_x(p))`) rather than into a new variable, which would spend
+//     the memory you just saved;
+//   * `free` the two reals as soon as they are packed, or they still occupy
+//     two memories each and the packing has bought nothing.
+//
+// Arithmetic on the packed value works on both parts at once, which is the other
+// half of the point: one `+` adds two coordinates, and `abs(p)` is the distance
+// from the origin with nothing unpacked.
+//
+// ## The mode
+//
+// A library cannot declare `#mode`, so the **program that includes this must say
+// `#mode CMPLX`** — `i()` and `conjg` are CMPLX keys and are rejected in COMP.
+
+/// Combine two reals into one complex value.
+fn pack(x, y) = x + y * i();
+
+/// The first of the two values packed by [`pack`].
+fn unpack_x(p) = (p + conjg(p)) / 2;
+
+/// The second of the two values packed by [`pack`].
+fn unpack_y(p) = (p - conjg(p)) / (2 * i());

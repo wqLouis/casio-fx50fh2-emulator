@@ -533,6 +533,25 @@ When you do need to shrink a program, in this order of preference:
    later program or the user can read it), so only you know when a value is
    finished with.
 
+4. **If you need more live values than memories, pack pairs into complex
+   numbers.** In CMPLX mode one memory holds a complex value, which is *two*
+   reals — so a pair of coordinates costs one memory instead of two and eight
+   values fit in four memories. This is the only one of these four that lets you
+   hold *more* values at once rather than fewer:
+
+   ```c
+   #include "lib/pack.fxc"
+   let p = pack(x, y);      // one memory: x + yi
+   free x; free y;          // or the packing has bought nothing
+   print(unpack_x(p));      // a single expression, so no extra memory
+   ```
+
+   It trades **program bytes for memories** — every call is inlined, so it always
+   makes the program longer — so use it when a memory is what you are short of.
+   See [`examples/packing.fxc`](../examples/packing.fxc) for a worked program, and
+   note the mode: a library cannot declare `#mode`, so the including program must
+   say `#mode CMPLX`.
+
 `fx50 regs program.fxc` prints the plan without running anything:
 
 ```console

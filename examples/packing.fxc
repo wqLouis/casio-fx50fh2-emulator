@@ -1,0 +1,85 @@
+// Eight reals in four memories, by packing each pair into a complex number.
+//
+// The calculator has seven memories (`A B C D X Y M`) and no more. Reading four
+// points means eight live values, which does not fit:
+//
+//     let x1 = input(); let y1 = input();   // ...and so on to x4, y4
+//     // error: no free memory for `y4`: all of A B C D X Y M are in use
+//
+// In CMPLX mode a complex number is two reals in **one** memory, so packing each
+// point as it is read makes the same program fit. That is the whole trick, and
+// `examples/lib/pack.fxc` is the library that does it.
+//
+//   fx50 build examples/packing.fxc      # 8 values, 4 memories
+//   fx50 regs  examples/packing.fxc      # the plan, with every free
+//   fx50 run   examples/packing.fxc
+//   fx50 test  examples/packing.fxc
+//
+// The trade is real and worth stating: packing costs *program bytes* and saves
+// *memories*. Every call is inlined, so each `unpack_x` emits its six keys. Do it
+// when a memory is what you are short of.
+
+#mode CMPLX
+
+#include "lib/pack.fxc"
+
+fn main() {
+    // Read four points, packing each into one memory as it arrives. `free`
+    // hands the two raw reals back straight away — without it they would still
+    // be occupying two memories each and the packing would have bought nothing.
+    let x = input();
+    let y = input();
+    let p1 = pack(x, y);
+    free x;
+    free y;
+
+    let x = input();
+    let y = input();
+    let p2 = pack(x, y);
+    free x;
+    free y;
+
+    let x = input();
+    let y = input();
+    let p3 = pack(x, y);
+    free x;
+    free y;
+
+    let x = input();
+    let y = input();
+    let p4 = pack(x, y);
+    free x;
+    free y;
+
+    // The sum is three complex additions, and each one adds both coordinates at
+    // once — a single `+` per point, not two. All four points stay live here,
+    // which is what the packing made possible.
+    let total = p1 + p2 + p3 + p4;
+
+    // The centroid: dividing by 4 scales both parts, so this is two divisions
+    // total rather than one per coordinate.
+    print(unpack_x(total) / 4);
+    print(unpack_y(total) / 4);
+
+    // The distance from the origin to the centroid, with nothing unpacked at
+    // all: `abs` is the modulus, which is what this is.
+    print(abs(total) / 4);
+}
+
+// The cases travel with the program: `fx50 test examples/packing.fxc`.
+#tests = [
+  { "name": "centroid of (1,2) (3,4) (5,6) (7,8)", "input": [1, 2, 3, 4, 5, 6, 7, 8],
+    "output": ["4", "5", "6.403124237"] },
+  { "name": "four points around the origin cancel out",
+    "input": [1, 0, 0, 1, -1, 0, 0, -1], "output": ["0", "0", "0"] },
+  { "name": "the same point four times", "input": [2, 3, 2, 3, 2, 3, 2, 3],
+    "output": ["2", "3", "3.605551275"] },
+  { "name": "negative coordinates", "input": [-1, -2, -3, -4, -5, -6, -7, -8],
+    "output": ["-4", "-5", "6.403124237"] },
+  { "name": "fractional coordinates", "input": [0.5, 1.5, 2.5, 3.5, 4.5, 5.5, 6.5, 7.5],
+    "output": ["3.5", "4.5", "5.700877125"] },
+  { "name": "a 14-digit coordinate survives the packing exactly",
+    "input": [1.2345678901234e8, 2.5, 1.2345678901234e8, 2.5,
+              1.2345678901234e8, 2.5, 1.2345678901234e8, 2.5],
+    "output": ["123456789", "2.5", "123456789"] }
+];

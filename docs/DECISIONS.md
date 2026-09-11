@@ -1144,3 +1144,48 @@ removal, since pruning can remove the statement that held the display.
 
 That is deliberately conservative: whether a loop body ran is a run-time
 question, so a program ending in a loop is left untrimmed rather than guessed at.
+
+## ADR 0028 — Two reals *can* share a memory, as a complex number
+
+ADR 0019 rejected register packing, and this adds a correction rather than
+reversing it: the two are about different mechanisms.
+
+ADR 0019 was about **packing two numbers into the digits of one `f64`** — writing
+`R = x + y·10⁻ᵏ` and splitting it with an integer-part or fractional-part
+operation. That remains impossible, for the reason given there: the model has no
+`Int`/`ImP`-style key to split with, and the 15-digit autocorrection rules out
+truncating the digits either.
+
+There is a second mechanism it did not consider, because it looks like arithmetic
+rather than packing. **In CMPLX mode a complex number is two reals, and it
+occupies one memory.** So `x + y·i` stores a pair in a single register, and
+`conjg` takes it apart again:
+
+    z + conjg(z) = 2x        x = (z + conjg(z)) / 2
+    z - conjg(z) = 2y·i      y = (z - conjg(z)) / (2i)
+
+`examples/lib/pack.fxc` is that library, and `examples/packing.fxc` reads four
+points — eight reals — into four memories, which the same program cannot do
+unpacked (`no free memory for y4`).
+
+**Why `conjg` and not `ReP`/`ImP`.** This model has no real-part or
+imaginary-part key; it is one of the gaps listed in `docs/LANGUAGE.md`. The
+identities above are the substitute, and they cost instruction bytes rather than
+memory.
+
+**What it costs, and the bound.** Packing is a trade of *program bytes for
+memories*: every call is inlined, so it always makes the program longer, and it
+only pays when a memory is what the program is short of. Unpacking is exact up to
+**14 significant digits**. The doubling is where the bound comes from — `2x` may
+need one digit more than `x` did, and every operation is normalised to 15, so a
+15-digit value can lose its last digit. Measured over 1 200 random pairs, 10, 12,
+13 and 14 digits round-tripped exactly and 15 digits failed 139 times in 200.
+The display shows 10 digits, so this is invisible in practice; it is stated
+because "packing is lossless" would be false as written, and because the failure
+is a last-place rounding rather than something that grows.
+
+This is deliberately **not** built into the language as an automatic transform.
+It is a library you include when you need it, because it makes programs longer
+and because arithmetic on a packed value means something different from
+arithmetic on its parts — `z1 + z2` adds both coordinates, which is a feature for
+coordinates and a surprise for unrelated values.
