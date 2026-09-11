@@ -180,17 +180,25 @@ travel with the program. **Every PRGM key has an `.fxc` spelling** — the
 postfix and infix keys (`sqr(x)`, `fact(x)`, `frac(a, b)`, `npr(n, r)`,
 `polar(r, θ)`), the statistical values (`stat.meanx`), setup and data keys
 (`fix(3);`, `dt(x, y);`), the bitwise words, `Ran#` as `ran()`, and the `⇒` key
-as `cond => stmt;`. Constant expressions are pre-calculated while transpiling —
-the machine has only 680 bytes of program storage — and a constant `for` loop
-that indexes an array is unrolled so its indices become literals.
+as `cond => stmt;`. It also has **user-defined functions** (`fn`), inlined at
+each call: **every program needs a `fn main()` entry point**, and every
+function except `main` is scoped to its own parameters and locals. Constant
+expressions are pre-calculated while transpiling — the machine has only 680
+bytes of program storage — and a constant `for` loop that indexes an array is
+unrolled so its indices become literals.
 
 ```c
-const max_input = 12;              // compile-time value: costs no memory
-let n = input();
-if (n > max_input) { n = max_input; }
-let result = 1;
-for (let i = 1; i <= n; i = i + 1) { result = result * i; }
-print(result);
+// A program is a set of functions with a `fn main()` entry point. `const`
+// values are visible everywhere and cost no memory.
+const max_input = 12;
+
+fn main() {
+    let n = input();
+    if (n > max_input) { n = max_input; }
+    let result = 1;
+    for (let i = 1; i <= n; i = i + 1) { result = result * i; }
+    print(result);
+}
 
 #tests = [
   { "name": "5! = 120", "input": [5], "output": ["120"] }

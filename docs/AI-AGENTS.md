@@ -48,16 +48,22 @@ generated code fails.
    `%`, `++`, `--`, `+=`. Comparisons produce `1` or `0`; the calculator keys
    behind them are calls (`fact(x)`, `pct(x)`, `not(x)`), except the base-n
    words `and`/`or`/`xor`/`xnor`, which are real infix operators in `#mode BASE`.
-5. **Everything is a floating-point number.** There is no integer type, no
-   string type, and no user-defined functions. Arrays exist (one memory per
-   element, literal indices only), and every PRGM key has a call spelling.
+5. **Everything is a floating-point number.** There is no integer type and no
+   string type. Arrays exist (one memory per element, literal indices only),
+   and so do user-defined functions — which are inlined, not called. **Every
+   program needs a `fn main()` entry point**; only `fn` definitions and
+   top-level `const` may sit at the top level. See §3.7.
 
 ---
 
 ## 2. Complete grammar
 
 ```text
-program    := directive* stmt*
+program    := directive* (funndef | conststmt)*
+             -- the top level holds only `fn` definitions and `const`
+             -- declarations; every program needs `fn main()`
+fndef     := 'fn' NAME '(' [NAME (',' NAME)*] ')' ('=' expr ';' | body)
+conststmt  := 'const' NAME '=' expr ';'
 directive  := '#mode' MODENAME             -- must be first if present
             | '#data' NAME '=' JSON ';'    -- may appear anywhere
             | '#tests' '=' JSON ';'        -- sugar for `#data tests = ...`
@@ -68,6 +74,7 @@ stmt       := 'let' NAME '=' expr ';'
             | NAME '[' expr ']' '=' expr ';'    -- array element (index folds to a literal)
             | 'free' NAME ';'
             | 'unsafe_free' NAME ';'      -- `free` without the control-flow check
+            | 'return' [expr] ';'         -- last statement of a `fn` body
             | 'print' [ '(' expr ')' | expr ] ';'   -- parens optional
             | 'if' '(' expr ')' body ('else' body)?
             | 'while' '(' expr ')' body
@@ -116,7 +123,7 @@ is fine. See [arrays](#arrays) for the shapes that unroll.
 | Comments | `// to end of line` and `/* block */`. An unterminated block comment is an error. |
 | Identifiers | `[A-Za-z_][A-Za-z0-9_]*`. Keywords are reserved. |
 | Numbers | Decimal: `123`, `1.5`, `.5`, `1e10`, `2.5E-2`. In `#mode BASE` also base-tagged: `0x1F`, `0b1010`, `0o17`. |
-| Keywords | `let const free unsafe_free if else while for break goto label print phys stat and or xor xnor` |
+| Keywords | `let const free unsafe_free if else while for break goto label print fn return phys stat and or xor xnor` |
 | Punctuation | `+ - * / ^ ** = == != < <= > >= => ( ) { } [ ] ; , .` |
 | Not available | As *operators*: `% & | ~ ! ++ -- += -= *= /= && \|\| << >> ?:`. The keys behind them have call spellings (`pct`, `fact`, `not`, `and`, `or`, `xor`, `xnor`). |
 
@@ -261,6 +268,56 @@ PRGM.
 let x = input();
 x > 0 => print(1);       // x>0⇒1◢
 ```
+
+---
+
+### 3.7 Functions
+
+A program **is** a set of functions. They are **inlined at each call**, so they
+cost no memory and an unused one costs nothing.
+
+```c
+fn square(x) = x * x;                 // expression function, no locals
+
+fn sum_to(n) {                        // procedure: locals and a return
+    let total = 0;
+    for (let i = 1; i <= n; i = i + 1) { total = total + i; }
+    return total;
+}
+
+fn main() {
+    print(square(4));
+    print(sum_to(10));
+}
+```
+
+Rules that matter when generating code:
+
+* **Every program needs `fn main()`.** The top level holds only `fn` definitions
+  and `const` declarations; a loose statement is an error telling you to move it
+  into `main`.
+* **`main` keeps the classic order-free rules.** Inside `main`, using a name
+  declares it, so `print(a);` alone is valid. `main` is where a program's loose
+  statements live, and moving them there does not change what is emitted.
+* **Every other function is closed.** Its body may only use its parameters, its
+  locals, top-level `const`/`#data` values, other functions and the built-in
+  keys. It cannot read or create a global — `fn f(x) = x + a;` is an error
+  unless `a` is a parameter, a local or a top-level `const`.
+* **Locals are hygienic.** They are renamed per call (`f$t$1`), so two calls and
+  a caller variable of the same name cannot collide.
+* **Arguments are passed by name** (substituted at each mention). A variable
+  argument is effectively passed by reference; `twice(ran())` draws two
+  numbers; an argument mentioned `n` times is emitted `n` times.
+* **A parameter that is assigned needs an assignable argument** (a variable or
+  array element), not an expression.
+* **`return` is the last statement only**, and there is one return value. For
+  two results, assign through output parameters:
+  `fn minmax(a, b, lo, hi) { lo = a; hi = b; … }`.
+* **No recursion** (direct or indirect) — there is no call stack.
+* **A procedure cannot be called from a `while`/`for` condition**; use an
+  expression function or precompute into a variable.
+* A function name cannot shadow a built-in (`fn sqrt(…)` is an error), and a
+  parameter cannot also be a local.
 
 ---
 
@@ -628,9 +685,8 @@ A program can inline another file's text at transpile time:
 
 ```c
 // main.fxc
-let n = input();
 #include "lib/squares.fxc"
-print(result);
+fn main() { let n = input(); print(square(n)); }
 ```
 
 `fx50 build main.fxc` substitutes the fragment before compiling, so the
@@ -642,13 +698,24 @@ Rules that matter when generating code:
 * Syntax is exactly `#include "path"`, starting the line.
 * The path is relative to the file containing the directive, and includes
   nest.
-* **A fragment is statements, not a function.** There are no user-defined
-  functions, so a fragment reads and writes the same seven memories as its
-  includer. `#include "f.fxc"` where `f.fxc` says `let total = a + 1;` is
-  exactly as if you had typed that line yourself — it can see `a` and leaves
-  `total` behind.
+* **A fragment may hold statements or `fn` definitions.** A statement is
+  spliced in place and shares the includer's seven memories; a `fn` is scoped to
+  its own parameters and locals, so an included **library** contributes only its
+  function names and cannot pollute the caller:
+
+  ```c
+  // lib/geometry.fxc
+  fn square(x) = x * x;
+
+  // main.fxc
+  #include "lib/geometry.fxc"
+  fn main() { print(square(4)); }
+  ```
+
+* Including a file that defines a `fn` makes the program function-based, so it
+  then needs `fn main()` and cannot have loose top-level statements.
 * Variables are allocated in **expanded** source order, so the names inside a
-  fragment are numbered where the `#include` line sits. Place includes after
+  spliced statement fragment are numbered where the `#include` line sits. Place includes after
   the inputs that should be allocated first if the numbering matters to you.
 * The seven-memory budget is shared across all files. Two fragments plus the
   main program still fit in seven distinct names in total.
@@ -663,9 +730,11 @@ numbers:
 fx50: unknown function `nope` (lib/squares.fxc:2:11)
 ```
 
-Prefer `#include` when two programs share a computation. Do **not** use it to
-simulate functions or parameter passing: there is no call, no arguments and no
-return value.
+Prefer `#include` for sharing code, and put the shared code in `fn`s so the
+caller's memories are untouched. A fragment of bare statements is also allowed,
+but it must be included **inside a function body** (normally `main`) — nothing
+runs at the top level. Such a fragment has no parameters and no return value;
+use a `fn` when you want an interface.
 
 ---
 
@@ -798,6 +867,12 @@ hand when the values are already available as JSON.
 ## 11. Checklist before you emit `.fxc`
 
 - [ ] Every statement ends with `;`.
+- [ ] Every program has a `fn main()` entry point, and no loose top-level
+      statements (top-level `const` is fine). Every function except `main` only
+      uses its parameters, its locals, top-level `const`/`#data` values, other
+      functions and built-ins — no globals, no recursion, and `return` only as
+      the last statement. Inside `main`, the classic order-free rules still
+      apply, so `print(a);` alone is valid.
 - [ ] `#mode` (if used) is the very first line, and the mode is spelled
       correctly.
 - [ ] At most **seven live** variables at any point; fixed values use `const`

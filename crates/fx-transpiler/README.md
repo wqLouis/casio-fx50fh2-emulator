@@ -5,9 +5,9 @@ source. It is a library (`fx_transpiler`); the user-facing commands are
 subcommands of the unified `fx50` binary.
 
 **The language itself is documented in [`docs/FXC.md`](../../docs/FXC.md)** —
-grammar, statements, the seven-memory model, `free`/`unsafe_free`, compile-time
-data, and `#include`. This README covers the crate: its CLI, its Rust API and
-its tests.
+grammar, statements, the seven-memory model, `free`/`unsafe_free`, user-defined
+`fn`s (inlined, with a required `fn main()` entry point), compile-time data, and
+`#include`. This README covers the crate: its CLI, its Rust API and its tests.
 
 ```bash
 fx50 build program.fxc          # print PRGM (calculator glyphs) to stdout
@@ -40,10 +40,12 @@ the `#tests` runner.
 The examples below use `factorial.fxc`:
 
 ```c
-let n = input();
-let result = 1;
-for (let i = 1; i <= n; i = i + 1) { result = result * i; }
-print(result);
+fn main() {
+    let n = input();
+    let result = 1;
+    for (let i = 1; i <= n; i = i + 1) { result = result * i; }
+    print(result);
+}
 ```
 
 ```console
@@ -81,15 +83,15 @@ about the memory plan.
 use fx_transpiler::{transpile, transpile_with, Mode, Options};
 
 // Calculator glyphs (default).
-let prgm = transpile("let a = input(); print(a * 2);")?;
+let prgm = transpile("fn main() { let a = input(); print(a * 2); }")?;
 assert_eq!(prgm, "?→A\nA×2◢\n");
 
 // ASCII aliases.
-let prgm = transpile_with("print(a <= b);", Options { ascii: true, ..Default::default() })?;
+let prgm = transpile_with("fn main() { print(a <= b); }", Options { ascii: true, ..Default::default() })?;
 assert_eq!(prgm, "A<=Bdisp\n");
 
 // Force BASE mode (overrides any `#mode` header).
-let prgm = transpile_with("print(a / b);", Options { mode: Some(Mode::Base), ..Default::default() })?;
+let prgm = transpile_with("fn main() { print(a / b); }", Options { mode: Some(Mode::Base), ..Default::default() })?;
 assert_eq!(prgm, "#mode BASE\nA÷B◢\n");
 # Ok::<(), fx_transpiler::error::TranspileError>(())
 ```
@@ -106,7 +108,11 @@ The entry points differ only in where `#include` and `#data` paths are resolved:
 # use std::path::Path;
 # use fx_transpiler::{transpile_file, transpile_with_base, Options};
 let prgm = transpile_file(Path::new("examples/include.fxc"), Options::default())?;
-let prgm = transpile_with_base("let a = 1;\n#include \"frag.fxc\"", Options::default(), Path::new("src"))?;
+let prgm = transpile_with_base(
+    "fn main() {\nlet a = 1;\n#include \"frag.fxc\"\n}",
+    Options::default(),
+    Path::new("src"),
+)?;
 # Ok::<(), fx_transpiler::error::TranspileError>(())
 ```
 
@@ -116,12 +122,13 @@ fragment. `analyze(source, dir)` returns the memory plan that `fx50 regs` prints
 without emitting. The pipeline stages are exposed as `lexer::lex`,
 `parser::parse`, `ast`, `data`, `json` and `builtins::lookup`.
 
-Between parsing and allocation two internal passes save program bytes:
-`fold.rs` pre-calculates constant expressions (leaving `pi`/`e`/`phys.`
-symbolic, and refusing anything the machine's 15-digit arithmetic would round),
-and `unroll.rs` expands a constant `for` loop whose body indexes an array, so
-its indices become literals. Both are private; `transpile`/`analyze` apply them
-automatically.
+Between parsing and allocation three internal passes shape the program:
+`functions.rs` resolves a `fn main()` entry point and inlines every user
+function call, `fold.rs` pre-calculates constant expressions (leaving
+`pi`/`e`/`phys.` symbolic, and refusing anything the machine's 15-digit
+arithmetic would round), and `unroll.rs` expands a constant `for` loop whose
+body indexes an array, so its indices become literals. All three are private;
+`transpile`/`analyze` apply them automatically.
 
 ### Testing API
 
@@ -165,7 +172,9 @@ loop sum, ascending/descending `for` loops, `while`/`if`/`break`, `goto` and the
 built-ins, then runs them on the interpreter and checks the displayed output.
 `tests/compiletime.rs` covers `const`, `#data`, `free`/`unsafe_free` and the
 lifetime errors. `tests/arrays.rs` covers arrays end to end, including the
-constant loops that are unrolled so `v[i]` becomes a literal. `tests/tokens.rs`
+constant loops that are unrolled so `v[i]` becomes a literal.
+`tests/functions.rs` covers `fn`: inlining, call-by-name, hygiene, the
+`fn main()` entry point, scoping, and `#include`d libraries. `tests/tokens.rs`
 is the catalogue of the full PRGM key surface and asserts that every element of
 the interpreter's own `FuncName::ALL`, `Postfix::ALL`, `BinOp::ALL` and
 `StatVar::ALL` has an `.fxc` spelling that transpiles.

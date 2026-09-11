@@ -24,7 +24,10 @@ this document is about the language, not the Rust API.
 ## Complete grammar
 
 ```text
-program    := directive* stmt*
+program    := directive* item*
+item       := funndef | 'const' NAME '=' expr ';'
+             -- every program needs `fn main()`; no statements at the top level
+funndef    := 'fn' NAME '(' [NAME (',' NAME)*] ')' ('=' expr ';' | body)
 directive  := '#mode' MODENAME             -- must be first if present
             | '#data' NAME '=' JSON ';'    -- may appear anywhere
             | '#tests' '=' JSON ';'        -- sugar for `#data tests = ...`
@@ -36,6 +39,7 @@ stmt       := 'let' NAME '=' expr ';'      -- declaration
             | NAME '[' expr ']' '=' expr ';'   -- element assignment (index resolves to a literal)
             | 'free' NAME ';'              -- release a memory
             | 'unsafe_free' NAME ';'       -- release it without the control-flow check
+            | 'return' [expr] ';'          -- last statement of a `fn` body
             | 'print' [ '(' expr ')' | expr ] ';'
             | 'if' '(' expr ')' body ('else' body)?
             | 'while' '(' expr ')' body
@@ -87,9 +91,13 @@ Notes:
   The display symbols of scientific constants (`ħ`, `μμ`, `R∞`) are accepted
   only directly after `phys.` — a bare `π` is rejected rather than silently
   becoming a variable.
-* There is no `&&`/`||`/`!`, no `++`/`--`/`+=`, no strings, and no
-  user-defined functions. Comparisons produce `1` or `0`. The base-n words
-  `and`/`or`/`xor`/`xnor` exist, but only in `#mode BASE`.
+* There is no `&&`/`||`/`!`, no `++`/`--`/`+=`, and no strings. Comparisons
+  produce `1` or `0`. The base-n words `and`/`or`/`xor`/`xnor` exist, but only
+  in `#mode BASE`.
+* **Every program is a set of functions with a `fn main()` entry point.**
+  User-defined functions (`fn`) are inlined at each call, and no statement runs
+  at the top level — only `fn` definitions and `const` declarations sit there.
+  A file with no `fn` at all is an error. See [Functions](#functions).
 * There is one numeric type: an `f64`, the same as the calculator computes with.
 * An array or `#data` index is written as an expression but must resolve to a
   non-negative whole number while transpiling: constant expressions are folded,
@@ -97,6 +105,8 @@ Notes:
   index is an error (see [Arrays](#arrays)).
 
 ## Statements
+
+A program's statements live inside a function body, normally `fn main()`:
 
 ```c
 // line comment, and /* block comments */
@@ -120,7 +130,9 @@ mplus(x);                 // x M+
 
 * **`let` declares.** It introduces a name and allocates its memory. Declaring a
   name that is still live is an error, but after a `free` the name can be
-  declared again — see [Memory and `free`](#memory-and-free).
+  declared again — see [Memory and `free`](#memory-and-free). In `main`, a name
+  used for the first time is declared on sight (the classic order-free rule);
+  every other function is closed and needs a real declaration.
 * **Arrays** are declared with a size in brackets and indexed with a literal:
   `let v[3];`, `let v[] = {1, 2, 3};`, `v[0] = 7;`. See
   [Arrays](#arrays) for why the index has to be a constant.
@@ -146,13 +158,15 @@ An array is a group of values that each take **one memory**. Declare one with a
 size in brackets, then index it with a **literal**:
 
 ```c
-let v[3];                 // three elements, no values yet
-let w[3] = {4, 8, 15};    // three elements, initialised (A B C)
-let u[] = {1, 2, 3};      // size inferred from the list
+fn main() {
+    let v[3];                 // three elements, no values yet
+    let w[3] = {4, 8, 15};    // three elements, initialised (A B C)
 
-print(w[0] + w[2]);       // read an element
-w[1] = 16;                // write an element
-free w;                   // release the whole array at once
+    print(w[0] + w[2]);       // read an element
+    w[1] = 16;                // write an element
+    free w;                   // release the whole array at once
+    let u[] = {1, 2, 3};      // size inferred from the list, into `w`'s memories
+}
 ```
 
 `v[0]`, `v[1]`, … are ordinary memories; the report shows which:
@@ -167,6 +181,8 @@ Memory plan for examples/arrays.fxc
   X  sums[1]
 
   5 of 7 memories used; free: Y M
+  released with `free`: data
+  1 data table(s) (no memory): tests
 ```
 
 ### Why the index must be a constant
@@ -180,8 +196,10 @@ That restriction buys the thing this language is for. An element reference
 compiles to **a single memory letter and no instructions at all**:
 
 ```c
-let v[3] = {10, 20, 30};
-print(v[1]);
+fn main() {
+    let v[3] = {10, 20, 30};
+    print(v[1]);
+}
 ```
 
 ```text
@@ -201,8 +219,10 @@ transpiler **unrolls** such a loop and replaces the counter with each of its
 values, so the index becomes a literal:
 
 ```c
-let v[3];
-for (let i = 0; i < 3; i = i + 1) { v[i] = input(); }
+fn main() {
+    let v[3];
+    for (let i = 0; i < 3; i = i + 1) { v[i] = input(); }
+}
 ```
 
 ```text
@@ -260,10 +280,12 @@ symbol the display shows. `phys` is a reserved word, and a bare `h` or `hbar`
 is an ordinary variable, so the namespace never pollutes the seven memories.
 
 ```c
-print(phys.h);      // Planck constant
-print(phys.ħ);      // the same constant, by its display symbol
-print(phys.C0);     // speed of light in vacuum
-print(phys.e);      // elementary charge (namespaced, so not Euler's e)
+fn main() {
+    print(phys.h);      // Planck constant
+    print(phys.ħ);      // the same constant, by its display symbol
+    print(phys.C0);     // speed of light in vacuum
+    print(phys.e);      // elementary charge (namespaced, so not Euler's e)
+}
 ```
 
 ```
@@ -345,8 +367,10 @@ Statistical values are reached through the `stat.` namespace, mirroring `phys.`:
 
 ```c
 #mode REG
-print(stat.meanx);   // x̄◢
-print(stat.regA);    // regA◢
+fn main() {
+    print(stat.meanx);   // x̄◢
+    print(stat.regA);    // regA◢
+}
 ```
 
 Glyph output uses the display spelling (`Σx`, `x̄`, `σx`, `regA`); `--ascii` uses
@@ -357,9 +381,9 @@ name rather than becoming a variable.
 
 `mvalue()`, `mplus()` and `mminus()` address the calculator's fixed `M` memory
 by letter, so the allocator **reserves** `M`: no `.fxc` variable is ever placed
-there while the program uses those keys. `let a = 1; mplus(a); print(mvalue());`
-emits `1→A`, `A M+`, `M◢` — the variable takes `A`, and `M` stays the
-accumulator.
+there while the program uses those keys. `fn main() { let a = 1; mplus(a);
+print(mvalue()); }` emits `1→A`, `A M+`, `M◢` — the variable takes `A`, and `M`
+stays the accumulator.
 
 ### Bitwise operators and base literals
 
@@ -369,7 +393,9 @@ tags them the way the calculator does:
 
 ```c
 #mode BASE
-print(0b1010 and 0b1100);   // 1010b and 1100b◢
+fn main() {
+    print(0b1010 and 0b1100);   // 1010b and 1100b◢
+}
 ```
 
 `and` binds tighter than `or`/`xor`/`xnor`; both are looser than the comparisons.
@@ -390,8 +416,10 @@ non-comment, non-blank line:
 
 ```c
 #mode CMPLX
-let a = input();
-print(a + 1);
+fn main() {
+    let a = input();
+    print(a + 1);
+}
 ```
 
 The valid names are `COMP`, `CMPLX`, `BASE`, `SD` and `REG` (case-insensitive;
@@ -414,15 +442,146 @@ calculator.
 
 ```c
 #mode BASE
-print(a / b);   // ok: `/` maps to `÷`, which BASE offers
-print(sqrt(a)); // error: `sqrt` is not available in BASE mode
-print(phys.h);  // error: `h` (Planck constant) is not available in BASE mode
-print(not(a));  // ok: `Not(` is a BASE key
+fn main() {
+    print(a / b);   // ok: `/` maps to `÷`, which BASE offers
+    print(sqrt(a)); // error: `sqrt` is not available in BASE mode
+    print(phys.h);  // error: `h` (Planck constant) is not available in BASE mode
+    print(not(a));  // ok: `Not(` is a BASE key
+}
 ```
 
 The mode can also be forced from Rust with `Options::mode`, which takes
 precedence over any header in the source (see the
 [crate README](../crates/fx-transpiler/README.md#library)).
+
+## Functions
+
+A `.fxc` program can define functions. PRGM has no call instruction, so a
+function is **inlined at each call** while transpiling — it never reaches the
+calculator as a function, costs no memory of its own, and a function that is
+never called costs nothing.
+
+```c
+fn square(x) = x * x;                 // expression function: no locals
+
+fn sum_to(n) {                        // procedure: locals, loop, return
+    let total = 0;
+    for (let i = 1; i <= n; i = i + 1) { total = total + i; }
+    return total;
+}
+
+fn main() {                           // the entry point
+    print(square(4));                 // emits `4×4` then folds to `16◢`
+    print(sum_to(10));
+}
+```
+
+### `fn main()` is the entry point
+
+**Every program is a set of functions with a `fn main()` entry point**, whether
+or not it defines any other function. A file with no `fn` at all is an error,
+not a top-level script:
+
+* `fn main()` is **required**. Without it the transpiler reports that the
+  program needs an entry point.
+* Only `fn` definitions and top-level `const` declarations may sit beside it. A
+  loose statement is an error telling you to move it into `main`.
+* `main` takes no parameters.
+
+`main` is the one body that is **not closed**: it keeps the classic order-free
+scoping, so a name used for the first time is declared on sight. Loose code
+moved into `main` therefore transpiles exactly as it did at the top level.
+Every other function is closed (see the next section).
+
+That boundary is what keeps an included library from running code or creating
+variables in the includer's namespace.
+
+### Every function except `main` is closed over its own names
+
+A function body may use:
+
+* its **parameters**,
+* names it declares with `let`/`const`/`let v[…]` (including `for (let i …)`),
+* top-level `const` values and `#data` tables (compile-time, no memory),
+* other functions, and the built-in calculator keys.
+
+Anything else is an error: a function cannot read or create a **global**.
+`fn f(x) = x + a;` is rejected unless `a` is a parameter, a local or a
+top-level `const`. This is deliberate: a library function cannot reach into the
+caller's memories, so including it cannot change the caller's behaviour by
+accident.
+
+Names declared inside a function are **local and hygienic**. The transpiler
+renames them per call (`sum_to$total$1`), so a caller variable, another
+function, or a second call to the same function cannot collide with them. Two
+calls to a procedure each get their own copies:
+
+```c
+fn add(a, b) { let s = a + b; return s; }
+fn main() { print(add(1, 2)); print(add(3, 4)); }   // two independent `s`
+```
+
+### Arguments are passed by name
+
+A parameter reference is replaced by the **argument expression at each
+mention**, not evaluated once. This is why functions cost nothing to call, and
+it has three consequences worth knowing:
+
+* **A variable argument behaves like a reference.** `fn inc(x) { x = x + 1; }`
+  with `inc(a)` becomes `a = a + 1`, so the caller's `a` changes.
+* **An expression argument is re-evaluated.** `twice(ran())` draws two random
+  numbers, because `ran()` is substituted into both mentions.
+* **An argument mentioned `n` times is emitted `n` times**, so spelling it out
+  more than once costs bytes. A single mention is free.
+
+Because an assignment is written back through the name, a parameter that the
+function **assigns** needs an assignable argument — a variable or an array
+element, not an expression:
+
+```c
+fn bump(x) { x = x + 1; }
+fn main() {
+    let a = 5;
+    bump(a);          // ok: a becomes 6
+    bump(1 + 2);      // error: `x` is assigned, so its argument must be a variable
+}
+```
+
+### Returning more than one value
+
+`return` may only be the **last statement** of a function body, so there is one
+return value. To return two results, pass variables and assign them — the
+transpiler writes back through them:
+
+```c
+fn minmax(a, b, lo, hi) {
+    lo = a;
+    hi = b;
+    if (a > b) { lo = b; hi = a; }
+}
+
+fn main() {
+    let small = 0;
+    let big = 0;
+    minmax(3, 7, small, big);   // small = 3, big = 7
+    print(small);
+    print(big);
+}
+```
+
+### What is not allowed
+
+| Mistake | Why |
+| --- | --- |
+| Recursion, direct or indirect | PRGM has no call stack |
+| A `return` that is not the last statement | It would need a jump out |
+| A procedure called from a `while`/`for` condition | Inlining would move its statements out of the loop |
+| A parameter used as an array (`x[0]`) | Pass the elements as separate scalars |
+| A parameter that is also a local | Rename one of them |
+| Redefining a built-in (`fn sqrt(…)`) | Choose another name |
+
+See [`examples/functions.fxc`](../examples/functions.fxc) for a working program
+and [`examples/lib/geometry.fxc`](../examples/lib/geometry.fxc) for a library.
 
 ## Memory and `free`
 
@@ -446,11 +605,13 @@ The ways to fit a program, in order of preference:
   it:
 
   ```c
-  let first = 5;
-  print(first);
-  free first;        // release the memory
-  let second = 7;    // reuses it
-  print(second);
+  fn main() {
+      let first = 5;
+      print(first);
+      free first;        // release the memory
+      let second = 7;    // reuses it
+      print(second);
+  }
   ```
 
   `free` emits nothing; it hands the memory back to the allocator. The value
@@ -489,7 +650,7 @@ free x;
 let x = input();   // fine: a second, independent `x`
 ```
 
-A plain assignment never declares, so after a `free` you must bring the name
+A plain assignment never re-declares, so after a `free` you must bring the name
 back with `let`:
 
 ```c
@@ -579,7 +740,9 @@ different variable) falls back to an equivalent `While` loop. A literal bound is
 folded, so `i < 5` emits `To 4` rather than `To 5-1`:
 
 ```c
-for (let i = 0; i != 5; i = i + 2) { print(i); }
+fn main() {
+    for (let i = 0; i != 5; i = i + 2) { print(i); }
+}
 ```
 
 ```
@@ -598,9 +761,11 @@ from numbers therefore has its value computed while transpiling and is replaced
 by that value:
 
 ```c
-print(2 * 3 + 4);        // -> 10◢, not 2×3+4◢
 const k = 6 * 7;         // -> k is 42
-print(k + 1);            // -> 43◢
+fn main() {
+    print(2 * 3 + 4);    // -> 10◢, not 2×3+4◢
+    print(k + 1);        // -> 43◢
+}
 ```
 
 The `for` limit is folded too, so `for (i = 0; i < 5; …)` emits `To 4`, not
@@ -626,8 +791,10 @@ values become literals and use none of the seven memories:
 #data config = { "base": 2, "offsets": [10, 20, 30] };
 const scale = config.base;
 
-let total = config.offsets[1] * scale;
-print(total);
+fn main() {
+    let total = config.offsets[1] * scale;
+    print(total);
+}
 ```
 
 ```console
@@ -663,9 +830,11 @@ A program can pull in another file's text at transpile time:
 
 ```c
 // main.fxc
-let n = input();
-#include "lib/squares.fxc"
-print(result);
+fn main() {
+    let n = input();
+    #include "lib/squares.fxc"
+    print(result);
+}
 ```
 
 ```c
@@ -696,10 +865,15 @@ Rules:
 * Includes nest, and a cycle is reported with the chain rather than looping.
 * Expansion is textual and unguarded, exactly like C: including a file twice
   includes its text twice.
-* **A fragment is statements, not a function.** `.fxc` has no user-defined
-  functions, so a fragment reads and writes the same seven calculator memories
-  as whatever included it. Names are allocated in expanded source order, so a
-  fragment's variables are numbered where the `#include` line sits.
+* **A fragment is spliced text.** A fragment of `fn` definitions (with any
+  top-level `const`s) is placed at the top level; an included library
+  contributes only its function names, and each function is scoped to its own
+  parameters and locals (see [Functions](#functions)). A fragment of
+  **statements** must be included inside a function body — normally `main` —
+  because no statement runs at the top level; its statements then share that
+  body's names and memories. Names in spliced statements are allocated in
+  expanded source order, so a fragment's variables are numbered where the
+  `#include` line sits.
 * `#mode` may only appear in the root file, since the mode applies to the whole
   program. A fragment that declares one is an error.
 
@@ -719,10 +893,12 @@ compile-time data facility as `#data`:
 
 ```c
 // factorial.fxc
-let n = input();
-let result = 1;
-for (let i = 1; i <= n; i = i + 1) { result = result * i; }
-print(result);
+fn main() {
+    let n = input();
+    let result = 1;
+    for (let i = 1; i <= n; i = i + 1) { result = result * i; }
+    print(result);
+}
 
 #tests = [
   { "name": "5! = 120", "input": [5], "output": ["120"] },

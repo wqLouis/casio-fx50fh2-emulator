@@ -727,3 +727,86 @@ maps every element of the interpreter's own `FuncName::ALL`, `Postfix::ALL`,
 `BinOp::ALL` and `StatVar::ALL` to an `.fxc` spelling and asserts it
 transpiles. Adding a key to the machine without a front end for it therefore
 fails the build.
+
+## ADR 0022 — Functions are inlined; `fn main` is the entry point
+
+`.fxc` gained user-defined functions:
+
+```c
+fn square(x) = x * x;                 // expression form
+fn sum_to(n) { … return total; }      // procedure form
+fn main() { print(square(4)); }
+```
+
+**PRGM has no call instruction, so a function is inlined, not called.** There
+is no stack, no return address and no indirect addressing, so a real call is
+impossible. A call is therefore replaced by the function's body while
+transpiling: `square(x) = x * x` with `square(a)` becomes `a × a`. That makes a
+call cost exactly its body and an uncalled function cost nothing — the same
+bargain as `const` and `#data`, and the only one this machine can afford.
+
+**Arguments are passed by name.** A parameter reference is replaced by the
+argument expression at each mention. We chose this over evaluating arguments
+into hidden temporaries for three reasons. It is free: no memory per argument,
+which matters with seven memories, and it lets an argument that is mentioned
+once inline with no trace. It is predictable: the program contains at each
+mention exactly what the call wrote. And it makes `fn inc(x) { x = x + 1; }`
+with `inc(a)` write back through the argument, which is how a procedure returns
+more than one value:
+
+```c
+fn minmax(a, b, lo, hi) { lo = a; hi = b; if (a > b) { lo = b; hi = a; } }
+```
+
+The cost is that an argument mentioned `n` times is emitted and evaluated `n`
+times, so `twice(ran())` draws two numbers. That is the documented meaning, not
+a bug: the alternative — an invisible temporary per argument — spends memories
+the machine does not have. Assigning to a parameter therefore requires an
+assignable argument (a variable or array element); assigning an expression is
+an error.
+
+**A function owns its names.** Locals are hygienic: each expansion renames a
+declared name to a private `f$name$N`, so two calls, or a caller variable of the
+same name, cannot collide. Every function except `main` is also **closed**:
+`f`'s body may use only its parameters, its locals, a top-level `const`/`#data`
+value, another function or a built-in. It cannot read or create a global. This
+is what makes a library safe to include: it contributes function names and
+nothing else, so it cannot change the includer's behaviour by reaching into its
+memories.
+
+**`fn main` is the universal entry point.** An earlier revision of this change
+kept the classic form for files with no `fn`, so the existing corpus was
+untouched. That was rejected: it left the language with two shapes, and it left
+the old failure mode reachable — an included fragment's loose statements ran in
+the includer's seven memories and could silently redefine its variables. The
+final rule is one shape for every program:
+
+* `fn main()` is required. A file with no `fn` at all is an error, not a
+  top-level script.
+* Only `fn` definitions and top-level `const` declarations sit beside it. A
+  loose statement is an error telling you to move it into `main`.
+* `main` is the one body that is **not** closed. It keeps the classic
+  order-free scoping — using a name declares it — so a program's loose
+  statements move into `main` unchanged. Wrapping them emits exactly the PRGM
+  they emitted at the top level.
+
+`main` is the exception on purpose. Closing it too would have forced every name
+in the corpus to be declared before use and broken `print(a);`, which is a
+property of the *entry point*, not of functions in general. A function called
+from another file is where isolation matters, and it is exactly those functions
+that are closed.
+
+**What is rejected, and why.** Recursion is rejected because there is no stack.
+A `return` that is not the last statement is rejected because leaving a function
+early would need a jump; two results are written with output parameters, which
+call-by-name makes natural. A procedure (statement body) called from a
+`while`/`for` condition is rejected because inlining would hoist its statements
+out of the loop. A parameter used as an array is rejected because there is no
+faithful inlining for it.
+
+**The passes.** `functions.rs` runs first, right after parsing: it collects the
+definitions, resolves the entry point, checks scoping, rejects cycles and
+arity mismatches (against the definitions' own positions, before inlining
+rewrites them), and substitutes each call. Bodies are re-positioned to the call
+site so the allocator's byte-range bindings stay valid. The existing
+`fold`/`unroll`/`alloc`/`emit` passes then see a flat, function-free program.
