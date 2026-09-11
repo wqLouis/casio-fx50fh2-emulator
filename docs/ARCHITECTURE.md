@@ -52,12 +52,23 @@ source ──► lexer ──► parser ──► flat Vec<Stmt> ──► tree-
 * **`src/value.rs`** — `Value::{Real, Complex}` and complex arithmetic.
 * **`src/precision.rs`** — 15-significant-digit rounding and the machine's
   autocorrection, applied after every arithmetic operation. This is the
-  interpreter's hot path, so it formats into a fixed-size stack buffer and fuses
-  the two round-trips that `autocorrect(round15(x))` implies; the fused path is
-  provably exact for normal inputs and falls back to the literal two-step
-  computation near the subnormal range. A test compares both against the
-  original implementation bit-for-bit over ~880 000 values, and the change is
-  worth about **2.6×** on arithmetic-heavy programs.
+  interpreter's hot path, so it has two implementations: an **integer-mantissa
+  fast path** that computes the 15 digits by scaling with an exactly
+  representable power of ten (one correctly-rounded multiply or divide), and the
+  original decimal round-trip as a fallback. The fast path is taken only when it
+  can be *proved* identical — the scaled value must land strictly inside
+  `[10^14, 10^15)` and its fractional part must be far enough from the rounding
+  boundary that one ulp of error cannot flip the decision, which also excludes
+  exact ties (decimal parsing breaks them to even, `f64::round` away from zero).
+  A cheap exponent check rejects values outside the window before doing any
+  work, so large and tiny magnitudes pay nothing.
+
+  The payoff depends on magnitude: **~4×** for the magnitudes ordinary
+  calculations use (`1e-10..1e20`, where it applies ~93% of the time), ~1.3×
+  spread evenly over the machine's full `1e-99..1e99`, and no change outside,
+  since those values never enter the fast path. Coverage and correctness are
+  tested against a verbatim copy of the original implementation over ~880 000
+  values plus >12 000 probes sitting exactly on the autocorrection boundaries.
 * **`src/stats.rs`** — the SD/REG data set and the S-SUM/S-VAR accessors.
 * **`src/bases.rs`** — `Dec`/`Hex`/`Bin`/`Oct` word sizes and formatting.
 * **`src/format.rs`** — approximates the two-line display (`Norm1`/`Norm2`,

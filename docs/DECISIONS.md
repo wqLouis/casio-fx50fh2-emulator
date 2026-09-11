@@ -926,3 +926,69 @@ pressed before typing the program rather than stored in it.
 `fx50 size FILE` prints the total, the statement count, the largest single
 statement, and whether it fits — and always prints what the optimiser saved, so
 the number is meaningful next to what it would have been.
+
+## ADR 0025 — The interpreter's numeric hot path has two implementations
+
+`precision::normalize` runs after **every** arithmetic operation, and it was
+85% of interpreter runtime — `format!`-then-`parse`, i.e. two string allocations
+and three float↔string conversions per operation.
+
+**First fix: the allocations.** Both directions now format into a fixed-size
+stack buffer, and `normalize` fuses the two round-trips that
+`autocorrect(round15(x))` implies into one. Fusing is exact for normal inputs:
+with `s = format15(x)` and `y = parse(s)`, `|y − s| ≤ ½·ulp(y) < 1.111e-15·10^e`
+against a 15-digit decimal spacing of `5.000e-15·10^e`, so `y` is strictly
+nearer to `s` than any other 15-digit decimal and renders back to the same
+string. Values below `1e-300` fall back, since there `y` can be subnormal and
+the bound fails. Worth **2.6×**.
+
+**Second fix: an integer-mantissa fast path.** Even after that, `normalize` was
+still ~73% of runtime at ~185 ns per operation — slower than CPython doing the
+same arithmetic, which is not a good look for an interpreter whose whole job is
+arithmetic. The cost is the decimal conversion itself.
+
+The 15 significant digits of `x` are the integer `T = |x|·10^(14-e10)`, so
+instead of rendering and re-parsing, the fast path scales by an *exactly
+representable* power of ten (one correctly-rounded multiply or divide), rounds
+to a whole number, applies the autocorrection to that integer, and scales back.
+Every subsequent step is arithmetic on a value below `2^53`, which is exact.
+
+It is taken only when the result is **provably** identical to the round-trip:
+
+* `|14 - e10| ≤ 22`, because `10^22` is the last power of ten `f64` represents
+  exactly (`10^23` rounds to `99999999999999991611392`);
+* the scaled value must land strictly inside `[10^14, 10^15)` — which is also
+  what validates the decimal exponent, so an off-by-one `log10` is caught rather
+  than trusted;
+* the fractional part must be more than `0.15` from the rounding boundary. The
+  scaling contributes at most ½ ulp ≈ 0.0625 of error, so this leaves a ~2.4×
+  margin. It also excludes exact ties, which matter because decimal parsing
+  breaks ties to **even** while `f64::round` breaks them away from zero.
+
+The window is narrow — `e10 ∈ [-8, 36]` — so a cheap check on the exponent bits
+rejects everything else before any work is done. Without that early-out,
+out-of-window values were **21% slower** than before (paying for a fast path
+they could not use); with it, they are unchanged.
+
+Measured per call:
+
+| corpus | before | after | |
+| --- | --- | --- | --- |
+| `1e-10 .. 1e20` (ordinary calculations) | 207 ns | 50 ns | **4.1× faster**, 93% coverage |
+| `1e-99 .. 1e99`, even by decade | 183 ns | 143 ns | 1.28× faster, 22% coverage |
+| `1e40 .. 1e89` (outside the window) | 169 ns | 169 ns | unchanged, 0% coverage |
+
+End to end on a million-iteration loop of four arithmetic operations each:
+1.02 s → 0.35 s. Against CPython 3.14 running the identical loop, fx50 went from
+5.3× slower to **1.8× slower**.
+
+**The bug this found, and why it is worth recording.** An early version returned
+`10` where the answer was `1` for `0.999999999999999`: when the autocorrection
+carries out of 15 digits, the value becomes `1 × 10^(e10+1)`, whose 15-digit
+mantissa is `10^14` — not the `10^15` (16 digits) that the rounding produces.
+The existing oracle corpus passed straight through that case, which is the
+lesson: **a corpus test proves nothing unless the corpus reaches the code**. The
+fix added >12 000 probes built to sit exactly on the autocorrection boundaries
+(`LMNO` in `0..=20` and `9980..=9999` across 101 exponents and three mantissa
+prefixes), plus explicit carry cases, and a check that every decade of the
+machine's range agrees.

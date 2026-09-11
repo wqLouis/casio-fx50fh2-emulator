@@ -363,3 +363,100 @@ fn fast_path_matches_oracle_bit_for_bit() {
     assert!(checked >= 500_000, "corpus too small: {checked}");
     eprintln!("differential corpus: {checked} values, all bit-for-bit equal");
 }
+
+// ---------------------------------------------------------------------------
+// The integer-mantissa fast path in `normalize`
+//
+// These do not test a public API change; they exist because the fast path is
+// only *conditionally* taken, so "the corpus passes" is a weak statement unless
+// the corpus actually reaches it — and the boundaries it can get wrong are
+// precisely where the autocorrection rule bites.
+
+/// Every 15-digit mantissa whose last four digits sit on a rule boundary,
+/// across exponents spanning the fast path's window and well outside it.
+#[test]
+fn fast_path_matches_the_oracle_on_every_boundary() {
+    // Every `LMNO` either side of both thresholds, plus the rounding midpoint
+    // and the endpoints — 41 values, which with the exponents and prefixes
+    // below gives well over 10 000 probes.
+    let mut boundaries: Vec<u64> = (0..=20).collect();
+    boundaries.push(4999);
+    boundaries.push(5000);
+    boundaries.push(5001);
+    boundaries.extend(9980..=9999);
+    let mut checked = 0usize;
+    for e10 in -40i32..=60 {
+        // An 11-digit prefix, so `prefix * 10^4 + lmno` is a 15-digit mantissa.
+        for prefix in [10_000_000_000u64, 12_345_678_901, 99_999_999_999] {
+            for &lmno in &boundaries {
+                // A 15-digit mantissa: an 11-digit prefix followed by LMNO.
+                let y = prefix * 10_000 + lmno;
+                if !(100_000_000_000_000..=999_999_999_999_999).contains(&y) {
+                    continue;
+                }
+                // The value is `y × 10^(e10 - 14)`.
+                let x = y as f64 * 10f64.powi(e10 - 14);
+                if !x.is_finite() || x == 0.0 {
+                    continue;
+                }
+                assert_eq!(
+                    normalize(x).to_bits(),
+                    oracle_normalize(x).to_bits(),
+                    "normalize disagreed for y={y} e10={e10} (x={x:.17e})"
+                );
+                checked += 1;
+            }
+        }
+    }
+    assert!(checked > 12_000, "only {checked} values checked");
+}
+
+/// Values that round *up* out of 15 digits — the carry that turns
+/// `0.999999999999999` into `1`. This is where an early version of the fast
+/// path returned ten times the right answer.
+#[test]
+fn a_carry_out_of_fifteen_digits_is_handled() {
+    // (1/3)*3 is exactly 1.0 in binary, but the interpreter reaches the
+    // autocorrection through the 15-digit rounding of 0.999999999999999.
+    for text in [
+        "0.999999999999999",
+        "0.9999999999999995",
+        "9.99999999999999",
+        "99999999999999.9",
+        "1e10",
+        "0.1",
+        "0.5",
+    ] {
+        let x: f64 = text.parse().unwrap();
+        assert_eq!(
+            normalize(x).to_bits(),
+            oracle_normalize(x).to_bits(),
+            "carry/rounding disagreed for {text}"
+        );
+    }
+    // The specific carry: 999999999999999 scaled by 10^-15.
+    let x = 999_999_999_999_999f64 * 1e-15;
+    assert_eq!(normalize(x), 1.0, "999999999999999e-15 must be 1");
+}
+
+/// Every decade of the machine's documented range agrees with the oracle,
+/// whatever path each one takes (inside the fast path's window or outside it).
+#[test]
+fn every_decade_agrees_with_the_oracle() {
+    let mut checked = 0usize;
+    for e10 in -99i32..=99 {
+        for factor in [1.0, 1.5, 9.99] {
+            let x = factor * 10f64.powi(e10);
+            if !x.is_finite() || x == 0.0 {
+                continue;
+            }
+            assert_eq!(
+                normalize(x).to_bits(),
+                oracle_normalize(x).to_bits(),
+                "normalize disagreed at 1e{e10} x {factor}"
+            );
+            checked += 1;
+        }
+    }
+    assert_eq!(checked, 199 * 3);
+}
