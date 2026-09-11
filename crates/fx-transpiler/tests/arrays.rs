@@ -250,10 +250,15 @@ fn an_index_outside_the_array_is_rejected() {
 }
 
 #[test]
-fn a_negative_looking_index_is_a_parse_error() {
-    // `v[-1]` is not an index; the parser rejects it rather than wrapping.
+fn a_negative_index_is_rejected_at_compile_time() {
+    // `v[-1]` folds to a negative number, which is not a valid index; the
+    // index must be a non-negative whole number known while transpiling.
     let error = err("let v[3] = {1,2,3};\nprint(v[-1]);\n");
-    assert!(error.message.contains("array index"), "{}", error.message);
+    assert!(
+        error.message.contains("compile-time index"),
+        "{}",
+        error.message
+    );
 }
 
 #[test]
@@ -467,4 +472,84 @@ fn a_float_builtin_in_a_base_mode_array_is_still_rejected() {
     let error =
         transpile_with("#mode BASE\nlet v[2] = {sqrt(2), 1};\n", Options::default()).unwrap_err();
     assert!(error.message.contains("BASE mode"), "{}", error.message);
+}
+
+// ---------------------------------------------------------------------------
+// Loops that index an array
+//
+// PRGM cannot look an array element up from a run-time index, so a constant
+// loop over an array is unrolled while transpiling and the index becomes a
+// literal. These tests run the result to prove the expansion means the same as
+// the loop.
+
+#[test]
+fn a_constant_loop_filling_an_array_runs() {
+    let source = "\
+let m[3] = {0, 0, 0};
+for (let i = 0; i < 3; i = i + 1) { m[i] = input(); }
+print(m[0] + m[1] + m[2]);
+";
+    assert_eq!(run(source, &[4.0, 5.0, 6.0]), vec!["15"]);
+}
+
+#[test]
+fn a_constant_loop_reading_an_array_runs() {
+    let source = "\
+let m[3] = {10, 20, 30};
+for (let i = 0; i < 3; i = i + 1) { print(m[i] * 2); }
+";
+    assert_eq!(run(source, &[]), vec!["20", "40", "60"]);
+}
+
+#[test]
+fn a_descending_constant_loop_over_an_array_runs() {
+    let source = "\
+let m[3] = {1, 2, 3};
+for (let i = 2; i >= 0; i = i - 1) { print(m[i]); }
+";
+    assert_eq!(run(source, &[]), vec!["3", "2", "1"]);
+}
+
+#[test]
+fn the_counter_keeps_its_final_value_after_unrolling() {
+    let source = "let m[2];\nfor (let i = 0; i < 2; i = i + 1) { m[i] = 1; }\nprint(i);";
+    assert_eq!(run(source, &[]), vec!["2"]);
+}
+
+#[test]
+fn a_run_time_index_is_a_transpile_error() {
+    let error =
+        err("let n = input();\nlet m[3];\nfor (let i = 0; i < n; i = i + 1) { m[i] = 1; }\n");
+    assert!(
+        error.message.contains("compile-time index"),
+        "{}",
+        error.message
+    );
+}
+
+#[test]
+fn an_unrollable_loop_explains_the_missing_index() {
+    // A `free` in the body stops the unroll, so the computed index survives.
+    let error = err("let m[3];\nfor (let i = 0; i < 3; i = i + 1) { m[i] = 1; free m; }\n");
+    assert!(
+        error.message.contains("compile-time index"),
+        "{}",
+        error.message
+    );
+}
+
+#[test]
+fn an_array_loop_with_an_ununrolled_inner_loop_is_rejected_cleanly() {
+    // The outer loop cannot be unrolled without duplicating the inner `let j`,
+    // so it is left alone and the computed index is reported rather than a
+    // confusing re-declaration error.
+    let error = err(
+        "let m[2];\nfor (let i = 0; i < 2; i = i + 1) {\n  m[i] = 1;\n  \
+         for (let j = 0; j < 3; j = j + 1) { print(j); }\n}\n",
+    );
+    assert!(
+        error.message.contains("compile-time index"),
+        "{}",
+        error.message
+    );
 }

@@ -62,17 +62,22 @@ The core crate is **std-only** by policy (see [DECISIONS.md](DECISIONS.md)).
 ## The `.fxc` front end
 
 ```text
-source ──► #include ──► #data/#tests ──► lexer ──► parser ──► validate ──► emit
-           include.rs     data.rs         lexer.rs   parser.rs  validate.rs  emit.rs
+source ──► #include ──► #data/#tests ──► lexer ──► parser ──► fold ──► unroll ──► validate ──► emit
+           include.rs     data.rs         lexer.rs   parser.rs  fold.rs   unroll.rs  validate.rs  emit.rs
                                                           └── alloc.rs (memories)
 ```
 
 Preprocessing is textual and happens before lexing: `#include` splices files,
 then `#data`/`#tests` extract JSON and blank the directive (keeping newlines, so
-diagnostics still point at the line the user wrote). `alloc.rs` walks the program
-building the register table — which variable occupies each of the seven memories
-— and rejects the lifetime mistakes (`free` of an undeclared name, double free,
-use after free, and running out of memory) before anything is emitted.
+diagnostics still point at the line the user wrote). Two byte-saving passes run
+next: `fold.rs` pre-calculates constant expressions, and `unroll.rs` expands a
+constant `for` loop whose body indexes an array, so its indices become literals.
+`alloc.rs` then walks the program building the register table — which variable
+occupies each of the seven memories — and rejects the lifetime mistakes (`free`
+of an undeclared name, double free, use after free, running out of memory, a
+checked `free` under re-entrant control flow — inside a loop body, or in a
+program with `goto`/`label` — and an array index that is still not a literal)
+before anything is emitted.
 
 The language is documented in [FXC.md](FXC.md); the crate API in
 [`crates/fx-transpiler/README.md`](../crates/fx-transpiler/README.md).
@@ -103,6 +108,7 @@ The CLI exposes it as `fx50 lsp`. Editor wiring is described in
 | Forced modes with a `#mode` header, CLI `--mode` and static checks | ✅ |
 | 40 scientific constants (2010 CODATA) | ✅ |
 | C-like front end: `const`, `free`/`unsafe_free`, `#data`, `#tests`, `#include` | ✅ |
+| Full PRGM key coverage: postfix/infix keys, `stat.` and `phys.` namespaces, setup/clear/data keys, `and`-family, `⇒`, base literals | ✅ |
 | `#include` for sharing fragments (transpile-time, C-style) | ✅ |
 | `#data` / `#tests` compile-time JSON, and a zero-dependency JSON parser | ✅ |
 | JSON test suites, embedded in the program or standalone (`fx50 test`) | ✅ |

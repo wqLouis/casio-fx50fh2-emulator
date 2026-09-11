@@ -189,16 +189,47 @@ fn a_jump_without_free_is_fine() {
 }
 
 // ---------------------------------------------------------------------------
+// `free` inside loops
+
+#[test]
+fn a_checked_free_inside_a_while_loop_is_an_error() {
+    let e = err("let n = 0;\nwhile (n < 2) { let t = 1; print(t); free t; n = n + 1; }\n");
+    assert!(e.message.contains("inside a loop"), "{e}");
+    assert!(e.message.contains("unsafe_free"), "{e}");
+}
+
+#[test]
+fn a_checked_free_inside_a_for_loop_is_an_error() {
+    let e = err("for (let i = 0; i < 2; i = i + 1) { let t = 1; print(t); free t; }\n");
+    assert!(e.message.contains("inside a loop"), "{e}");
+    assert!(e.message.contains("unsafe_free"), "{e}");
+}
+
+#[test]
+fn unsafe_free_inside_a_loop_is_allowed() {
+    let source = "let n = 0;\nwhile (n < 2) { let t = 1; print(t); unsafe_free t; n = n + 1; }\n";
+    assert_eq!(out(source), "0→A\nWhile A<2\n1→B\nB◢\nA+1→A\nWhileEnd\n");
+}
+
+#[test]
+fn a_checked_free_outside_a_loop_is_allowed() {
+    // The loop does not re-enter the released region, so this is fine.
+    let source = "let t = 1;\nfree t;\nlet u = 2;\nwhile (u < 3) { u = u + 1; }\nprint(u);\n";
+    assert_eq!(out(source), "1→A\n2→A\nWhile A<3\nA+1→A\nWhileEnd\nA◢\n");
+}
+
+// ---------------------------------------------------------------------------
 // `const`
 
 #[test]
 fn a_const_is_inlined_and_uses_no_memory() {
-    assert_eq!(out("const k = 4;\nprint(k * 2);\n"), "4×2◢\n");
+    // The constant is inlined *and* folded, so `k * 2` costs one byte.
+    assert_eq!(out("const k = 4;\nprint(k * 2);\n"), "8◢\n");
 }
 
 #[test]
 fn a_const_may_build_on_an_earlier_const() {
-    assert_eq!(out("const a = 2;\nconst b = a + 3;\nprint(b);\n"), "2+3◢\n");
+    assert_eq!(out("const a = 2;\nconst b = a + 3;\nprint(b);\n"), "5◢\n");
 }
 
 #[test]

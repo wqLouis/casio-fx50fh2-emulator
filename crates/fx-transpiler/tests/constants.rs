@@ -149,7 +149,7 @@ fn base_mode_rejects_a_constant_and_names_it() {
     assert!(e.message.contains("`h` (Planck constant)"), "{}", e.message);
     assert!(
         e.message
-            .contains("is not available in BASE mode (switch to COMP, CMPLX, SD or REG)"),
+            .contains("is not available in BASE mode (needs COMP, CMPLX, SD or REG)"),
         "{}",
         e.message
     );

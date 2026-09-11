@@ -11,7 +11,7 @@
 
 use crate::Options;
 use crate::alloc::Allocator;
-use crate::ast::{Accessor, BinOp, Expr, ForStmt, Program, Stmt, UnOp};
+use crate::ast::{Accessor, BinOp, Expr, ForStmt, MemOp, Program, Stmt, UnOp};
 use crate::builtins;
 use crate::constants::Constant;
 use crate::data::Data;
@@ -22,13 +22,20 @@ use std::collections::BTreeSet;
 /// Operator precedence levels for the `.fxc` grammar, mirroring
 /// [`crate::parser`]. Higher binds tighter.
 mod prec {
-    pub const EQUALITY: u8 = 1;
-    pub const COMPARISON: u8 = 2;
-    pub const ADDITIVE: u8 = 3;
-    pub const MULTIPLICATIVE: u8 = 4;
-    pub const UNARY: u8 = 5;
-    pub const POWER: u8 = 6;
-    pub const ATOM: u8 = 7;
+    pub const BITWISE_OR: u8 = 1;
+    pub const BITWISE_AND: u8 = 2;
+    pub const EQUALITY: u8 = 3;
+    pub const COMPARISON: u8 = 4;
+    pub const ADDITIVE: u8 = 5;
+    pub const MULTIPLICATIVE: u8 = 6;
+    /// `nPr`, `nCr`.
+    pub const PERM: u8 = 7;
+    pub const UNARY: u8 = 8;
+    /// The `┘` fraction key.
+    pub const FRACTION: u8 = 9;
+    pub const POWER: u8 = 10;
+    pub const POSTFIX: u8 = 11;
+    pub const ATOM: u8 = 12;
 }
 
 /// Transpile a parsed program into PRGM source.
@@ -82,8 +89,24 @@ impl Emitter<'_> {
         if self.opts.ascii { "disp" } else { "◢" }
     }
 
+    /// `<value><display>`, inserting a space when the ASCII display key would
+    /// otherwise merge with a base-tagged literal (`FFhdisp` lexes as the
+    /// identifier `FFhdisp`, not `FFh` + `disp`).
+    fn displayed(&self, value: &str) -> String {
+        if self.opts.ascii && ends_with_base_literal(value) {
+            format!("{value} {}", self.display())
+        } else {
+            format!("{value}{}", self.display())
+        }
+    }
+
     fn arrow(&self) -> &'static str {
         if self.opts.ascii { "->" } else { "→" }
+    }
+
+    /// `⇒` / `=>`.
+    fn cond_arrow(&self) -> &'static str {
+        if self.opts.ascii { "=>" } else { "⇒" }
     }
 
     // -- statements ---------------------------------------------------------
@@ -112,6 +135,52 @@ impl Emitter<'_> {
                 let var = self.element(name, *index, *pos)?;
                 self.assign_to(value, var)?;
             }
+            Stmt::AssignElementExpr { name, pos, .. } => {
+                return Err(crate::error::computed_index_error(self.source, name, *pos));
+            }
+            // `mplus(x);` / `mminus(x);` — the `M+` / `M-` keys.
+            Stmt::Memory { value, op, .. } => {
+                let text = self.expr(value, 0)?;
+                let key = match op {
+                    MemOp::Plus => "M+",
+                    MemOp::Minus => "M-",
+                };
+                self.line(format!("{text} {key}"));
+            }
+            Stmt::Setup { setup, .. } => {
+                let text = if self.opts.ascii {
+                    setup.ascii()
+                } else {
+                    setup.glyph()
+                };
+                self.line(text);
+            }
+            Stmt::ClrMemory => self.line("ClrMemory"),
+            Stmt::ClrStat => self.line("ClrStat"),
+            Stmt::FreqOn => self.line("FreqOn"),
+            Stmt::FreqOff => self.line("FreqOff"),
+            Stmt::Data { x, y, freq, .. } => {
+                let x = self.expr(x, 0)?;
+                let text = match (y, freq) {
+                    (Some(y), Some(f)) => {
+                        let y = self.expr(y, 0)?;
+                        let f = self.expr(f, 0)?;
+                        format!("{x},{y};{f} DT")
+                    }
+                    (Some(y), None) => {
+                        let y = self.expr(y, 0)?;
+                        format!("{x},{y} DT")
+                    }
+                    _ => format!("{x} DT"),
+                };
+                self.line(text);
+            }
+            Stmt::CondJump { cond, target, .. } => {
+                let cond = self.expr(cond, 0)?;
+                let target = self.inline_stmt(target)?;
+                let arrow = self.cond_arrow();
+                self.line(format!("{cond}{arrow}{target}"));
+            }
             Stmt::Const { name, value, pos } => self.const_declaration(name, *pos, value)?,
             // `free`/`unsafe_free` are compile-time instructions: they hand the
             // memory back to the allocator, and emit nothing. The value in the
@@ -119,8 +188,8 @@ impl Emitter<'_> {
             Stmt::Free { .. } => {}
             Stmt::Print(expr) => {
                 let value = self.expr(expr, 0)?;
-                let display = self.display();
-                self.line(format!("{value}{display}"));
+                let line = self.displayed(&value);
+                self.line(line);
             }
             Stmt::ExprStmt(expr) => {
                 let value = self.expr(expr, 0)?;
@@ -187,6 +256,18 @@ impl Emitter<'_> {
             Expr::Number(_) | Expr::Pi(_) | Expr::E(_) | Expr::Constant(..) | Expr::Data { .. } => {
                 Ok(())
             }
+            Expr::BaseLiteral { .. } => Ok(()),
+            Expr::Ans(pos) => Err(TranspileError::at(
+                self.source,
+                "`ans()` is only known when the program runs; a `const` is fixed when transpiling",
+                *pos,
+            )),
+            Expr::StatVar(_, pos) => Err(TranspileError::at(
+                self.source,
+                "a statistical variable is only known when the program runs; a `const` is fixed \
+                 when transpiling",
+                *pos,
+            )),
             Expr::Unary(_, inner) => self.check_const_expr(owner, inner),
             Expr::Binary(_, left, right) => {
                 self.check_const_expr(owner, left)?;
@@ -347,13 +428,17 @@ impl Emitter<'_> {
     }
 
     /// `expr ± offset` as a PRGM expression, parenthesising only when needed.
+    ///
+    /// The result is folded, so a literal limit saves bytes: `i < 5` becomes
+    /// `To 4`, not `To 5-1`.
     fn offset(&self, expr: &Expr, delta: f64) -> Result<String, TranspileError> {
         let op = if delta < 0.0 { BinOp::Sub } else { BinOp::Add };
-        let combined = Expr::Binary(
+        let mut combined = Expr::Binary(
             op,
             Box::new(expr.clone()),
             Box::new(Expr::Number(delta.abs())),
         );
+        crate::fold::fold_expr(&mut combined);
         self.expr(&combined, 0)
     }
 
@@ -380,6 +465,16 @@ impl Emitter<'_> {
     fn expr_prec(&self, expr: &Expr) -> Result<(String, u8), TranspileError> {
         match expr {
             Expr::Number(value) => Ok((format_number(*value), prec::ATOM)),
+            Expr::BaseLiteral { value, base, .. } => Ok((base.tag(*value), prec::ATOM)),
+            Expr::Ans(_) => Ok(("Ans".to_string(), prec::ATOM)),
+            Expr::StatVar(var, _) => {
+                let name = if self.opts.ascii {
+                    var.ascii()
+                } else {
+                    var.glyph()
+                };
+                Ok((name.to_string(), prec::ATOM))
+            }
             // A `const` or a data table is replaced by its value here; only a
             // real variable reaches the allocator.
             Expr::Name(name, pos) => {
@@ -420,6 +515,9 @@ impl Emitter<'_> {
                     let memory = self.element(name, *index, *pos)?;
                     return Ok((memory.to_string(), prec::ATOM));
                 }
+                if let [Accessor::IndexExpr { pos: at, .. }] = accessors.as_slice() {
+                    return Err(crate::error::computed_index_error(self.source, name, *at));
+                }
                 Err(TranspileError::at(
                     self.source,
                     format!("internal error: `{name}` is neither a `#data` table nor an array"),
@@ -453,13 +551,78 @@ impl Emitter<'_> {
                         *pos,
                     ));
                 };
-                let mut rendered = Vec::with_capacity(args.len());
-                for arg in args {
-                    rendered.push(self.expr(arg, 0)?);
-                }
                 let spelling = builtin.spelling(self.opts.ascii);
-                Ok((format!("{spelling}({})", rendered.join(",")), prec::ATOM))
+                match builtin.form {
+                    builtins::Form::Call => {
+                        let mut rendered = Vec::with_capacity(args.len());
+                        for arg in args {
+                            rendered.push(self.expr(arg, 0)?);
+                        }
+                        Ok((format!("{spelling}({})", rendered.join(",")), prec::ATOM))
+                    }
+                    builtins::Form::Postfix => {
+                        let operand = self.expr(&args[0], prec::POSTFIX)?;
+                        Ok((format!("{operand}{spelling}"), prec::ATOM))
+                    }
+                    builtins::Form::Infix => {
+                        let level = if *name == "frac" {
+                            prec::FRACTION
+                        } else {
+                            prec::PERM
+                        };
+                        let left = self.expr(&args[0], level)?;
+                        let right = self.expr(&args[1], level + 1)?;
+                        Ok((format!("{left}{spelling}{right}"), level))
+                    }
+                    builtins::Form::Special => self.special_builtin(name, args, spelling),
+                }
             }
+        }
+    }
+
+    /// Emit the few built-ins whose argument order does not map to
+    /// `spelling(args…)`.
+    fn special_builtin(
+        &self,
+        name: &str,
+        args: &[Expr],
+        spelling: &str,
+    ) -> Result<(String, u8), TranspileError> {
+        match name {
+            // `root(index, radicand)` is the `x√(` key: the index is written
+            // before the radical.
+            "root" => {
+                let index = self.expr(&args[0], prec::ATOM)?;
+                let radicand = self.expr(&args[1], 0)?;
+                Ok((format!("{index}{spelling}({radicand})"), prec::ATOM))
+            }
+            // The remaining specials are nullary and need no arguments.
+            _ => Ok((spelling.to_string(), prec::ATOM)),
+        }
+    }
+
+    /// Render a statement that may follow `⇒` on the same line.
+    fn inline_stmt(&self, stmt: &Stmt) -> Result<String, TranspileError> {
+        match stmt {
+            Stmt::Print(expr) => {
+                let value = self.expr(expr, 0)?;
+                Ok(self.displayed(&value))
+            }
+            Stmt::Assign { name, value, pos } | Stmt::Let { name, value, pos } => {
+                let var = self.variable(name, *pos)?;
+                if matches!(value, Expr::Input(_)) {
+                    return Ok(format!("?{}{var}", self.arrow()));
+                }
+                let text = self.expr(value, 0)?;
+                Ok(format!("{text}{}{var}", self.arrow()))
+            }
+            Stmt::ExprStmt(expr) => self.expr(expr, 0),
+            _ => Err(TranspileError::at(
+                self.source,
+                "`=>` can only guard a single assignment, display or expression; use `if` for \
+                 anything else",
+                0,
+            )),
         }
     }
 
@@ -477,6 +640,10 @@ impl Emitter<'_> {
         // operand needs parentheses at the same precedence.
         let right_text = self.expr(right, level + 1)?;
         let symbol = binary_symbol(op, self.opts.ascii);
+        // The base-n keys are words, so they need spaces around them.
+        if matches!(op, BinOp::And | BinOp::Or | BinOp::Xor | BinOp::Xnor) {
+            return Ok((format!("{left_text} {symbol} {right_text}"), level));
+        }
         Ok((format!("{left_text}{symbol}{right_text}"), level))
     }
 
@@ -509,8 +676,27 @@ impl Emitter<'_> {
     }
 }
 
+/// Whether ASCII `disp` would merge with `text` when appended.
+///
+/// A base-tagged literal (`FFh`, `1010b`, `17o`) ends in a letter that the
+/// interpreter's lexer would read as part of one longer word.
+fn ends_with_base_literal(text: &str) -> bool {
+    let mut chars = text.chars().rev();
+    let Some(suffix) = chars.next() else {
+        return false;
+    };
+    if !matches!(suffix, 'h' | 'H' | 'b' | 'o') {
+        return false;
+    }
+    // At least one hex digit must precede the suffix; whatever comes before
+    // that is a token boundary (a space, an operator or the start).
+    chars.next().is_some_and(|ch| ch.is_ascii_hexdigit())
+}
+
 fn binary_precedence(op: BinOp) -> u8 {
     match op {
+        BinOp::Or | BinOp::Xor | BinOp::Xnor => prec::BITWISE_OR,
+        BinOp::And => prec::BITWISE_AND,
         BinOp::Eq | BinOp::Ne => prec::EQUALITY,
         BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => prec::COMPARISON,
         BinOp::Add | BinOp::Sub => prec::ADDITIVE,
@@ -562,6 +748,11 @@ fn binary_symbol(op: BinOp, ascii: bool) -> &'static str {
                 "≥"
             }
         }
+        // The base-n bitwise keys are already ASCII words.
+        BinOp::And => "and",
+        BinOp::Or => "or",
+        BinOp::Xor => "xor",
+        BinOp::Xnor => "xnor",
     }
 }
 

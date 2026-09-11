@@ -34,7 +34,7 @@
 //! accessor  := '.' NAME | '[' INTEGER ']'
 //! ```
 
-use crate::ast::{Accessor, BinOp, Expr, ForStmt, Program, Stmt, UnOp};
+use crate::ast::{Accessor, BinOp, Expr, ForStmt, MemOp, Program, Setup, StatVar, Stmt, UnOp};
 use crate::builtins;
 use crate::error::TranspileError;
 use crate::lexer::{Tok, Token};
@@ -196,7 +196,142 @@ impl<'a> Parser<'a> {
                 self.advance();
                 Ok(Stmt::Empty)
             }
+            // `deg();`, `fix(3);`, `dt(x, y);`, `mplus(x);`, …
+            Tok::Ident(name) if self.peek_at(1) == &Tok::LParen => {
+                let pos = self.position();
+                if let Some(stmt) = self.statement_builtin(&name, pos)? {
+                    return Ok(stmt);
+                }
+                self.assign_or_expression()
+            }
             _ => self.assign_or_expression(),
+        }
+    }
+
+    /// Parse the calculator keys that are statements rather than values.
+    ///
+    /// The name has been checked to be followed by `(`. Returns `None` when
+    /// `name` is an ordinary expression built-in, so the caller falls through
+    /// to `assign_or_expression`.
+    fn statement_builtin(
+        &mut self,
+        name: &str,
+        pos: usize,
+    ) -> Result<Option<Stmt>, TranspileError> {
+        if !is_statement_builtin(name) {
+            return Ok(None);
+        }
+        self.advance(); // the name
+        self.expect(&Tok::LParen, "`(`")?;
+
+        let setup = match name {
+            "deg" => Some(Setup::Deg),
+            "rad" => Some(Setup::Rad),
+            "gra" => Some(Setup::Gra),
+            "dec" => Some(Setup::Dec),
+            "hex" => Some(Setup::Hex),
+            "bin" => Some(Setup::Bin),
+            "oct" => Some(Setup::Oct),
+            "to_cartesian" => Some(Setup::Cartesian),
+            "to_polar" => Some(Setup::Polar),
+            _ => None,
+        };
+        if let Some(setup) = setup {
+            self.expect(&Tok::RParen, "`)`")?;
+            self.expect(&Tok::Semi, "`;`")?;
+            return Ok(Some(Stmt::Setup { setup, pos }));
+        }
+
+        let stmt = match name {
+            "fix" => {
+                let n = self.digit_argument("fix", 0, 9)?;
+                Stmt::Setup {
+                    setup: Setup::Fix(n),
+                    pos,
+                }
+            }
+            "sci" => {
+                let n = self.digit_argument("sci", 0, 9)?;
+                Stmt::Setup {
+                    setup: Setup::Sci(n),
+                    pos,
+                }
+            }
+            "norm" => {
+                let n = self.digit_argument("norm", 1, 2)?;
+                Stmt::Setup {
+                    setup: Setup::Norm(n),
+                    pos,
+                }
+            }
+            "clrmemory" => {
+                self.expect(&Tok::RParen, "`)`")?;
+                Stmt::ClrMemory
+            }
+            "clrstat" => {
+                self.expect(&Tok::RParen, "`)`")?;
+                Stmt::ClrStat
+            }
+            "freqon" => {
+                self.expect(&Tok::RParen, "`)`")?;
+                Stmt::FreqOn
+            }
+            "freqoff" => {
+                self.expect(&Tok::RParen, "`)`")?;
+                Stmt::FreqOff
+            }
+            "mplus" | "mminus" => {
+                let value = self.expression()?;
+                self.expect(&Tok::RParen, "`)`")?;
+                Stmt::Memory {
+                    value,
+                    op: if name == "mplus" {
+                        MemOp::Plus
+                    } else {
+                        MemOp::Minus
+                    },
+                    pos,
+                }
+            }
+            "dt" => {
+                let x = self.expression()?;
+                let y = if self.matches(&Tok::Comma) {
+                    Some(self.expression()?)
+                } else {
+                    None
+                };
+                let freq = if self.matches(&Tok::Comma) {
+                    Some(self.expression()?)
+                } else {
+                    None
+                };
+                self.expect(&Tok::RParen, "`)`")?;
+                Stmt::Data { x, y, freq, pos }
+            }
+            _ => unreachable!("is_statement_builtin covers the match"),
+        };
+        self.expect(&Tok::Semi, "`;`")?;
+        Ok(Some(stmt))
+    }
+
+    /// A literal digit argument, as in `fix(3)`.
+    fn digit_argument(&mut self, name: &str, min: u8, max: u8) -> Result<u8, TranspileError> {
+        let pos = self.position();
+        match self.peek().clone() {
+            Tok::Number(value)
+                if value.fract() == 0.0 && value >= f64::from(min) && value <= f64::from(max) =>
+            {
+                self.advance();
+                self.expect(&Tok::RParen, "`)`")?;
+                Ok(value as u8)
+            }
+            other => Err(self.error_at(
+                format!(
+                    "`{name}` needs a literal {min}\u{2013}{max}, found {}",
+                    other.describe()
+                ),
+                pos,
+            )),
         }
     }
 
@@ -315,7 +450,17 @@ impl<'a> Parser<'a> {
             self.expect(&Tok::Semi, "`;` after assignment")?;
             return Ok(Stmt::Assign { name, value, pos });
         }
+        let value_pos = self.position();
         let value = self.expression()?;
+        // `cond => stmt;` is the calculator's `⇒` conditional jump.
+        if self.matches(&Tok::Arrow) {
+            let target = self.statement()?;
+            return Ok(Stmt::CondJump {
+                cond: value,
+                target: Box::new(target),
+                pos: value_pos,
+            });
+        }
         // `a[i] = expr;` parses as an indexed expression followed by `=`. Only
         // a single `[index]` can be an assignment target: `a.b` is a value and
         // `a[0][1]` is two levels of storage.
@@ -325,18 +470,37 @@ impl<'a> Parser<'a> {
                 accessors,
                 pos,
             } = value
-                && let [Accessor::Index { index, .. }] = accessors.as_slice()
             {
-                let index = *index;
-                self.advance();
-                let value = self.expression()?;
-                self.expect(&Tok::Semi, "`;` after assignment")?;
-                return Ok(Stmt::AssignElement {
-                    name,
-                    index,
-                    value,
-                    pos,
-                });
+                // A literal index is an element assignment; anything else must
+                // be resolved (folded or unrolled) before the program is
+                // allocated.
+                match accessors.as_slice() {
+                    [Accessor::Index { index, .. }] => {
+                        let index = *index;
+                        self.advance();
+                        let value = self.expression()?;
+                        self.expect(&Tok::Semi, "`;` after assignment")?;
+                        return Ok(Stmt::AssignElement {
+                            name,
+                            index,
+                            value,
+                            pos,
+                        });
+                    }
+                    [Accessor::IndexExpr { expr, .. }] => {
+                        let index = expr.clone();
+                        self.advance();
+                        let value = self.expression()?;
+                        self.expect(&Tok::Semi, "`;` after assignment")?;
+                        return Ok(Stmt::AssignElementExpr {
+                            name,
+                            index,
+                            value,
+                            pos,
+                        });
+                    }
+                    _ => {}
+                }
             }
             return Err(self.error(
                 "the left-hand side of `=` must be a variable or an array element such as `a[0]`",
@@ -446,7 +610,33 @@ impl<'a> Parser<'a> {
     // -- expressions --------------------------------------------------------
 
     fn expression(&mut self) -> Result<Expr, TranspileError> {
-        self.equality()
+        self.bitwise_or()
+    }
+
+    fn bitwise_or(&mut self) -> Result<Expr, TranspileError> {
+        let mut left = self.bitwise_and()?;
+        loop {
+            let op = match self.peek() {
+                Tok::Or => BinOp::Or,
+                Tok::Xor => BinOp::Xor,
+                Tok::Xnor => BinOp::Xnor,
+                _ => return Ok(left),
+            };
+            self.advance();
+            let right = self.bitwise_and()?;
+            left = Expr::Binary(op, Box::new(left), Box::new(right));
+        }
+    }
+
+    fn bitwise_and(&mut self) -> Result<Expr, TranspileError> {
+        let mut left = self.equality()?;
+        loop {
+            if !self.matches(&Tok::And) {
+                return Ok(left);
+            }
+            let right = self.equality()?;
+            left = Expr::Binary(BinOp::And, Box::new(left), Box::new(right));
+        }
     }
 
     fn equality(&mut self) -> Result<Expr, TranspileError> {
@@ -532,6 +722,10 @@ impl<'a> Parser<'a> {
                 self.advance();
                 Ok(Expr::Number(value))
             }
+            Tok::BaseNumber { value, base } => {
+                self.advance();
+                Ok(Expr::BaseLiteral { value, base, pos })
+            }
             Tok::LParen => {
                 self.advance();
                 let expr = self.expression()?;
@@ -558,6 +752,7 @@ impl<'a> Parser<'a> {
                 }
             }
             Tok::Phys => self.constant(pos),
+            Tok::Stat => self.stat_variable(pos),
             other => Err(self.error_at(
                 format!("expected an expression, found {}", other.describe()),
                 pos,
@@ -584,6 +779,22 @@ impl<'a> Parser<'a> {
         Ok(Expr::Constant(constant, pos))
     }
 
+    /// Resolve `stat.NAME` to a statistical variable.
+    fn stat_variable(&mut self, pos: usize) -> Result<Expr, TranspileError> {
+        self.expect(&Tok::Stat, "`stat`")?;
+        if !self.matches(&Tok::Dot) {
+            return Err(self.error_at(
+                "`stat` must be followed by `.` and a name, as in `stat.sumx`",
+                pos,
+            ));
+        }
+        let (name, name_pos) = self.expect_ident("a statistical variable name after `stat.`")?;
+        let Some(var) = StatVar::parse(&name) else {
+            return Err(self.error_at(format!("unknown statistical variable `{name}`"), name_pos));
+        };
+        Ok(Expr::StatVar(var, pos))
+    }
+
     /// Parse one or more accessors: `.field` or `[index]`.
     fn accessors(&mut self) -> Result<Vec<Accessor>, TranspileError> {
         let mut accessors = Vec::new();
@@ -593,9 +804,21 @@ impl<'a> Parser<'a> {
                 accessors.push(Accessor::Field { name, pos });
             } else if self.matches(&Tok::LBracket) {
                 let pos = self.position();
-                let index = self.bracket_index()?;
+                let expr = self.expression()?;
                 self.expect(&Tok::RBracket, "`]` after the index")?;
-                accessors.push(Accessor::Index { index, pos });
+                // Keep a plain literal as an `Index`; everything else is left
+                // for the folder/unroller to resolve.
+                match expr {
+                    Expr::Number(value)
+                        if value.fract() == 0.0 && value >= 0.0 && value <= usize::MAX as f64 =>
+                    {
+                        accessors.push(Accessor::Index {
+                            index: value as usize,
+                            pos,
+                        });
+                    }
+                    other => accessors.push(Accessor::IndexExpr { expr: other, pos }),
+                }
             } else {
                 return Ok(accessors);
             }
@@ -612,7 +835,7 @@ impl<'a> Parser<'a> {
                 self.advance();
                 Ok(value as usize)
             }
-            _ => Err(self.error_at("an array index must be a non-negative whole number", pos)),
+            _ => Err(self.error_at("an array size must be a non-negative whole number", pos)),
         }
     }
 
@@ -656,4 +879,30 @@ impl<'a> Parser<'a> {
         }
         Ok(Expr::Call(name, args, pos))
     }
+}
+
+/// Whether `name` names a calculator key that is a statement, not a value.
+fn is_statement_builtin(name: &str) -> bool {
+    matches!(
+        name,
+        "deg"
+            | "rad"
+            | "gra"
+            | "fix"
+            | "sci"
+            | "norm"
+            | "dec"
+            | "hex"
+            | "bin"
+            | "oct"
+            | "to_cartesian"
+            | "to_polar"
+            | "clrmemory"
+            | "clrstat"
+            | "freqon"
+            | "freqoff"
+            | "mplus"
+            | "mminus"
+            | "dt"
+    )
 }

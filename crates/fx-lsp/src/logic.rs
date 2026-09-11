@@ -607,6 +607,10 @@ fn fxc_completion_items() -> Vec<CompletionItem> {
         ("goto", "unconditional jump to a label"),
         ("label", "jump label"),
         ("print", "display a value"),
+        ("and", "bitwise AND (BASE mode)"),
+        ("or", "bitwise OR (BASE mode)"),
+        ("xor", "bitwise XOR (BASE mode)"),
+        ("xnor", "bitwise XNOR (BASE mode)"),
     ];
     for (label, detail) in keywords {
         push(
@@ -675,6 +679,64 @@ fn fxc_completion_items() -> Vec<CompletionItem> {
         );
     }
 
+    // -- statement-only calculator keys ------------------------------------
+    let statements: &[(&str, &str)] = &[
+        ("mplus(", "M+ — add to the fixed M memory"),
+        ("mminus(", "M- — subtract from the fixed M memory"),
+        ("clrmemory(", "ClrMemory — clear A B C D X Y M"),
+        ("clrstat(", "ClrStat — clear statistics data (SD/REG)"),
+        ("freqon(", "FreqOn — turn frequency weighting on (SD/REG)"),
+        (
+            "freqoff(",
+            "FreqOff — turn frequency weighting off (SD/REG)",
+        ),
+        ("dt(", "DT — append a statistics data point (SD/REG)"),
+        ("deg(", "Deg — degrees"),
+        ("rad(", "Rad — radians"),
+        ("gra(", "Gra — gradians"),
+        ("fix(", "Fix n — fixed display, 0-9"),
+        ("sci(", "Sci n — scientific display, 0-9"),
+        ("norm(", "Norm n — normal display, 1-2"),
+        ("dec(", "Dec — decimal base (BASE)"),
+        ("hex(", "Hex — hexadecimal base (BASE)"),
+        ("bin(", "Bin — binary base (BASE)"),
+        ("oct(", "Oct — octal base (BASE)"),
+        (
+            "to_cartesian(",
+            "▶a+b𝑖 — complex results in cartesian form (CMPLX)",
+        ),
+        ("to_polar(", "▶r∠θ — complex results in polar form (CMPLX)"),
+    ];
+    for (label, detail) in statements {
+        push(&mut items, function(label, &format!("{label}$0)"), detail));
+    }
+
+    // -- the `stat.` namespace ---------------------------------------------
+    push(
+        &mut items,
+        CompletionItem {
+            label: "stat.".to_string(),
+            kind: Some(CompletionItemKind::VARIABLE),
+            detail: Some("statistical-variable namespace (SD/REG)".to_string()),
+            documentation: Some(Documentation::String(
+                "Statistical variables are reached as `stat.NAME`, for example \
+                 `stat.meanx` or `stat.regA`."
+                    .to_string(),
+            )),
+            ..Default::default()
+        },
+    );
+    for var in fx_transpiler::ast::StatVar::ALL {
+        push(
+            &mut items,
+            simple(
+                &format!("stat.{}", var.ascii()),
+                CompletionItemKind::VARIABLE,
+                &format!("statistical variable (displays as `{}`)", var.glyph()),
+            ),
+        );
+    }
+
     // -- constants ----------------------------------------------------------
     push(
         &mut items,
@@ -727,6 +789,7 @@ fn fxc_completion_items() -> Vec<CompletionItem> {
         ("^", "power"),
         ("**", "power (alias for `^`)"),
         ("=", "assignment"),
+        ("=>", "conditional jump (⇒)"),
         (";", "statement terminator"),
     ];
     for (label, detail) in operators {
@@ -1075,6 +1138,19 @@ fn preceded_by_phys(source: &str, word_start: usize) -> bool {
     !prefix.chars().next_back().is_some_and(is_word_char)
 }
 
+/// Whether the word starting at `word_start` is the `NAME` of a `stat.NAME`.
+fn preceded_by_stat(source: &str, word_start: usize) -> bool {
+    let before = source[..word_start].trim_end_matches([' ', '\t']);
+    let Some(prefix) = before.strip_suffix('.') else {
+        return false;
+    };
+    let prefix = prefix.trim_end_matches([' ', '\t']);
+    let Some(prefix) = prefix.strip_suffix("stat") else {
+        return false;
+    };
+    !prefix.chars().next_back().is_some_and(is_word_char)
+}
+
 /// Hover for `.fxc`.
 ///
 /// The description is found without the transpiler's lexer, so it still works
@@ -1111,8 +1187,44 @@ fn fxc_description(source: &str, word: &str, start: usize) -> String {
         };
     }
 
+    if preceded_by_stat(source, start) {
+        return match fx_transpiler::ast::StatVar::parse(word) {
+            Some(var) => format!(
+                "**`stat.{word}`** — statistical variable\n\nDisplays as `{}` (SD or REG mode).",
+                var.glyph()
+            ),
+            None => format!(
+                "**`stat.{word}`** — unknown statistical variable\n\nNo statistical variable is named `{word}`."
+            ),
+        };
+    }
+
     match word {
         "phys" => "**`phys`** — scientific-constant namespace\n\nWrite `phys.NAME`, for example `phys.h` (Planck constant) or `phys.hbar` (reduced Planck constant).".to_string(),
+        "stat" => "**`stat`** — statistical-variable namespace\n\nWrite `stat.NAME`, for example `stat.meanx` or `stat.regA` (SD or REG mode).".to_string(),
+        // Statement-only calculator keys.
+        "mplus" => "**`mplus(x)`** — add to the fixed `M` memory (`M+`)".to_string(),
+        "mminus" => "**`mminus(x)`** — subtract from the fixed `M` memory (`M-`)".to_string(),
+        "clrmemory" => "**`clrmemory()`** — clear A B C D X Y M".to_string(),
+        "clrstat" => "**`clrstat()`** — clear statistics data (SD/REG)".to_string(),
+        "freqon" => "**`freqon()`** — turn frequency weighting on (SD/REG)".to_string(),
+        "freqoff" => "**`freqoff()`** — turn frequency weighting off (SD/REG)".to_string(),
+        "dt" => "**`dt(x)`**, **`dt(x, y)`**, **`dt(x, y, f)`** — append statistics data (SD/REG)".to_string(),
+        "deg" => "**`deg()`** — angle unit: degrees".to_string(),
+        "rad" => "**`rad()`** — angle unit: radians".to_string(),
+        "gra" => "**`gra()`** — angle unit: gradians".to_string(),
+        "fix" => "**`fix(n)`** — fixed display with `n` decimals (0-9)".to_string(),
+        "sci" => "**`sci(n)`** — scientific display with `n` digits (0-9)".to_string(),
+        "norm" => "**`norm(n)`** — normal display (1 or 2)".to_string(),
+        "dec" => "**`dec()`** — decimal base (BASE mode)".to_string(),
+        "hex" => "**`hex()`** — hexadecimal base (BASE mode)".to_string(),
+        "bin" => "**`bin()`** — binary base (BASE mode)".to_string(),
+        "oct" => "**`oct()`** — octal base (BASE mode)".to_string(),
+        "to_cartesian" => "**`to_cartesian()`** — complex results as `a+b𝑖` (CMPLX)".to_string(),
+        "to_polar" => "**`to_polar()`** — complex results as `r∠θ` (CMPLX)".to_string(),
+        "and" | "or" | "xor" | "xnor" => {
+            format!("**`{word}`** — bitwise operator (BASE mode)")
+        }
         "let" => "**`let`** — declare a variable".to_string(),
         "if" => "**`if`** — conditional execution".to_string(),
         "else" => "**`else`** — alternative `if` body".to_string(),

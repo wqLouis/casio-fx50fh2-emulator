@@ -176,7 +176,13 @@ B◢
 **`.fxc`** is a C-like source language that transpiles to the above. It adds
 `const` for compile-time values, `#data` for reading JSON while transpiling,
 `free` for releasing one of the seven memories, and `#tests` for cases that
-travel with the program.
+travel with the program. **Every PRGM key has an `.fxc` spelling** — the
+postfix and infix keys (`sqr(x)`, `fact(x)`, `frac(a, b)`, `npr(n, r)`,
+`polar(r, θ)`), the statistical values (`stat.meanx`), setup and data keys
+(`fix(3);`, `dt(x, y);`), the bitwise words, `Ran#` as `ran()`, and the `⇒` key
+as `cond => stmt;`. Constant expressions are pre-calculated while transpiling —
+the machine has only 680 bytes of program storage — and a constant `for` loop
+that indexes an array is unrolled so its indices become literals.
 
 ```c
 const max_input = 12;              // compile-time value: costs no memory

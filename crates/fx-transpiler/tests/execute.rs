@@ -171,3 +171,103 @@ fn transpiler_mode_acceptance_implies_interpreter_acceptance() {
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// The full PRGM token vocabulary in `.fxc`
+
+#[test]
+fn ran_is_deterministic() {
+    assert_eq!(run("print(ran());", &[]), vec!["0.6772111681"]);
+    assert_eq!(
+        run("print(ran()); print(ran());", &[]),
+        vec!["0.6772111681", "0.7455286005"]
+    );
+}
+
+#[test]
+fn roots_powers_and_arithmetic_keys_run() {
+    assert_eq!(run("print(root(3, 27));", &[]), vec!["3"]);
+    assert_eq!(run("print(pow10(3));", &[]), vec!["1000"]);
+    assert_eq!(run("print(exp(0));", &[]), vec!["1"]);
+    assert_eq!(
+        run("print(sqr(5)); print(cube(2)); print(inv(4));", &[]),
+        vec!["25", "8", "0.25"]
+    );
+    assert_eq!(
+        run("print(fact(5)); print(pct(50));", &[]),
+        vec!["120", "0.5"]
+    );
+    assert_eq!(run("print(frac(1, 3));", &[]), vec!["0.3333333333"]);
+    assert_eq!(
+        run("print(ncr(5, 2)); print(npr(5, 2));", &[]),
+        vec!["10", "20"]
+    );
+}
+
+#[test]
+fn base_n_operators_run() {
+    let source = "\
+#mode BASE
+dec();
+print(0b1010 and 0b1100);
+print(0b1010 or 0b1100);
+print(0b1010 xor 0b1100);
+print(not(0));
+print(neg(1));
+";
+    assert_eq!(run(source, &[]), vec!["8d", "14d", "6d", "-1d", "-1d"]);
+}
+
+#[test]
+fn statistics_statements_run() {
+    let source = "\
+#mode REG
+dt(1, 2);
+dt(3, 4);
+print(stat.meanx);
+print(stat.sumxy);
+freqon();
+print(stat.n);
+";
+    assert_eq!(run(source, &[]), vec!["2", "14", "2"]);
+}
+
+#[test]
+fn memory_accumulator_runs() {
+    assert_eq!(run("mplus(3); mminus(1); print(mvalue());", &[]), vec!["2"]);
+    assert_eq!(
+        run("mplus(3); clrmemory(); print(mvalue());", &[]),
+        vec!["0"]
+    );
+}
+
+#[test]
+fn conditional_jump_runs() {
+    assert_eq!(
+        run("let x = 5; x > 0 => print(1); x < 0 => print(2);", &[]),
+        vec!["1"]
+    );
+}
+
+#[test]
+fn complex_builtins_run() {
+    assert_eq!(run("#mode CMPLX\nprint(arg(i()));", &[]), vec!["90"]);
+    assert_eq!(
+        run("#mode CMPLX\nprint(conjg(1 + i()));", &[]),
+        vec!["1-1𝑖"]
+    );
+    assert_eq!(
+        run("#mode CMPLX\nprint(polar(2, 45));", &[]),
+        vec!["1.414213562+1.414213562𝑖"]
+    );
+}
+
+#[test]
+fn fix_setup_rounds_the_display() {
+    assert_eq!(run("fix(3); print(1 / 3);", &[]), vec!["0.333"]);
+}
+
+#[test]
+fn ans_reads_the_previous_result() {
+    assert_eq!(run("let a = 6 * 7; print(ans());", &[]), vec!["42"]);
+}

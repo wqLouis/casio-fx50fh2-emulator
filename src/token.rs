@@ -118,6 +118,39 @@ pub enum FuncName {
     Neg,
 }
 
+impl FuncName {
+    /// Every parenthetical function. Used by tests to guarantee the `.fxc`
+    /// front end offers a spelling for each one.
+    pub const ALL: [FuncName; 26] = [
+        FuncName::Sin,
+        FuncName::Cos,
+        FuncName::Tan,
+        FuncName::Asin,
+        FuncName::Acos,
+        FuncName::Atan,
+        FuncName::Sinh,
+        FuncName::Cosh,
+        FuncName::Tanh,
+        FuncName::Asinh,
+        FuncName::Acosh,
+        FuncName::Atanh,
+        FuncName::Log,
+        FuncName::Ln,
+        FuncName::Sqrt,
+        FuncName::Cbrt,
+        FuncName::TenPow,
+        FuncName::EPow,
+        FuncName::Abs,
+        FuncName::Pol,
+        FuncName::Rec,
+        FuncName::Rnd,
+        FuncName::Arg,
+        FuncName::Conjg,
+        FuncName::Not,
+        FuncName::Neg,
+    ];
+}
+
 /// Postfix operators that bind to the value on their left.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Postfix {
@@ -131,6 +164,17 @@ pub enum Postfix {
     Fact,
     /// `x%`
     Percent,
+}
+
+impl Postfix {
+    /// Every postfix key. Used by the `.fxc` coverage test.
+    pub const ALL: [Postfix; 5] = [
+        Postfix::Inverse,
+        Postfix::Square,
+        Postfix::Cube,
+        Postfix::Fact,
+        Postfix::Percent,
+    ];
 }
 
 /// Infix binary operators.
@@ -156,6 +200,30 @@ pub enum BinOp {
     Xnor,
     /// The `∠` polar form `r∠θ`.
     Polar,
+}
+
+impl BinOp {
+    /// Every infix operator. Used by the `.fxc` coverage test.
+    pub const ALL: [BinOp; 18] = [
+        BinOp::Add,
+        BinOp::Sub,
+        BinOp::Mul,
+        BinOp::Div,
+        BinOp::Frac,
+        BinOp::Perm,
+        BinOp::Comb,
+        BinOp::Eq,
+        BinOp::Ne,
+        BinOp::Gt,
+        BinOp::Lt,
+        BinOp::Ge,
+        BinOp::Le,
+        BinOp::And,
+        BinOp::Or,
+        BinOp::Xor,
+        BinOp::Xnor,
+        BinOp::Polar,
+    ];
 }
 
 #[derive(Debug, Clone, PartialEq)]

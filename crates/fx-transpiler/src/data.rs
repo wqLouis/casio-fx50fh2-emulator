@@ -146,6 +146,9 @@ impl Data {
                     path.push('.');
                     path.push_str(field);
                 }
+                Accessor::IndexExpr { pos: at, .. } => {
+                    return Err(crate::error::computed_index_error(source, name, *at));
+                }
                 Accessor::Index { index, pos: at } => {
                     let Json::Array(items) = value else {
                         return Err(TranspileError::at(

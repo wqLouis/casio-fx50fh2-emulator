@@ -70,6 +70,24 @@ impl fmt::Display for TranspileError {
 
 impl std::error::Error for TranspileError {}
 
+/// The error for an array index that is still not a literal after folding and
+/// unrolling.
+///
+/// PRGM has no indirect addressing, so an element is a fixed memory chosen
+/// while transpiling; a run-time index cannot be expressed without an
+/// `If`/`Else` chain over every element.
+pub(crate) fn computed_index_error(source: &str, name: &str, pos: usize) -> TranspileError {
+    TranspileError::at(
+        source,
+        format!(
+            "`{name}[…]` needs a compile-time index: PRGM has no indirect addressing, so each \
+             element is a fixed memory chosen while transpiling. Unroll the loop (write \
+             `{name}[0]`, `{name}[1]`, …) so the index is a literal"
+        ),
+        pos,
+    )
+}
+
 /// Map a byte offset to a 1-based `(line, column)` pair.
 ///
 /// The column counts `char`s, not bytes, and offsets past the end of the

@@ -44,10 +44,13 @@ generated code fails.
 3. **`input()` is only legal as the entire right-hand side of an assignment.**
    `let a = input();` is fine; `print(input());` and `let a = input() + 1;` are
    errors.
-4. **There are no logic operators and no modulo.** No `&&`, `||`, `!`, `%`,
-   `++`, `--`, `+=`, or bitwise operators. Comparisons produce `1` or `0`.
+4. **There are no C-style logic operators and no modulo.** No `&&`, `||`, `!`,
+   `%`, `++`, `--`, `+=`. Comparisons produce `1` or `0`; the calculator keys
+   behind them are calls (`fact(x)`, `pct(x)`, `not(x)`), except the base-n
+   words `and`/`or`/`xor`/`xnor`, which are real infix operators in `#mode BASE`.
 5. **Everything is a floating-point number.** There is no integer type, no
-   string type, no arrays, and no user-defined functions.
+   string type, and no user-defined functions. Arrays exist (one memory per
+   element, literal indices only), and every PRGM key has a call spelling.
 
 ---
 
@@ -62,9 +65,9 @@ stmt       := 'let' NAME '=' expr ';'
             | 'let' NAME '[' INTEGER? ']' ('=' '{' expr (',' expr)* '}')? ';'
             | 'const' NAME '=' expr ';'
             | NAME '=' expr ';'
-            | NAME '[' INTEGER ']' '=' expr ';'    -- array element
+            | NAME '[' expr ']' '=' expr ';'    -- array element (index folds to a literal)
             | 'free' NAME ';'
-            | 'unsafe_free' NAME ';'      -- `free` without the jump check
+            | 'unsafe_free' NAME ';'      -- `free` without the control-flow check
             | 'print' [ '(' expr ')' | expr ] ';'   -- parens optional
             | 'if' '(' expr ')' body ('else' body)?
             | 'while' '(' expr ')' body
@@ -72,6 +75,13 @@ stmt       := 'let' NAME '=' expr ';'
             | 'break' ';'
             | 'goto' DIGIT ';'
             | 'label' DIGIT ';'
+            | 'mplus' | 'mminus' '(' expr ')' ';'  -- expr M+ / M-
+            | 'clrmemory' | 'clrstat' | 'freqon' | 'freqoff' '(' ')' ';'
+            | 'deg' | 'rad' | 'gra' | 'dec' | 'hex' | 'bin' | 'oct'
+            | 'to_cartesian' | 'to_polar' '(' ')' ';'
+            | 'fix' | 'sci' | 'norm' '(' INTEGER ')' ';'
+            | 'dt' '(' expr (',' expr (',' expr)?)? ')' ';'  -- statistics data
+            | expr '=>' stmt                 -- conditional jump (⇒)
             | '{' stmt* '}'
             | ';'                            -- empty statement
             | expr ';'                       -- evaluate, do not display
@@ -80,17 +90,23 @@ forinit    := ['let'] NAME '=' expr
 
 JSON       := a JSON value, or a string naming a file to read
 dataref    := NAME accessor+
-accessor   := '.' NAME | '[' INTEGER ']'
+accessor   := '.' NAME | '[' expr ']'
 
-primary    := NUMBER | 'pi' | 'e' | 'input()' | NAME | dataref
-            | NAME '(' [expr (',' expr)*] ')' | '(' expr ')'
+primary    := NUMBER | '0x' HEX | '0b' BIN | '0o' OCT | 'pi' | 'e'
+            | 'input()' | NAME | dataref
+            | NAME '(' [expr (',' expr)*] ')'
+            | 'phys' '.' CONSTNAME | 'stat' '.' STATNAME | '(' expr ')'
 ```
 
 **Binding strength, tightest first:** `(...)` / calls → `^ **` → unary `-` →
-`* /` → `+ -` → `< <= > >=` → `== !=` (loosest).
+`* /` → `+ -` → `< <= > >=` → `== !=` → `and` → `or xor xnor` (loosest).
 
 Note that unary minus binds *looser* than power, so `-2 ^ 2` is `-(2 ^ 2) = -4`,
 not `(-2) ^ 2`.
+
+A `for` loop whose bounds are integer constants is unrolled when its body needs
+a computed array index, so `for (let i = 0; i < 3; i = i + 1) { v[i] = input(); }`
+is fine. See [arrays](#arrays) for the shapes that unroll.
 
 ### Lexical details
 
@@ -99,10 +115,10 @@ not `(-2) ^ 2`.
 | Whitespace | Insignificant, including newlines. Indent freely. |
 | Comments | `// to end of line` and `/* block */`. An unterminated block comment is an error. |
 | Identifiers | `[A-Za-z_][A-Za-z0-9_]*`. Keywords are reserved. |
-| Numbers | Decimal only: `123`, `1.5`, `.5`, `1e10`, `2.5E-2`. **No** hex/binary literals. |
-| Keywords | `let if else while for break goto label print` |
-| Punctuation | `+ - * / ^ ** = == != < <= > >= ( ) { } [ ] ; ,` |
-| Not available | `% & | ~ ! ++ -- += -= *= /= && || << >> ?:` |
+| Numbers | Decimal: `123`, `1.5`, `.5`, `1e10`, `2.5E-2`. In `#mode BASE` also base-tagged: `0x1F`, `0b1010`, `0o17`. |
+| Keywords | `let const free unsafe_free if else while for break goto label print phys stat and or xor xnor` |
+| Punctuation | `+ - * / ^ ** = == != < <= > >= => ( ) { } [ ] ; , .` |
+| Not available | As *operators*: `% & | ~ ! ++ -- += -= *= /= && \|\| << >> ?:`. The keys behind them have call spellings (`pct`, `fact`, `not`, `and`, `or`, `xor`, `xnor`). |
 
 ---
 
@@ -139,15 +155,27 @@ free w;                   // release every element at once
 ```
 
 The payoff is that an element reference is **free**: `w[1]` emits the single
-memory letter `B`, with no instructions at all. The cost is that you cannot walk
-an array in a loop — unroll it instead:
+memory letter `B`, with no instructions at all. The cost is that an index must
+be known while transpiling. You can still walk an array with a loop whose
+bounds are constant — the transpiler unrolls it and substitutes each counter
+value:
 
 ```c
-// Not `for (i…) print(v[i]);` — `i` is not a constant.
-print(v[0]);
-print(v[1]);
-print(v[2]);
+let v[3];
+for (let i = 0; i < 3; i = i + 1) { v[i] = input(); }
 ```
+
+```text
+?→A
+?→B
+?→C
+```
+
+The loop must be the canonical `for` shape with integer bounds after
+compile-time evaluation. A run-time bound (`i < n`), a `break`, `goto`/`label`,
+a declaration, or a `free` in the body stops the unroll, and the computed index
+is then a compile-time error — unroll those by hand. A loop that only touches
+scalars keeps its native `For`/`Next` form.
 
 Rules that will bite you:
 
@@ -224,16 +252,32 @@ Goto 1
 Prefer structured loops. `goto` exists for compatibility with hand-written
 PRGM.
 
+### Conditional jump (`⇒`)
+
+`cond => stmt;` runs a single statement when `cond` is non-zero. It is PRGM's
+`⇒` key; use `if` for anything larger than one statement.
+
+```c
+let x = input();
+x > 0 => print(1);       // x>0⇒1◢
+```
+
 ---
 
 ## 4. Expressions and built-ins
 
-| Built-in | Emits | Notes |
+Every PRGM key has an `.fxc` spelling. Value keys are calls; keys that act on
+the machine are statements ending in `;`.
+
+| Call | Emits | Notes |
 | --- | --- | --- |
 | `sqrt(x)` | `√(x)` | |
 | `cbrt(x)` | `∛(x)` | |
+| `root(n, x)` | `nx√(x)` | the `x√(` key; index first |
+| `pow10(x)` | `10^(x)` | |
+| `exp(x)` | `e^(x)` | |
 | `abs(x)` | `Abs(x)` | |
-| `sin cos tan` | `sin(x)` … | angle unit set by the calculator's mode |
+| `sin cos tan` | `sin(x)` … | angle unit set by `deg`/`rad`/`gra` |
 | `asin acos atan` | `sin⁻¹(x)` … | |
 | `sinh cosh tanh` | `sinh(x)` … | |
 | `asinh acosh atanh` | `sinh⁻¹(x)` … | |
@@ -241,12 +285,40 @@ PRGM.
 | `log(a, b)` | `log(a,b)` | log of `b` to base `a` — argument order matters |
 | `ln(x)` | `ln(x)` | natural log |
 | `rnd(x)` | `Rnd(x)` | round to 10 significant digits |
+| `pol(x, y)` / `rec(x, y)` | `Pol(x,y)` / `Rec(x,y)` | COMP or CMPLX; write `X`/`Y` |
+| `arg(x)` / `conjg(x)` | `arg(x)` / `Conjg(x)` | CMPLX |
+| `polar(r, θ)` | `r∠θ` | CMPLX |
+| `not(x)` / `neg(x)` | `Not(x)` / `Neg(x)` | BASE |
+| `inv(x)` / `sqr(x)` / `cube(x)` | `x⁻¹` / `x²` / `x³` | postfix keys |
+| `fact(x)` / `pct(x)` | `x!` / `x%` | postfix keys |
+| `frac(a, b)` | `a┘b` | the fraction key |
+| `npr(n, r)` / `ncr(n, r)` | `<n>nPr<r>` / `<n>nCr<r>` | |
+| `ran()` | `Ran#` | pseudo-random in `[0, 1)`; fixed seed |
+| `i()` | `i` | CMPLX; a bare `i` is still a variable |
+| `ans()` | `Ans` | the previous result |
+| `mvalue()` | `M` | the fixed `M` memory (reserves it; see §5) |
+
+Statement keys (all end in `;`): `mplus(x);`/`mminus(x);` → `x M+`/`x M-`,
+`clrmemory();` → `ClrMemory`, `clrstat();` → `ClrStat`, `freqon();`/`freqoff();`
+→ `FreqOn`/`FreqOff`, `dt(x[; y[; f]]);` → `x DT`/`x,y DT`/`x,y;f DT`,
+`deg();`/`rad();`/`gra();` → `Deg`/`Rad`/`Gra`, `fix(n);`/`sci(n);` → `Fix n`/`Sci n`
+(`n` 0–9), `norm(n);` → `Norm n` (1–2), `dec();`/`hex();`/`bin();`/`oct();` →
+`Dec`/`Hex`/`Bin`/`Oct`, `to_cartesian();`/`to_polar();` → `▶a+b𝑖`/`▶r∠θ`.
+
+Statistical variables use the `stat.` namespace: `stat.sumx`, `stat.meanx`,
+`stat.sigmax`, `stat.regA`, … (glyph `Σx`, `x̄`, `σx`, `regA`). A bare
+`sumx` would be an ordinary variable, so always write the namespace.
 
 Constants: `pi` → `π` (or `pi` with `--ascii`), `e` → `e`, and the 40
 scientific constants under the `phys.` namespace (below).
 
+In `#mode BASE`, `and`, `or`, `xor` and `xnor` are infix operators and integer
+literals may be base-tagged (`0x1F`, `0b1010`, `0o17`, emitted `1Fh`, `1010b`,
+`17o`). `and` binds tighter than `or`/`xor`/`xnor`.
+
 The only exponentiation operators are `^` and its alias `**`. There is no
-`min`/`max`, and no integer division or modulo. Unknown function names are a
+`min`/`max`, and no integer division or modulo (call `frac(a, b)` for the
+calculator's `┘` key). Unknown function names are a
 parse error, so do not invent built-ins.
 
 ### Scientific constants
@@ -434,19 +506,21 @@ declaration takes effect:
 let x = x + 1;     // ERROR: `x` cannot be used in its own initializer
 ```
 
-### `free` with jumps needs `unsafe_free`
+### `free` under jumps or loops needs `unsafe_free`
 
-A `goto` can re-enter code whose memory has since been re-used, so a checked
-`free` in a program containing `goto`/`label` is an error. `unsafe_free` says you
-have checked it yourself:
+A `goto` can re-enter code whose memory has since been re-used, and a loop body
+re-enters on every iteration, so a checked `free` inside a loop body or in a
+program containing `goto`/`label` is an error. `unsafe_free` says you have
+checked it yourself:
 
 ```c
 unsafe_free x;
 ```
 
 `unsafe_free` still rejects double frees, unknown names and `const`s — it only
-waives the control-flow check. Programs with jumps and no `free` are unaffected,
-because nothing is ever re-used.
+waives the control-flow check. Programs with jumps or loops and no `free` are
+unaffected, because nothing is ever re-used. A `free` outside every loop is
+fine even when the program loops.
 
 Running out of memories names the variables in the way:
 
@@ -470,10 +544,10 @@ with a **header directive**:
 | Name | Aliases | What it means for `.fxc` |
 | --- | --- | --- |
 | `COMP` | — | default; general real arithmetic |
-| `CMPLX` | `CPLX`, `COMPLEX` | declares complex mode |
-| `BASE` | `BASEN`, `BASE-N` | integer arithmetic; **rejects built-ins and `pi`/`e`** |
-| `SD` | `STAT`, `STATS`, `STATISTICS` | declares statistics mode |
-| `REG` | `REGRESSION` | declares regression mode |
+| `CMPLX` | `CPLX`, `COMPLEX` | unlocks `i()`, `arg`, `conjg`, `polar`, `to_cartesian`/`to_polar` |
+| `BASE` | `BASEN`, `BASE-N` | integer arithmetic; bitwise words, base literals, `dec`/`hex`/`bin`/`oct`, `not`/`neg`; **rejects every float built-in and `pi`/`e`/`phys.*`** |
+| `SD` | `STAT`, `STATS`, `STATISTICS` | unlocks `stat.*`, `dt`, `clrstat`, `freqon`/`freqoff` |
+| `REG` | `REGRESSION` | everything SD has, plus the `y`/regression stats (`stat.sumy`, `stat.regA`, …) |
 
 Rules:
 
@@ -484,14 +558,18 @@ Rules:
   in COMP.
 * A header (or `--mode`) is **copied into the output**, so the mode survives the
   round trip.
-* Because `.fxc` is real-number-only, `CMPLX`/`SD`/`REG` change only the
-  declared mode. **`BASE` is the one mode that changes what you may write.**
+* The mode is checked at transpile time, exactly as the interpreter checks it:
+  using `stat.sumx` in COMP, `arg` in COMP, `not` in COMP, `0xFF` in COMP, or
+  `sqrt` in BASE is a **transpile error**, not a `Mode ERROR` at run time.
+  `pol`/`rec` are the one COMP/CMPLX-only pair — they are not offered in
+  SD/REG either.
 
-In `BASE`, all built-ins and `pi`/`e` are rejected at transpile time:
+In `BASE`, all float built-ins and `pi`/`e`/`phys.*` are rejected at transpile
+time:
 
 ```console
 $ fx50 build base.fxc      # with: #mode BASE / print(sqrt(4));
-fx50: `sqrt` is not available in BASE mode (switch to COMP, CMPLX, SD or REG) (line 2, column 7)
+fx50: `sqrt` is not available in BASE mode (needs COMP, CMPLX, SD or REG) (line 2, column 7)
 ```
 
 > **Caveat.** `#mode BASE` declares integer mode, but `.fxc` has no syntax for
@@ -508,9 +586,10 @@ fx50: `sqrt` is not available in BASE mode (switch to COMP, CMPLX, SD or REG) (l
 1. **No `%`, `&&`, `||`, `!`, `++`, `--`, compound assignment.** Write
    `i = i + 1`, not `i++`. Build boolean logic from comparisons and nesting:
    `if (a > 0) { if (b > 0) { ... } }` instead of `a > 0 && b > 0`.
-2. **`for` bounds are adjusted.** `i < limit` becomes `To limit-1`, and
-   `i > limit` becomes `To limit+1 Step -step`. So `for (i = 0; i < 5; ...)`
-   emits `For 0→A To 5-1 Step 1`. The adjustment is correct but surprising if
+2. **`for` bounds are adjusted, then folded.** `i < limit` becomes `To limit-1`,
+   and `i > limit` becomes `To limit+1 Step -step`. A literal limit is folded, so
+   `for (i = 0; i < 5; ...)` emits `For 0→A To 4 Step 1`, while a variable limit
+   keeps the subtraction: `To A-1`. The adjustment is correct but surprising if
    you are diffing output.
 3. **Only four `for` shapes compile natively:** `<` with `+`, `<=` with `+`,
    `>` with `-`, `>=` with `-`. Anything else (for example `i != n`, or an
@@ -524,12 +603,22 @@ fx50: `sqrt` is not available in BASE mode (switch to COMP, CMPLX, SD or REG) (l
    common and often a bug.
 6. **Comparisons are not a boolean type.** `a > 0` evaluates to `1` or `0`, so
    you may write `x = (a > 0);` and later test it.
-7. **Error timing differs.** Malformed source, an eighth variable, `input()` in
-   an expression, an unknown function and BASE-mode built-ins are all caught at
-   **transpile time** with a line and column. `break` outside a loop, a `goto`
-   with no matching label, and division by zero are **runtime** errors
-   (`Argument ERROR`, `Go ERROR`, `Math ERROR`). Do not assume a clean
-   `fx50 build` means the program will run — run it if you can.
+7. **Every key is a call, not an operator.** `x²` is `sqr(x)`, `x!` is
+   `fact(x)`, `%` is `pct(x)`, `┘` is `frac(a, b)`, `nPr` is `npr(n, r)`, `∠`
+   is `polar(r, θ)`. The `and`/`or`/`xor`/`xnor` words are the exception: those
+   are real infix operators (BASE mode only). `i` alone is still a variable;
+   the imaginary unit is `i()`.
+8. **Error timing differs.** Malformed source, an eighth variable, `input()` in
+   an expression, an unknown function, a mode violation, and `free` under
+   re-entrant control flow are all caught at **transpile time** with a line and
+   column. `break` outside a loop, a `goto` with no matching label, and
+   division by zero are **runtime** errors (`Argument ERROR`, `Go ERROR`,
+   `Math ERROR`). Do not assume a clean `fx50 build` means the program will run
+   — run it if you can.
+9. **The fixed `M` memory is shared.** `mplus`/`mminus`/`mvalue` use the
+   calculator's `M`. The allocator reserves `M` for the whole program when they
+   appear, so a program that uses them has only six memories for its own
+   variables.
 
 ---
 
@@ -688,8 +777,9 @@ Rules:
 * A **top-level JSON string means "read this file"**:
   `#data offsets = "offsets.json";` reads that file, resolved relative to the
   file containing the directive.
-* Reference values with `.field` and `[index]`: `config.offsets[1]`. Indices
-  must be whole-number literals, not expressions.
+* Reference values with `.field` and `[index]`: `config.offsets[1]`. An index
+  may be a constant expression (`config.offsets[1 + 1]`), but it must resolve to
+  a whole number while transpiling; a run-time index is an error.
 * Only **numbers and booleans** can reach the calculator. A boolean is `1` or
   `0`. A string, array or object used as a value is an error — index into it
   first.
@@ -715,23 +805,37 @@ hand when the values are already available as JSON.
       variable that is finished with.
 - [ ] `#data` paths resolve to numbers or booleans; array indices are literals.
 - [ ] No use after free, no double free, no re-declaring a live name, and no
-      `free` alongside `goto`/`label` (use `unsafe_free` if you have verified
-      the jumps).
+      `free` inside a loop body or alongside `goto`/`label` (use `unsafe_free`
+      if you have verified the control flow).
 - [ ] `input()` appears only as a complete assignment right-hand side.
-- [ ] No `%`, `&&`, `||`, `!`, `++`, `--`, `+=`, hex literals, or strings.
-- [ ] Every array index is a **literal** (never a variable), in range, and the
-      array plus everything else fits in seven memories — `fx50 regs` shows the
-      plan. Arrays are freed whole (`free v;`), never element by element.
+- [ ] Calculator keys are written as calls, not operators: `sqr(x)`, `fact(x)`,
+      `pct(x)`, `frac(a, b)`, `npr(n, r)`, `polar(r, θ)`, `ran()`, `i()`. The
+      imaginary unit is `i()`, not a bare `i`. No `%`, `&&`, `||`, `!`, `++`,
+      `--`, `+=`, or strings.
+- [ ] Every array index resolves to a **literal** while transpiling — either
+      written out, folded from a constant expression, or produced by a
+      constant-bound `for` the transpiler can unroll. A run-time index is an
+      error. Indices are in range, and the array plus everything else fits in
+      seven memories — `fx50 regs` shows the plan. Arrays are freed whole
+      (`free v;`), never element by element.
 - [ ] Only built-ins from the table in §4 are called, with the right arity
-      (`log` takes 1 or 2 arguments; everything else takes 1).
-- [ ] `goto`/`label` use a single digit `0`–`9`.
+      (`log` takes 1 or 2 arguments; `root`, `pol`, `rec`, `frac`, `npr`, `ncr`,
+      `polar` take 2; `ran`, `i`, `ans`, `mvalue` take 0; everything else
+      takes 1).
+- [ ] `goto`/`label` use a single digit `0`–`9`. A `=>` guards one statement
+      only; use `if` for more.
 - [ ] Loop bodies that need more than one statement use `{ }` — braces are
       optional for a single statement and it is easy to lose the rest.
 - [ ] Every `goto` has a matching `label`, and `break` only appears inside a
       loop.
-- [ ] In `#mode BASE`, no built-ins, no `pi`, no `e`, no `phys.` constant.
-- [ ] Scientific constants are written `phys.<name>` with the namespace — never
-      as a bare name, which would become a variable.
+- [ ] In `#mode BASE`, no float built-ins, no `pi`, no `e`, no `phys.`
+      constant; base literals (`0x1F`) and the bitwise words are welcome.
+- [ ] Mode-specific keys match the mode: complex keys need CMPLX, `stat.*` and
+      `dt` need SD/REG (`stat.sumy`… need REG), base keys need BASE, setup needs
+      a non-BASE mode, `pol`/`rec` need COMP or CMPLX.
+- [ ] Scientific constants are written `phys.<name>` and statistical variables
+      `stat.<name>`, always with the namespace — never as a bare name, which
+      would become a variable.
 - [ ] `#include` paths exist, start the line, and contain no `#mode`; the
       seven-memory budget is respected *after* expansion.
 - [ ] If you can run commands, a `#tests` table (or a `.tests.json` suite)

@@ -116,6 +116,13 @@ fragment. `analyze(source, dir)` returns the memory plan that `fx50 regs` prints
 without emitting. The pipeline stages are exposed as `lexer::lex`,
 `parser::parse`, `ast`, `data`, `json` and `builtins::lookup`.
 
+Between parsing and allocation two internal passes save program bytes:
+`fold.rs` pre-calculates constant expressions (leaving `pi`/`e`/`phys.`
+symbolic, and refusing anything the machine's 15-digit arithmetic would round),
+and `unroll.rs` expands a constant `for` loop whose body indexes an array, so
+its indices become literals. Both are private; `transpile`/`analyze` apply them
+automatically.
+
 ### Testing API
 
 The `#tests` runner is behind the `testing` feature:
@@ -157,7 +164,11 @@ ASCII modes. `tests/execute.rs` (feature `execute`) transpiles a factorial, a
 loop sum, ascending/descending `for` loops, `while`/`if`/`break`, `goto` and the
 built-ins, then runs them on the interpreter and checks the displayed output.
 `tests/compiletime.rs` covers `const`, `#data`, `free`/`unsafe_free` and the
-lifetime errors.
+lifetime errors. `tests/arrays.rs` covers arrays end to end, including the
+constant loops that are unrolled so `v[i]` becomes a literal. `tests/tokens.rs`
+is the catalogue of the full PRGM key surface and asserts that every element of
+the interpreter's own `FuncName::ALL`, `Postfix::ALL`, `BinOp::ALL` and
+`StatVar::ALL` has an `.fxc` spelling that transpiles.
 
 ## Reference works
 

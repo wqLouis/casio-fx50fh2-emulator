@@ -460,16 +460,19 @@ Two smaller rules keep that story coherent:
 * **A declaration's name is bound before its initializer is walked**, so
   allocation follows source order: `let a = -b * c;` gives `a` the first memory.
 
-**`free` and jumps: `unsafe_free`.** A jump can re-enter code whose memory has
-since been released and given to another variable, so a single forward walk no
-longer describes the program — the linear model would emit the wrong memory.
-Rather than ban the combination, a checked `free` in a program containing
-`goto`/`label` is an error, and `unsafe_free` is the explicit way to say "I have
-checked this myself", borrowing Rust's convention of making the unchecked
-operation visible. Like Rust's `unsafe`, it waives one guarantee, not all
-checking: `unsafe_free` still rejects double frees, unknown names and `const`s.
-A program with jumps and no `free` at all is unaffected, because then nothing is
-ever re-used.
+**`free` under jumps or loops: `unsafe_free`.** A jump can re-enter code whose
+memory has since been released and given to another variable, and so can a loop
+body on its next iteration — `while (c) { print(x); free x; let y = 1; }` gives
+`x` and `y` the same memory, so the second pass reads `y` as `x`. Either way the
+single forward walk no longer describes the program and the linear model would
+emit the wrong memory. Rather than ban the combination, a checked `free` inside
+a loop body or in a program containing `goto`/`label` is an error, and
+`unsafe_free` is the explicit way to say "I have checked this myself", borrowing
+Rust's convention of making the unchecked operation visible. Like Rust's
+`unsafe`, it waives one guarantee, not all checking: `unsafe_free` still rejects
+double frees, unknown names and `const`s. A program with jumps or loops and no
+`free` at all is unaffected, because then nothing is ever re-used, and a `free`
+outside every loop is fine even when the program loops.
 
 **What this replaced.** An earlier revision shipped a `#reg NAME = M` directive
 for pinning a variable to a chosen memory. It answered "how do I make my program
@@ -613,3 +616,114 @@ is a trick a programmer can apply by hand in the rare program where it fits.
 
 Arrays therefore use one memory per element (ADR 0018), and the way to fit a
 program is `const`, `#data` and `free` — not packing.
+
+## ADR 0020 — Constant expressions are pre-calculated, and constant array loops are unrolled
+
+Two byte-saving passes run after parsing and before allocation, both fed by the
+fact that the machine has **680 bytes of program storage shared by all four
+program areas**.
+
+**Constant folding.** An expression built only from numbers is evaluated while
+transpiling and replaced by its value: `2 * 3 + 4` emits `10`, not `2×3+4`; a
+numeric `const` is inlined and then folded, so `const k = 6; print(k + 1)` emits
+`7`; and a literal `for` limit is folded, so `i < 5` emits `To 4`, not `To 5-1`.
+
+Folding had been partly rejected in ADR 0015, which keeps `const` symbolic. That
+reason still holds where it applies, and this ADR does not overturn it: `pi`,
+`e` and the `phys.` constants are **never** folded, because the machine keys
+them in as their own symbols and folding `2 * pi` to a decimal would lose
+precision and cost bytes. What is folded is arithmetic on plain numbers.
+
+Folding must also agree with the machine's arithmetic, which keeps 15
+significant digits and applies an auto-correction pass after every operation —
+while a literal read from a program is *not* corrected. A value is therefore
+folded only when the machine's own `normalize` would leave it unchanged; `1 / 3`
+and `0.1 + 0.2` stay as written, because the machine's `0.333333333333333` and
+`0.3` are not the values a naive `f64` fold produces. The predicate mirrors the
+rules in `src/precision.rs` rather than duplicating them, and a test under the
+`execute` feature asserts the two agree.
+
+**Unrolling constant array loops.** ADR 0018 requires array indices to be
+compile-time literals, which meant `for (let i… ) v[i] = input();` could not be
+written at all. The transpiler now expands a `for` loop whose bounds are integer
+literals after folding, replacing the counter with each of its values and
+folding, so the index becomes a literal. Only loops whose body contains a
+computed index that mentions the counter are expanded: a loop over plain scalars
+keeps its native `For`/`Next` form, because unrolling it would cost bytes rather
+than save them.
+
+The shape is deliberately narrow. A run-time bound, a `break`, `goto`/`label`, a
+declaration, or a `free` in the body stops the unroll, and the index is then
+reported as the compile-time error ADR 0018 describes. The expansion is bounded
+so a large loop cannot silently produce a giant program.
+
+**What happens to the counter.** A `for (let i… )` counter that nothing outside
+the loop mentions is dropped, exactly as writing the loop out by hand drops it —
+that is where the byte saving comes from, and re-declaring it would also make the
+machine display its value at the end of the program, which the loop itself does
+not. If the counter *is* read or freed afterwards, or was an existing variable
+rather than a `let` in the header, it is kept with the value the machine's `For`
+would have left (the first value past the limit), so the unrolled program means
+exactly what the loop did.
+
+## ADR 0021 — Every PRGM key has an `.fxc` spelling
+
+The `.fxc` language began as a C-like shorthand for the common PRGM constructs:
+arithmetic, `If`/`While`/`For`, the prefix functions, `const`, `#data` and
+memory management. The machine's full key vocabulary was **not** reachable —
+`Ran#`, `x√(`, `x²`/`x³`/`x⁻¹`, `!`, `%`, `┘`, `nPr`/`nCr`, `∠`, `Pol(`/`Rec(`,
+`arg`, `Conjg`, `Not`/`Neg`, the `stat.` values, `DT`, `Fix`/`Sci`/`Norm`,
+`Deg`/`Rad`/`Gra`, `Hex`/`Bin`/`Oct`/`Dec`, `▶a+b𝑖`/`▶r∠θ`, `ClrMemory`,
+`ClrStat`, `FreqOn`/`FreqOff`, `M+`/`M-`, the bitwise words and the `⇒` key had
+no spelling at all. A program that needed one had to be written twice, once in
+`.fxc` and once by hand.
+
+**The front end now covers the whole machine.** The transpiler is a front end
+for the calculator, so anything the calculator can key in, `.fxc` can express.
+The mapping was chosen to keep one uniform rule rather than to mirror the
+keyboard's shape:
+
+* **Value keys are calls.** Prefix, postfix and infix keys alike are written
+  `name(args)`, so `sqr(x)` is `x²`, `fact(x)` is `x!`, `frac(a, b)` is `a┘b`,
+  `npr(n, r)` is `n nPr r`, and `polar(r, θ)` is `r∠θ`. The emitter puts the
+  operator back between its arguments with the machine's own precedence, so the
+  output is a real keystroke program. `root(n, x)` is the one place the argument
+  order is not the spelling's order — the `x√(` key writes the index *before*
+  the radical, and `root` follows the key rather than pretending otherwise.
+* **Keys that act on the machine are statements.** `deg();`, `fix(3);`,
+  `clrmemory();`, `dt(x, y);`, `mplus(x);` end in `;` and emit a bare key. This
+  keeps them out of the expression grammar, where `Fix 3` is not a value.
+* **Namespaces mirror `phys.`.** `phys.hbar` was already how a scientific
+  constant is written, so statistical values are `stat.sumx`, `stat.meanx`,
+  `stat.regA`, … A bare `sumx` stays an ordinary variable, so adding the
+  namespace changed no existing program.
+* **`Ran#` is reachable as `ran()`.** It was the only random source, and
+  excluding it was arbitrary. It stays deterministic (a fixed-seed xorshift),
+  which is what makes it usable in `#tests`.
+* **The bitwise words are operators, not calls**, because they are infix on the
+  keypad too: `a and b`, `a or b`, `a xor b`, `a xnor b`. `and` binds tighter
+  than the others, and all four bind looser than the comparisons. Base-tagged
+  literals are written the way other languages write them (`0x1F`, `0b1010`,
+  `0o17`) and emitted the way the calculator does (`1Fh`, `1010b`, `17o`).
+* **`cond => stmt;` is the `⇒` key.** It guards a single assignment, `print` or
+  expression statement; anything larger is a transpile error pointing at `if`,
+  because `⇒` on the machine guards exactly one statement.
+* **The fixed `M` memory is reserved, not shared.** `mplus`/`mminus`/`mvalue`
+  address `M` by its PRGM letter, so the allocator keeps `M` out of its pool for
+  the whole program when they appear. Otherwise a `.fxc` variable could be
+  placed in `M` and silently clobber the accumulator. This costs one of the
+  seven memories only for programs that ask for the accumulator.
+
+**Mode checking now mirrors the interpreter for every mode.** Previously only
+BASE was validated, because `.fxc` was real-number-only. With the full key set
+reachable, the transpiler applies the same rules as `src/check.rs`: complex keys
+need CMPLX, statistics need SD/REG (and the `y`/regression values need REG),
+base keys need BASE, setup needs a non-BASE mode, and `pol`/`rec` need COMP or
+CMPLX. A construct the mode does not offer is a **transpile** error, with a line
+and column, rather than a `Mode ERROR` on the calculator.
+
+**Completeness is tested, not assumed.** `crates/fx-transpiler/tests/tokens.rs`
+maps every element of the interpreter's own `FuncName::ALL`, `Postfix::ALL`,
+`BinOp::ALL` and `StatVar::ALL` to an `.fxc` spelling and asserts it
+transpiles. Adding a key to the machine without a front end for it therefore
+fails the build.

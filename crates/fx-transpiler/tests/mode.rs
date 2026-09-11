@@ -241,11 +241,24 @@ fn base_allows_integer_arithmetic_and_division() {
 /// Every floating-point built-in is rejected in BASE, because the interpreter
 /// rejects all of them. A hardcoded subset once let `abs` and `cbrt` pass
 /// `build` and then fail at `run` time.
+///
+/// `not`/`neg` are the base-n keys and are offered in BASE; `ans`/`mvalue`
+/// read fixed memories and exist everywhere. Everything else is rejected.
 #[test]
 fn base_rejects_every_float_builtin() {
     for builtin in fx_transpiler::builtins::BUILTINS {
-        let src = format!("#mode BASE\nprint({}(a));\n", builtin.name);
-        let e = err(&src);
+        if matches!(builtin.name, "not" | "neg" | "ans" | "mvalue") {
+            continue;
+        }
+        let args = vec!["a"; builtin.max_args].join(", ");
+        let src = format!("#mode BASE\nlet a = 1;\nprint({}({args}));\n", builtin.name);
+        let e = match transpile(&src) {
+            Ok(prgm) => panic!(
+                "`{}` should be rejected in BASE, got:\n{prgm}",
+                builtin.name
+            ),
+            Err(e) => e,
+        };
         assert!(
             e.message
                 .contains(&format!("`{}` is not available in BASE", builtin.name)),

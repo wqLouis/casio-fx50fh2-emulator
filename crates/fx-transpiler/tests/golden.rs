@@ -121,10 +121,10 @@ fn arithmetic_operators() {
 
 #[test]
 fn power_is_parenthesised() {
-    glyph("let a = 2 ^ 3;", "2^(3)→A\n");
-    glyph("let a = 2 ** 3;", "2^(3)→A\n");
-    glyph("let a = 2 ^ (3 + 4);", "2^(3+4)→A\n");
-    glyph("let a = 2 ^ 3 + 1;", "2^(3)+1→A\n");
+    glyph("let a = b ^ c;", "B^(C)→A\n");
+    glyph("let a = b ** c;", "B^(C)→A\n");
+    glyph("let a = b ^ (c + d);", "B^(C+D)→A\n");
+    glyph("let a = b ^ c + d;", "B^(C)+D→A\n");
 }
 
 #[test]
@@ -133,15 +133,15 @@ fn unary_minus() {
     glyph("let a = -b * c;", "-B×C→A\n");
     glyph("let a = -(b + c);", "-(B+C)→A\n");
     glyph("let a = -(-b);", "-(-B)→A\n");
-    glyph("let a = -2 ^ 2;", "-2^(2)→A\n");
+    glyph("let a = -b ^ c;", "-B^(C)→A\n");
 }
 
 #[test]
 fn parentheses_are_only_added_when_needed() {
-    glyph("let a = (1 + 2) * 3;", "(1+2)×3→A\n");
-    glyph("let a = 1 - (2 - 3);", "1-(2-3)→A\n");
-    glyph("let a = 1 / (2 * 3);", "1÷(2×3)→A\n");
-    glyph("let a = (1 + 2) + 3;", "1+2+3→A\n");
+    glyph("let a = (b + c) * d;", "(B+C)×D→A\n");
+    glyph("let a = b - (c - d);", "B-(C-D)→A\n");
+    glyph("let a = b / (c * d);", "B÷(C×D)→A\n");
+    glyph("let a = (b + c) + d;", "B+C+D→A\n");
 }
 
 #[test]
@@ -219,7 +219,7 @@ fn break_statement() {
 fn for_less_than_uses_offset_limit() {
     glyph(
         "for (let i = 0; i < 5; i = i + 1) { print(i); }",
-        "For 0→A To 5-1 Step 1\nA◢\nNext\n",
+        "For 0→A To 4 Step 1\nA◢\nNext\n",
     );
 }
 
@@ -235,7 +235,7 @@ fn for_less_or_equal_uses_the_limit() {
 fn for_greater_than_uses_a_negative_step() {
     glyph(
         "for (let i = 10; i > 0; i = i - 1) { print(i); }",
-        "For 10→A To 0+1 Step -1\nA◢\nNext\n",
+        "For 10→A To 1 Step -1\nA◢\nNext\n",
     );
 }
 
@@ -273,7 +273,7 @@ fn for_falls_back_to_while_when_shape_does_not_match() {
 fn nested_loops() {
     glyph(
         "for (let i = 0; i < 2; i = i + 1) { for (let j = 0; j < 3; j = j + 1) { print(i * 10 + j); } }",
-        "For 0→A To 2-1 Step 1\nFor 0→B To 3-1 Step 1\nA×10+B◢\nNext\nNext\n",
+        "For 0→A To 1 Step 1\nFor 0→B To 2 Step 1\nA×10+B◢\nNext\nNext\n",
     );
 }
 
@@ -281,6 +281,62 @@ fn nested_loops() {
 fn goto_and_label() {
     glyph("label 1; goto 1;", "Lbl 1\nGoto 1\n");
     glyph("goto 7; label 7;", "Goto 7\nLbl 7\n");
+}
+
+// ---------------------------------------------------------------------------
+// Constant folding
+
+#[test]
+fn constant_expressions_are_pre_calculated() {
+    glyph("print(2 * 3 + 4);", "10◢\n");
+    glyph("print((2 + 3) * 4);", "20◢\n");
+    glyph("print(10 / 4);", "2.5◢\n");
+    glyph("print(0.5 + 0.25);", "0.75◢\n");
+    glyph("print(1 < 2);", "1◢\n");
+}
+
+#[test]
+fn inexact_arithmetic_is_left_as_written() {
+    // The machine keeps 15 significant digits and auto-corrects after every
+    // operation, so these are not the values it would produce.
+    glyph("print(1 / 3);", "1÷3◢\n");
+    glyph("print(0.1 + 0.2);", "0.1+0.2◢\n");
+}
+
+#[test]
+fn a_const_is_folded_after_inlining() {
+    glyph("const k = 6;\nprint(k * 2);", "12◢\n");
+    glyph("print(2 * pi + 1);", "2×π+1◢\n");
+}
+
+// ---------------------------------------------------------------------------
+// Unrolling a constant loop that indexes an array
+
+#[test]
+fn a_constant_loop_filling_an_array_is_unrolled() {
+    let source = "\
+let m[3] = {0, 0, 0};
+for (let i = 0; i < 3; i = i + 1) { m[i] = input(); }
+print(m[0] + m[1] + m[2]);
+";
+    glyph(source, "0→A\n0→B\n0→C\n?→A\n?→B\n?→C\nA+B+C◢\n");
+    ascii(source, "0->A\n0->B\n0->C\n?->A\n?->B\n?->C\nA+B+Cdisp\n");
+}
+
+#[test]
+fn a_loop_reading_an_array_with_the_counter_is_unrolled() {
+    let source = "\
+let m[3] = {10, 20, 30};
+for (let i = 0; i < 3; i = i + 1) { print(m[i]); }
+";
+    glyph(source, "10→A\n20→B\n30→C\nA◢\nB◢\nC◢\n");
+}
+
+#[test]
+fn a_counter_read_after_the_loop_is_kept() {
+    let source = "let m[2];\nfor (let i = 0; i < 2; i = i + 1) { m[i] = 1; }\nprint(i);";
+    // The loop becomes two assignments; the counter keeps its final value.
+    glyph(source, "1→A\n1→B\n2→C\nC◢\n");
 }
 
 // ---------------------------------------------------------------------------
@@ -299,11 +355,11 @@ for (let i = 0; i < 3; i = i + 1) { print(i); }
 ";
     glyph(
         source,
-        "?→A\n?→B\nA+B→C\nC◢\nIf C>10\nThen\n1◢\nElse\n0◢\nIfEnd\nWhile C>0\nC-1→C\nWhileEnd\nFor 0→D To 3-1 Step 1\nD◢\nNext\n",
+        "?→A\n?→B\nA+B→C\nC◢\nIf C>10\nThen\n1◢\nElse\n0◢\nIfEnd\nWhile C>0\nC-1→C\nWhileEnd\nFor 0→D To 2 Step 1\nD◢\nNext\n",
     );
     ascii(
         source,
-        "?->A\n?->B\nA+B->C\nCdisp\nIf C>10\nThen\n1disp\nElse\n0disp\nIfEnd\nWhile C>0\nC-1->C\nWhileEnd\nFor 0->D To 3-1 Step 1\nDdisp\nNext\n",
+        "?->A\n?->B\nA+B->C\nCdisp\nIf C>10\nThen\n1disp\nElse\n0disp\nIfEnd\nWhile C>0\nC-1->C\nWhileEnd\nFor 0->D To 2 Step 1\nDdisp\nNext\n",
     );
 }
 

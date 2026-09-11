@@ -35,6 +35,8 @@ pub mod testing;
 
 mod alloc;
 mod emit;
+mod fold;
+mod unroll;
 mod validate;
 
 pub use alloc::Allocation;
@@ -151,7 +153,11 @@ fn transpile_expanded(
     });
     let effective = opts.mode.or(header).unwrap_or(Mode::Comp);
 
-    let program = parser::parse(&tokens, &text)?;
+    let mut program = parser::parse(&tokens, &text)?;
+    // Pre-calculate constant expressions and unroll the loops that need it, so
+    // the emitter sees plain literal array indices.
+    fold::fold_program(&mut program);
+    unroll::unroll_program(&mut program);
     validate::validate(&program, effective, &text)?;
     let body = emit::emit(&program, &text, opts, &data)?;
 
@@ -194,7 +200,11 @@ fn analyze_expanded(
 ) -> Result<Analysis, TranspileError> {
     let (text, data) = data::extract(expanded, base_dir)?;
     let tokens = lexer::lex(&text)?;
-    let program = parser::parse(&tokens, &text)?;
+    let mut program = parser::parse(&tokens, &text)?;
+    // Mirror the transpiler front end, so `fx50 regs` and `fx50 build` never
+    // disagree about the memory plan.
+    fold::fold_program(&mut program);
+    unroll::unroll_program(&mut program);
     let allocator = alloc::Allocator::collect(&program, &text, &data)?;
     Ok(Analysis {
         allocation: allocator.allocation(),

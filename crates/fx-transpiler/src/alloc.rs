@@ -56,17 +56,20 @@
 //!   without an index, assigning to the array name instead of an element, and
 //!   an index outside `0..size`
 //!
-//! ## `free` and jumps: `unsafe_free`
+//! ## `free` under re-entrant control flow: `unsafe_free`
 //!
-//! The walk above is a single forward pass, which is sound for structured
-//! control flow but not for `goto`: a jump can re-enter a region whose memory
-//! has since been released and given to another variable. For example, jumping
-//! back to a label after a `free` re-runs code that reads a name whose memory
-//! now holds something else.
+//! The walk above is a single forward pass, which assumes every statement runs
+//! at most once. Neither a `goto` nor a loop satisfies that: both can re-enter
+//! a region whose memory has since been released and given to another variable.
+//! Jumping back to a label after a `free` re-runs code that reads a name whose
+//! memory now holds something else, and a loop body does the same on its next
+//! iteration — `while (c) { print(x); free x; let y = 1; }` reads `y` as `x` on
+//! the second pass, because both `x` and `y` were given `A`.
 //!
-//! So a checked `free` in a program containing `goto`/`label` is an error, and
-//! the way to say "I have checked this myself" is `unsafe_free`, borrowing
-//! Rust's convention of making the unchecked operation explicit:
+//! So a checked `free` inside a loop body, and a checked `free` in any program
+//! containing `goto`/`label`, is an error. The way to say "I have checked this
+//! myself" is `unsafe_free`, borrowing Rust's convention of making the
+//! unchecked operation explicit:
 //!
 //! ```text
 //! unsafe_free x;   // no control-flow check; still checked for double free etc.
@@ -74,8 +77,8 @@
 //!
 //! Like Rust's `unsafe`, this waives one specific guarantee, not all checking:
 //! `unsafe_free` still rejects double frees, unknown names and `const`s. A
-//! program with jumps and no `free` at all is unaffected, because then nothing
-//! is ever re-used.
+//! program with jumps or loops and no `free` at all is unaffected, because then
+//! nothing is ever re-used.
 
 use std::collections::BTreeSet;
 
@@ -180,6 +183,9 @@ impl Allocator {
             declaring: None,
             has_jump: false,
             first_checked_release: None,
+            loop_depth: 0,
+            first_loop_release: None,
+            reserved: reserve_fixed(program),
         };
         collect_consts(program, &mut scanner.consts);
         scanner.stmts(program)?;
@@ -327,6 +333,15 @@ struct Scanner<'a> {
     has_jump: bool,
     /// Offset of the first `free` that was *not* `unsafe_free`.
     first_checked_release: Option<usize>,
+    /// How many loop bodies enclose the statement being walked. A `free` inside
+    /// one needs `unsafe_free` for the same reason a `goto` does: the loop can
+    /// re-run code whose memory has since been given to another variable.
+    loop_depth: usize,
+    /// Offset of the first checked `free` seen inside a loop body.
+    first_loop_release: Option<usize>,
+    /// Memories the program addresses by their fixed PRGM letter (`M`), and
+    /// which must therefore stay out of the allocator's pool.
+    reserved: [bool; VARIABLES.len()],
 }
 
 impl Scanner<'_> {
@@ -383,7 +398,7 @@ impl Scanner<'_> {
         // The lowest free memory keeps the allocation deterministic and easy to
         // read, and naturally re-uses one that was just released.
         let register = (0..VARIABLES.len())
-            .find(|register| self.occupants[*register].is_none())
+            .find(|register| self.occupants[*register].is_none() && !self.reserved[*register])
             .ok_or_else(|| self.out_of_memory(name, pos))?;
         self.bindings.push(Binding {
             name: name.to_string(),
@@ -417,7 +432,7 @@ impl Scanner<'_> {
         pos: usize,
     ) -> Result<(), TranspileError> {
         let available: Vec<usize> = (0..VARIABLES.len())
-            .filter(|register| self.occupants[*register].is_none())
+            .filter(|register| self.occupants[*register].is_none() && !self.reserved[*register])
             .collect();
         if available.len() < size {
             return Err(self.no_room_for_array(name, size, pos, &available));
@@ -628,6 +643,11 @@ impl Scanner<'_> {
             };
             return self.check_bounds(name, index, array, at);
         }
+        // A computed index that survived folder and unroller is a run-time
+        // value, which PRGM cannot address.
+        if let [Accessor::IndexExpr { pos: at, .. }] = accessors {
+            return Err(crate::error::computed_index_error(self.source, name, *at));
+        }
         // Not a plain element reference. An array has no fields, and a scalar
         // has nothing to index at all.
         if self.live_var(name).is_some() || self.seen_var(name) {
@@ -747,6 +767,9 @@ impl Scanner<'_> {
 
         if !is_unsafe {
             self.first_checked_release.get_or_insert(pos);
+            if self.loop_depth > 0 {
+                self.first_loop_release.get_or_insert(pos);
+            }
         }
         Ok(())
     }
@@ -890,11 +913,40 @@ impl Scanner<'_> {
                 self.assign_element(name, *index, *pos)?;
                 self.expr(value)
             }
+            // A computed element assignment should have been unrolled or
+            // folded away; reaching one means the index is a run-time value,
+            // which PRGM cannot address.
+            Stmt::AssignElementExpr {
+                name,
+                index: _,
+                value: _,
+                pos,
+            } => Err(crate::error::computed_index_error(self.source, name, *pos)),
             Stmt::Free {
                 name,
                 pos,
                 is_unsafe,
             } => self.free(name, *pos, *is_unsafe),
+            // `mplus(x)`/`mminus(x)` read their operand but allocate nothing.
+            Stmt::Memory { value, .. } => self.expr(value),
+            // Setup and clear keys mention no names.
+            Stmt::Setup { .. } | Stmt::ClrMemory | Stmt::ClrStat | Stmt::FreqOn | Stmt::FreqOff => {
+                Ok(())
+            }
+            Stmt::Data { x, y, freq, .. } => {
+                self.expr(x)?;
+                if let Some(y) = y {
+                    self.expr(y)?;
+                }
+                if let Some(freq) = freq {
+                    self.expr(freq)?;
+                }
+                Ok(())
+            }
+            Stmt::CondJump { cond, target, .. } => {
+                self.expr(cond)?;
+                self.stmt(target)
+            }
             Stmt::Print(expr) | Stmt::ExprStmt(expr) => self.expr(expr),
             Stmt::If {
                 cond,
@@ -907,7 +959,10 @@ impl Scanner<'_> {
             }
             Stmt::While { cond, body } => {
                 self.expr(cond)?;
-                self.stmts(body)
+                self.loop_depth += 1;
+                let body_result = self.stmts(body);
+                self.loop_depth -= 1;
+                body_result
             }
             Stmt::For(for_stmt) => {
                 if for_stmt.is_decl {
@@ -919,7 +974,10 @@ impl Scanner<'_> {
                     self.expr(&for_stmt.init_value)?;
                 }
                 self.expr(&for_stmt.cond)?;
-                self.stmts(&for_stmt.body)?;
+                self.loop_depth += 1;
+                let body_result = self.stmts(&for_stmt.body);
+                self.loop_depth -= 1;
+                body_result?;
                 self.assign(&for_stmt.update_name, for_stmt.pos)?;
                 self.expr(&for_stmt.update_value)
             }
@@ -955,9 +1013,14 @@ impl Scanner<'_> {
                 }
                 Ok(())
             }
-            Expr::Number(_) | Expr::Pi(_) | Expr::E(_) | Expr::Constant(..) | Expr::Input(_) => {
-                Ok(())
-            }
+            Expr::Number(_)
+            | Expr::BaseLiteral { .. }
+            | Expr::Pi(_)
+            | Expr::E(_)
+            | Expr::Ans(_)
+            | Expr::StatVar(..)
+            | Expr::Constant(..)
+            | Expr::Input(_) => Ok(()),
         }
     }
 
@@ -970,6 +1033,17 @@ impl Scanner<'_> {
                 "`free` cannot be used in a program containing `goto`/`label`: a jump can \
                  re-enter code whose memory has since been re-used. Use `unsafe_free` if \
                  you have checked that it cannot",
+                pos,
+            ));
+        }
+        // A loop re-enters its body, so a `free` inside one has the same
+        // problem as a jump: the memory may be re-used and then read again on
+        // the next iteration.
+        if let Some(pos) = self.first_loop_release {
+            return Err(TranspileError::at(
+                self.source,
+                "`free` cannot be used inside a loop: the loop can re-enter code whose memory \
+                 has since been re-used. Use `unsafe_free` if you have checked that it cannot",
                 pos,
             ));
         }
@@ -1043,11 +1117,22 @@ fn collect_consts(stmts: &[Stmt], out: &mut BTreeSet<String>) {
             Stmt::While { body, .. } => collect_consts(body, out),
             Stmt::For(for_stmt) => collect_consts(&for_stmt.body, out),
             Stmt::Block(stmts) => collect_consts(stmts, out),
+            // A `=>` target could name a `const`, though the emitter rejects
+            // guarding one.
+            Stmt::CondJump { target, .. } => collect_consts(std::slice::from_ref(target), out),
             Stmt::Let { .. }
             | Stmt::LetArray { .. }
             | Stmt::Assign { .. }
             | Stmt::AssignElement { .. }
+            | Stmt::AssignElementExpr { .. }
             | Stmt::Free { .. }
+            | Stmt::Memory { .. }
+            | Stmt::Setup { .. }
+            | Stmt::ClrMemory
+            | Stmt::ClrStat
+            | Stmt::FreqOn
+            | Stmt::FreqOff
+            | Stmt::Data { .. }
             | Stmt::Print(_)
             | Stmt::ExprStmt(_)
             | Stmt::Break
@@ -1063,6 +1148,137 @@ pub fn const_names(program: &Program) -> Vec<String> {
     let mut names = BTreeSet::new();
     collect_consts(program, &mut names);
     names.into_iter().collect()
+}
+
+/// Which fixed PRGM memories the program addresses by letter.
+///
+/// `mplus`/`mminus`/`mvalue` touch the calculator's fixed `M` memory, so the
+/// allocator must not hand `M` to a `.fxc` variable: the two would silently
+/// share it.
+fn reserve_fixed(program: &Program) -> [bool; VARIABLES.len()] {
+    let mut reserved = [false; VARIABLES.len()];
+    for stmt in program {
+        scan_fixed_stmt(stmt, &mut reserved);
+    }
+    reserved
+}
+
+fn scan_fixed_stmt(stmt: &Stmt, reserved: &mut [bool; VARIABLES.len()]) {
+    match stmt {
+        Stmt::Memory { value, .. } => {
+            reserved[memory_index('M')] = true;
+            scan_fixed_expr(value, reserved);
+        }
+        Stmt::Let { value, .. }
+        | Stmt::Const { value, .. }
+        | Stmt::Assign { value, .. }
+        | Stmt::AssignElement { value, .. }
+        | Stmt::ExprStmt(value)
+        | Stmt::Print(value) => scan_fixed_expr(value, reserved),
+        Stmt::AssignElementExpr { index, value, .. } => {
+            scan_fixed_expr(index, reserved);
+            scan_fixed_expr(value, reserved);
+        }
+        Stmt::LetArray { values, .. } => {
+            for value in values {
+                scan_fixed_expr(value, reserved);
+            }
+        }
+        Stmt::Data { x, y, freq, .. } => {
+            scan_fixed_expr(x, reserved);
+            if let Some(y) = y {
+                scan_fixed_expr(y, reserved);
+            }
+            if let Some(freq) = freq {
+                scan_fixed_expr(freq, reserved);
+            }
+        }
+        Stmt::CondJump { cond, target, .. } => {
+            scan_fixed_expr(cond, reserved);
+            scan_fixed_stmt(target, reserved);
+        }
+        Stmt::If {
+            cond,
+            then_body,
+            else_body,
+        } => {
+            scan_fixed_expr(cond, reserved);
+            for stmt in then_body.iter().chain(else_body) {
+                scan_fixed_stmt(stmt, reserved);
+            }
+        }
+        Stmt::While { cond, body } => {
+            scan_fixed_expr(cond, reserved);
+            for stmt in body {
+                scan_fixed_stmt(stmt, reserved);
+            }
+        }
+        Stmt::For(for_stmt) => {
+            scan_fixed_expr(&for_stmt.init_value, reserved);
+            scan_fixed_expr(&for_stmt.cond, reserved);
+            scan_fixed_expr(&for_stmt.update_value, reserved);
+            for stmt in &for_stmt.body {
+                scan_fixed_stmt(stmt, reserved);
+            }
+        }
+        Stmt::Block(stmts) => {
+            for stmt in stmts {
+                scan_fixed_stmt(stmt, reserved);
+            }
+        }
+        Stmt::Free { .. }
+        | Stmt::Setup { .. }
+        | Stmt::ClrMemory
+        | Stmt::ClrStat
+        | Stmt::FreqOn
+        | Stmt::FreqOff
+        | Stmt::Break
+        | Stmt::Goto(..)
+        | Stmt::Label(..)
+        | Stmt::Empty => {}
+    }
+}
+
+fn scan_fixed_expr(expr: &Expr, reserved: &mut [bool; VARIABLES.len()]) {
+    match expr {
+        Expr::Call(name, args, _) => {
+            if name == "mvalue" {
+                reserved[memory_index('M')] = true;
+            }
+            for arg in args {
+                scan_fixed_expr(arg, reserved);
+            }
+        }
+        Expr::Unary(_, inner) => scan_fixed_expr(inner, reserved),
+        Expr::Binary(_, left, right) => {
+            scan_fixed_expr(left, reserved);
+            scan_fixed_expr(right, reserved);
+        }
+        Expr::Data { accessors, .. } => {
+            for accessor in accessors {
+                if let Accessor::IndexExpr { expr, .. } = accessor {
+                    scan_fixed_expr(expr, reserved);
+                }
+            }
+        }
+        Expr::Number(_)
+        | Expr::BaseLiteral { .. }
+        | Expr::Name(..)
+        | Expr::Pi(_)
+        | Expr::E(_)
+        | Expr::Ans(_)
+        | Expr::StatVar(..)
+        | Expr::Constant(..)
+        | Expr::Input(_) => {}
+    }
+}
+
+/// The index of `letter` in [`VARIABLES`].
+fn memory_index(letter: char) -> usize {
+    VARIABLES
+        .iter()
+        .position(|memory| *memory == letter)
+        .expect("the fixed letter is one of the seven memories")
 }
 
 /// `A B C D X Y M`, for messages.
@@ -1303,9 +1519,31 @@ mod tests {
     }
 
     #[test]
-    fn free_inside_a_loop_body_is_allowed() {
-        let a = alloc("while (1 < 2) { let t = 1; print(t); free t; }").unwrap();
+    fn free_inside_a_loop_body_is_rejected() {
+        let err = alloc("while (1 < 2) { let t = 1; print(t); free t; }").unwrap_err();
+        assert!(err.message.contains("inside a loop"), "{}", err.message);
+        assert!(err.message.contains("unsafe_free"), "{}", err.message);
+    }
+
+    #[test]
+    fn free_inside_a_for_body_is_rejected() {
+        let err = alloc("for (let i = 0; i < 3; i = i + 1) { let t = 1; free t; }").unwrap_err();
+        assert!(err.message.contains("inside a loop"), "{}", err.message);
+        assert!(err.message.contains("unsafe_free"), "{}", err.message);
+    }
+
+    #[test]
+    fn unsafe_free_inside_a_loop_body_is_allowed() {
+        let a = alloc("while (1 < 2) { let t = 1; print(t); unsafe_free t; }").unwrap();
         assert_eq!(a.lookup("t"), Some('A'));
+    }
+
+    #[test]
+    fn free_outside_a_loop_is_allowed_even_when_the_program_loops() {
+        let a =
+            alloc("let t = 1; free t; let u = 2; while (u < 3) { u = u + 1; } print(u);").unwrap();
+        assert_eq!(a.lookup("t"), Some('A'));
+        assert_eq!(a.lookup("u"), Some('A'), "u reuses the freed memory");
     }
 
     // -- arrays -------------------------------------------------------------

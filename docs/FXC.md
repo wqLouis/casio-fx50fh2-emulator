@@ -33,9 +33,9 @@ stmt       := 'let' NAME '=' expr ';'      -- declaration
               ('=' '{' expr (',' expr)* '}')? ';'
             | 'const' NAME '=' expr ';'    -- compile-time constant
             | NAME '=' expr ';'            -- assignment
-            | NAME '[' INTEGER ']' '=' expr ';'   -- element assignment
+            | NAME '[' expr ']' '=' expr ';'   -- element assignment (index resolves to a literal)
             | 'free' NAME ';'              -- release a memory
-            | 'unsafe_free' NAME ';'       -- release it without the jump check
+            | 'unsafe_free' NAME ';'       -- release it without the control-flow check
             | 'print' [ '(' expr ')' | expr ] ';'
             | 'if' '(' expr ')' body ('else' body)?
             | 'while' '(' expr ')' body
@@ -43,27 +43,40 @@ stmt       := 'let' NAME '=' expr ';'      -- declaration
             | 'break' ';'
             | 'goto' DIGIT ';'
             | 'label' DIGIT ';'
+            | 'mplus' '(' expr ')' ';'      -- expr M+
+            | 'mminus' '(' expr ')' ';'     -- expr M-
+            | 'clrmemory' | 'clrstat' | 'freqon' | 'freqoff' '(' ')' ';'
+            | 'deg' | 'rad' | 'gra' | 'dec' | 'hex' | 'bin' | 'oct'
+            | 'to_cartesian' | 'to_polar' '(' ')' ';'
+            | 'fix' | 'sci' | 'norm' '(' INTEGER ')' ';'
+            | 'dt' '(' expr (',' expr (',' expr)?)? ')' ';'   -- x DT / x,y DT / x,y;f DT
+            | expr '=>' stmt                -- conditional jump (⇒)
             | '{' stmt* '}'
             | ';'                            -- empty statement
             | expr ';'                       -- evaluate, do not display
 body       := stmt | '{' stmt* '}'           -- braces optional for one statement
 forinit    := ['let'] NAME '=' expr
 
-expr       := equality
+expr       := bitwise_or
+bitwise_or := bitwise_and (('or' | 'xor' | 'xnor') bitwise_and)*
+bitwise_and:= equality ('and' equality)*
 equality   := comparison (('==' | '!=') comparison)*
 comparison := additive  (('<' | '<=' | '>' | '>=') additive)*
 additive   := multiplicative (('+' | '-') multiplicative)*
 multiplicative := unary (('*' | '/') unary)*
 unary      := '-' unary | power
 power      := primary (('^' | '**') unary)?   -- right-associative
-primary    := NUMBER | 'pi' | 'e' | 'input()' | NAME | dataref
-            | NAME '(' [expr (',' expr)*] ')' | '(' expr ')'
+primary    := NUMBER | BASENUMBER | 'pi' | 'e' | 'input()' | NAME | dataref
+            | NAME '(' [expr (',' expr)*] ')' | 'phys' '.' CONSTNAME
+            | 'stat' '.' STATNAME | '(' expr ')'
+BASENUMBER := '0x' HEXDIGITS | '0b' BINARY | '0o' OCTAL   -- BASE mode
+STATNAME   := 'n' | 'sumx' | 'sumx2' | … | 'rega' | 'regb' | 'regr'
 dataref    := NAME accessor+
-accessor   := '.' NAME | '[' INTEGER ']'
+accessor   := '.' NAME | '[' expr ']'
 ```
 
 **Binding strength, tightest first:** `(...)` / calls → `^ **` → unary `-` →
-`* /` → `+ -` → `< <= > >=` → `== !=` (loosest).
+`* /` → `+ -` → `< <= > >=` → `== !=` → `and` → `or xor xnor` (loosest).
 
 Notes:
 
@@ -74,9 +87,14 @@ Notes:
   The display symbols of scientific constants (`ħ`, `μμ`, `R∞`) are accepted
   only directly after `phys.` — a bare `π` is rejected rather than silently
   becoming a variable.
-* There is no `%`, no `&&`/`||`/`!`, no `++`/`--`/`+=`, no bitwise operators,
-  no strings, and no user-defined functions. Comparisons produce `1` or `0`.
+* There is no `&&`/`||`/`!`, no `++`/`--`/`+=`, no strings, and no
+  user-defined functions. Comparisons produce `1` or `0`. The base-n words
+  `and`/`or`/`xor`/`xnor` exist, but only in `#mode BASE`.
 * There is one numeric type: an `f64`, the same as the calculator computes with.
+* An array or `#data` index is written as an expression but must resolve to a
+  non-negative whole number while transpiling: constant expressions are folded,
+  and a constant `for` loop that indexes an array is unrolled, but a run-time
+  index is an error (see [Arrays](#arrays)).
 
 ## Statements
 
@@ -94,6 +112,10 @@ for (let i = 0; i < 5; i = i + 1) { print(i); }
 break;
 label 1;
 goto 1;
+deg();                    // angle unit: Deg
+fix(3);                   // display: Fix 3
+x > 0 => print(1);        // conditional jump
+mplus(x);                 // x M+
 ```
 
 * **`let` declares.** It introduces a name and allocates its memory. Declaring a
@@ -106,11 +128,17 @@ goto 1;
   `let a = input();` is fine; `print(input());` and `let a = input() + 1;` are
   errors.
 * **`goto`/`label`** take a single digit `0`–`9`.
+* **`expr => stmt;`** is the calculator's `⇒` conditional jump: run `stmt`
+  when `expr` is non-zero. It can guard a single assignment, `print`, or
+  expression statement (use `if` for anything larger).
+* **Calculator keys that act on the whole machine** are written as calls and
+  end with `;`: `deg();`, `fix(3);`, `clrmemory();`, `dt(x, y);`, `mplus(x);`.
+  They are listed under [Calculator keys](#calculator-keys).
 
 Expressions support `+ - * /`, `^` / `**` (power), unary `-`, comparisons
-`== != < <= > >=`, parentheses, the constants `pi` and `e`, and the built-ins
-`sqrt cbrt abs sin cos tan asin acos atan sinh cosh tanh asinh acosh atanh log
-ln rnd` (`log` accepts one or two arguments). Values are real numbers.
+`== != < <= > >=`, the base-n words `and`/`or`/`xor`/`xnor` (in `#mode BASE`),
+parentheses, the constants `pi` and `e`, and every calculator key — see
+[Calculator keys](#calculator-keys). Values are real numbers.
 
 ## Arrays
 
@@ -166,15 +194,32 @@ B◢
 The alternative — a run-time index — would need an `If`/`Else` chain over every
 element, and the machine has only **680 bytes of program memory shared by all
 four program areas**. On a machine that small, `v[0]` being free and `v[i]`
-costing a dozen bytes per lookup is the right trade. To walk an array, unroll the
-loop:
+costing a dozen bytes per lookup is the right trade.
+
+To walk an array, use a loop whose bounds are known while transpiling. The
+transpiler **unrolls** such a loop and replaces the counter with each of its
+values, so the index becomes a literal:
 
 ```c
-// Instead of `for (i…) print(v[i]);`:
-print(v[0]);
-print(v[1]);
-print(v[2]);
+let v[3];
+for (let i = 0; i < 3; i = i + 1) { v[i] = input(); }
 ```
+
+```text
+?→A
+?→B
+?→C
+```
+
+The loop must be the canonical `for` shape with integer bounds after
+compile-time evaluation. A run-time bound (`i < n`), a `break`, `goto`/`label`,
+a declaration, or a `free` in the body all stop the unroll, and the index is
+reported as an error — write those loops out by hand. A loop that only touches
+scalars keeps its compact native `For`/`Next` form; unrolling happens **only**
+when an array index needs it, since otherwise it would cost bytes rather than
+save them. A counter the rest of the program never mentions is dropped along
+with the loop, as it would be if you unrolled the loop by hand; if it is read
+afterwards, it keeps the value the `For` would have left.
 
 ### What the transpiler checks
 
@@ -189,6 +234,7 @@ print(v[2]);
 | `const v[3]` | `` `const` cannot declare an array; use `let v[…]` instead`` |
 | Freeing one element | `` `free v[…]` releases one element, which would strand the others…`` |
 | Not enough memories | ``no room for array `w`: it needs 3 memories but only 2 are free (Y M)…`` |
+| Run-time index | `for (i < n) v[i];` | `` `v[…]` needs a compile-time index… `` |
 
 Notes:
 
@@ -236,6 +282,106 @@ remains just `e`.
 The full table (menu number, ASCII name, display symbol) is available as
 `fx_transpiler::constants::CONSTANTS`, and `fx50 constants` prints it.
 
+## Calculator keys
+
+The transpiler is a front end for the whole machine, so **every PRGM key** has
+an `.fxc` spelling. Keys that produce a value are ordinary calls; keys that act
+on the machine are statements ending in `;`. The emitter writes the calculator's
+native keystroke back out, so a `.fxc` program can reach all of PRGM.
+
+### Value keys
+
+| `.fxc` | Emits | Notes |
+| --- | --- | --- |
+| `sqrt(x)` / `cbrt(x)` | `√(x)` / `∛(x)` | |
+| `root(n, x)` | `nx√(x)` | the `x√(` key; **index first** |
+| `pow10(x)` / `exp(x)` | `10^(x)` / `e^(x)` | |
+| `abs(x)` / `rnd(x)` | `Abs(x)` / `Rnd(x)` | |
+| `sin`…`atanh(x)` | `sin(x)`… | angle unit follows `deg`/`rad`/`gra` |
+| `log(x)` / `log(b, x)` / `ln(x)` | `log(x)` / `log(b,x)` / `ln(x)` | |
+| `inv(x)` / `sqr(x)` / `cube(x)` | `x⁻¹` / `x²` / `x³` | postfix keys |
+| `fact(x)` / `pct(x)` | `x!` / `x%` | postfix keys |
+| `frac(a, b)` | `a┘b` | the fraction key |
+| `npr(n, r)` / `ncr(n, r)` | `<n>nPr<r>` / `<n>nCr<r>` | |
+| `pol(x, y)` / `rec(x, y)` | `Pol(x,y)` / `Rec(x,y)` | COMP or CMPLX; write into `X`/`Y` |
+| `arg(x)` / `conjg(x)` | `arg(x)` / `Conjg(x)` | CMPLX |
+| `polar(r, θ)` | `r∠θ` | CMPLX |
+| `not(x)` / `neg(x)` | `Not(x)` / `Neg(x)` | BASE |
+| `ran()` | `Ran#` | pseudo-random, `[0, 1)`; deterministic from a fixed seed |
+| `i()` | `i` | CMPLX; bare `i` is still an ordinary variable |
+| `ans()` | `Ans` | the previous result memory |
+| `mvalue()` | `M` | the fixed `M` memory; see below |
+
+`frac`, `npr`, `ncr` and `polar` are **infix** keys, but are written as
+two-argument calls for one uniform syntax; the emitter places them between their
+arguments with the machine's own precedence (`┘` binds tighter than `×`, `nPr`
+looser).
+
+### Statement keys
+
+| `.fxc` | Emits |
+| --- | --- |
+| `mplus(x);` / `mminus(x);` | `x M+` / `x M-` |
+| `clrmemory();` | `ClrMemory` |
+| `clrstat();` | `ClrStat` |
+| `freqon();` / `freqoff();` | `FreqOn` / `FreqOff` |
+| `dt(x);` / `dt(x, y);` / `dt(x, y, f);` | `x DT` / `x,y DT` / `x,y;f DT` |
+| `deg();` / `rad();` / `gra();` | `Deg` / `Rad` / `Gra` |
+| `fix(n);` / `sci(n);` | `Fix n` / `Sci n` (`n` = 0–9) |
+| `norm(n);` | `Norm n` (`n` = 1 or 2) |
+| `dec();` / `hex();` / `bin();` / `oct();` | `Dec` / `Hex` / `Bin` / `Oct` |
+| `to_cartesian();` / `to_polar();` | `▶a+b𝑖` / `▶r∠θ` |
+
+The digit of `fix`/`sci`/`norm` must be a literal; the mode each key needs is in
+the [Modes](#modes) table.
+
+### Statistical variables
+
+Statistical values are reached through the `stat.` namespace, mirroring `phys.`:
+`stat.n`, `stat.sumx`, `stat.sumx2`, `stat.sumy`, `stat.sumy2`, `stat.sumxy`,
+`stat.meanx`, `stat.meany`, `stat.sigmax`, `stat.sigmay`, `stat.sx`, `stat.sy`,
+`stat.minx`, `stat.maxx`, `stat.miny`, `stat.maxy`, `stat.rega`, `stat.regb`,
+`stat.regr`.
+
+```c
+#mode REG
+print(stat.meanx);   // x̄◢
+print(stat.regA);    // regA◢
+```
+
+Glyph output uses the display spelling (`Σx`, `x̄`, `σx`, `regA`); `--ascii` uses
+the ASCII alias (`sumx`, `meanx`, `sigmax`, `rega`). A bad name is reported by
+name rather than becoming a variable.
+
+### The fixed `M` memory
+
+`mvalue()`, `mplus()` and `mminus()` address the calculator's fixed `M` memory
+by letter, so the allocator **reserves** `M`: no `.fxc` variable is ever placed
+there while the program uses those keys. `let a = 1; mplus(a); print(mvalue());`
+emits `1→A`, `A M+`, `M◢` — the variable takes `A`, and `M` stays the
+accumulator.
+
+### Bitwise operators and base literals
+
+In `#mode BASE`, `and`, `or`, `xor` and `xnor` are infix operators, and integers
+may be written `0x1F` (hex), `0b1010` (binary) or `0o17` (octal). The emitter
+tags them the way the calculator does:
+
+```c
+#mode BASE
+print(0b1010 and 0b1100);   // 1010b and 1100b◢
+```
+
+`and` binds tighter than `or`/`xor`/`xnor`; both are looser than the comparisons.
+In `--ascii`, a display key after a base literal keeps a space (`FFh disp`) so it
+re-lexes as `FFh` then `disp`.
+
+### `Ran#`
+
+`ran()` emits the machine's `Ran#`, a pseudo-random number in `[0, 1)` drawn
+from a fixed-seed xorshift generator. Running the same program twice gives the
+same sequence, which is what makes it usable in `#tests`.
+
 ## Modes
 
 The calculator forces an operating mode before it will compute. A program may
@@ -252,16 +398,26 @@ The valid names are `COMP`, `CMPLX`, `BASE`, `SD` and `REG` (case-insensitive;
 `STAT` is an alias for `SD`). `COMP` is the default, so a program without a
 directive emits no header. When a header is present it is re-emitted as the
 first line of the PRGM, and the program is checked against the mode's
-capabilities. `.fxc` is real-number-only, so the only restriction is `BASE`,
-which rejects the floating-point built-ins `sqrt sin cos tan asin acos atan log
-ln rnd` and the constants `pi`/`e` as well as every `phys.` scientific constant
-(`/` maps to `÷`, which is fine):
+capabilities — the same rules the interpreter enforces, so a construct the mode
+does not offer is a **transpile error** rather than a `Mode ERROR` on the
+calculator.
+
+| Constructs | Need |
+| --- | --- |
+| `sqrt`, `sin`, trig/logs, `^`, `┘`, `!`, `%`, `npr`/`ncr`, `pol`/`rec`, `ran`, `pi`, `e`, `phys.*` | anything except BASE |
+| `deg`/`rad`/`gra`, `fix`/`sci`/`norm` | anything except BASE |
+| `hex`/`bin`/`oct`, base literals (`0x1F`), `and`/`or`/`xor`/`xnor`, `not`/`neg` | BASE |
+| `i()`, `arg`, `conjg`, `polar`, `to_cartesian`/`to_polar` | CMPLX |
+| `stat.*`, `dt`, `clrstat`, `freqon`/`freqoff` | SD or REG |
+| `stat.sumy` … `stat.regr` (the `y` and regression values) | REG |
+| `pol`/`rec` specifically | COMP or CMPLX |
 
 ```c
 #mode BASE
-print(a / b);   // ok
+print(a / b);   // ok: `/` maps to `÷`, which BASE offers
 print(sqrt(a)); // error: `sqrt` is not available in BASE mode
 print(phys.h);  // error: `h` (Planck constant) is not available in BASE mode
+print(not(a));  // ok: `Not(` is a BASE key
 ```
 
 The mode can also be forced from Rust with `Options::mode`, which takes
@@ -348,21 +504,28 @@ declaration takes effect:
 let x = x + 1;     // ERROR: `x` cannot be used in its own initializer
 ```
 
-### `free` with jumps needs `unsafe_free`
+### `free` under re-entrant control flow needs `unsafe_free`
 
 A `goto` can re-enter code whose memory has since been released and given to
-another variable, so the transpiler cannot verify the allocation of a program
-that both jumps and frees. A checked `free` in a program containing
-`goto`/`label` is therefore an error, and `unsafe_free` is how you say you have
-checked it yourself — the same convention Rust uses for unchecked operations:
+another variable, and a loop body does the same on each iteration. For example,
+`while (c) { print(x); free x; let y = 1; }` gives `x` and `y` the same memory,
+so the second pass prints `y` as `x`. The transpiler walks a loop body once, so
+it cannot verify the allocation of a program that both loops and frees either.
+
+A checked `free` inside a loop body, and a checked `free` in a program
+containing `goto`/`label`, is therefore an error. `unsafe_free` is how you say
+you have checked it yourself — the same convention Rust uses for unchecked
+operations:
 
 ```c
 unsafe_free x;   // no control-flow check; every other check still applies
 ```
 
 Like Rust's `unsafe`, it waives one guarantee, not all checking: `unsafe_free`
-still rejects double frees, unknown names and `const`s. Programs with jumps and
-no `free` at all are unaffected, since nothing is ever re-used.
+still rejects double frees, unknown names and `const`s. Programs with jumps or
+loops and no `free` at all are unaffected, since nothing is ever re-used. A
+`free` that is outside every loop is fine even when the program loops, because
+no back-edge re-enters the released region.
 
 ### Errors the register table catches
 
@@ -376,6 +539,7 @@ transpile errors rather than surprises on the calculator:
 | Own initializer | `let x = x + 1;` | `` `x` cannot be used in its own initializer `` |
 | Double free | `free a; free a;` | `` `a` was already freed (double free) `` |
 | `free` with a jump | `free a; goto 1; label 1;` | `` use `unsafe_free` `` |
+| `free` inside a loop | `while (c) { free a; }` | `` use `unsafe_free` `` |
 | Freeing what has no memory | `const k = 1; free k;` | `` `k` is a `const`, which uses no memory `` |
 | Freeing an unknown name | `free nope;` | `` `nope` is not a variable `` |
 | Running out | an eighth live variable | `` no free memory for `z`: … `` |
@@ -398,11 +562,21 @@ transpile errors rather than surprises on the calculator:
 | `while (c) {..}`                   | `While <c>` `..` `WhileEnd`                            |
 | `for (i = a; i < b; i = i + s)`    | `For <a>→<v> To <b>-1 Step <s>` `..` `Next`           |
 | `break;` / `goto N;` / `label N;`  | `Break` / `Goto N` / `Lbl N`                           |
+| `c => s;`                         | `<c>⇒<s>` / `<c>=><s>`                                 |
 | `pi` / `e`                         | `π` / `e` (ASCII: `pi` / `e`)                          |
+| `root(n, x)` / `polar(r, θ)`       | `nx√(x)` / `r∠θ`                                       |
+| `inv(x)` / `sqr(x)` / `fact(x)`    | `x⁻¹` / `x²` / `x!` (ASCII: `x^-1` / `x^2`)            |
+| `frac(a, b)` / `ncr(n, r)`         | `a┘b` / `nnCrr`                                        |
+| `stat.NAME`                        | the statistical value (`Σx`, `x̄`, …)                   |
+| `0x1F` / `0b1010` / `0o17`         | `1Fh` / `1010b` / `17o`                                |
+| `a and b`                          | `a and b` (BASE)                                       |
+| `deg();` / `dt(x, y);`             | `Deg` / `x,y DT`                                       |
+| `mplus(x);` / `clrmemory();`       | `x M+` / `ClrMemory`                                   |
 
 `Then` is always emitted after every `If`. A `for` whose header does not match
 the canonical shape (for example a `!=` bound, or an update that mutates a
-different variable) falls back to an equivalent `While` loop:
+different variable) falls back to an equivalent `While` loop. A literal bound is
+folded, so `i < 5` emits `To 4` rather than `To 5-1`:
 
 ```c
 for (let i = 0; i != 5; i = i + 2) { print(i); }
@@ -415,6 +589,33 @@ A◢
 A+2→A
 WhileEnd
 ```
+
+## Constant folding
+
+The machine has 680 bytes of program storage shared by all four program areas,
+and every operator in the emitted PRGM costs bytes. An expression built only
+from numbers therefore has its value computed while transpiling and is replaced
+by that value:
+
+```c
+print(2 * 3 + 4);        // -> 10◢, not 2×3+4◢
+const k = 6 * 7;         // -> k is 42
+print(k + 1);            // -> 43◢
+```
+
+The `for` limit is folded too, so `for (i = 0; i < 5; …)` emits `To 4`, not
+`To 5-1`.
+
+**Symbolic values are never folded.** `pi`, `e` and the `phys.` constants stay
+symbolic, because the calculator keys them in as their own symbols: `2 * pi`
+emits `2×π`, preserving both the precision and the cheaper spelling (ADR 0015).
+
+**Nothing the machine would round is folded.** The machine keeps 15 significant
+digits and auto-corrects after every operation, while a literal it reads from a
+program is not corrected. So `1 / 3` and `0.1 + 0.2` are left as written — the
+machine's `0.333333333333333` and `0.3` are not the values a naive fold would
+produce. Only arithmetic whose result the machine would leave unchanged is
+folded.
 
 ## Compile-time data
 

@@ -40,6 +40,31 @@ pub enum StatVar {
     RegR,
 }
 
+impl StatVar {
+    /// Every statistical variable. Used by the `.fxc` coverage test.
+    pub const ALL: [StatVar; 19] = [
+        StatVar::N,
+        StatVar::SumX,
+        StatVar::SumX2,
+        StatVar::SumY,
+        StatVar::SumY2,
+        StatVar::SumXY,
+        StatVar::MeanX,
+        StatVar::MeanY,
+        StatVar::SigmaX,
+        StatVar::SigmaY,
+        StatVar::Sx,
+        StatVar::Sy,
+        StatVar::MinX,
+        StatVar::MaxX,
+        StatVar::MinY,
+        StatVar::MaxY,
+        StatVar::RegA,
+        StatVar::RegB,
+        StatVar::RegR,
+    ];
+}
+
 /// A fixed-capacity list of data points.
 #[derive(Debug, Clone)]
 pub struct Stats {

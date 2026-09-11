@@ -11,6 +11,11 @@ pub enum Tok {
     Ident(String),
     /// A numeric literal.
     Number(f64),
+    /// A base-tagged integer literal, written `0x1F`, `0b1010` or `0o17`.
+    BaseNumber {
+        value: u64,
+        base: crate::ast::Base,
+    },
     /// The leading `#mode NAME` directive.
     Mode(Mode),
     Let,
@@ -29,6 +34,8 @@ pub enum Tok {
     Print,
     /// The `phys` namespace keyword (scientific constants).
     Phys,
+    /// The `stat` namespace keyword (statistical variables).
+    Stat,
     Plus,
     Minus,
     Star,
@@ -38,6 +45,14 @@ pub enum Tok {
     Power,
     /// `=`
     Assign,
+    /// `=>`, the `⇒` conditional-jump key.
+    Arrow,
+    /// `and`
+    And,
+    /// `or`, `xor`, `xnor`
+    Or,
+    Xor,
+    Xnor,
     /// `==`
     Eq,
     /// `!=`
@@ -65,6 +80,7 @@ impl Tok {
         match self {
             Tok::Ident(name) => format!("identifier `{name}`"),
             Tok::Number(value) => format!("number `{value}`"),
+            Tok::BaseNumber { value, base } => format!("`{}` literal", base.tag(*value)),
             Tok::Mode(mode) => format!("`#mode {}`", mode.name()),
             Tok::Let => "`let`".into(),
             Tok::Const => "`const`".into(),
@@ -79,6 +95,7 @@ impl Tok {
             Tok::Label => "`label`".into(),
             Tok::Print => "`print`".into(),
             Tok::Phys => "`phys`".into(),
+            Tok::Stat => "`stat`".into(),
             Tok::Plus => "`+`".into(),
             Tok::Minus => "`-`".into(),
             Tok::Star => "`*`".into(),
@@ -86,6 +103,11 @@ impl Tok {
             Tok::Caret => "`^`".into(),
             Tok::Power => "`**`".into(),
             Tok::Assign => "`=`".into(),
+            Tok::Arrow => "`=>`".into(),
+            Tok::And => "`and`".into(),
+            Tok::Or => "`or`".into(),
+            Tok::Xor => "`xor`".into(),
+            Tok::Xnor => "`xnor`".into(),
             Tok::Eq => "`==`".into(),
             Tok::Ne => "`!=`".into(),
             Tok::Lt => "`<`".into(),
@@ -177,6 +199,12 @@ impl<'a> Lexer<'a> {
             if ch.is_ascii_digit()
                 || (ch == '.' && self.peek_at(1).is_some_and(|d| d.is_ascii_digit()))
             {
+                // `0x`/`0b`/`0o` introduce a base-tagged integer, tried before
+                // ordinary decimal so a leading hex letter works.
+                if let Some(tok) = self.try_base_number() {
+                    tokens.push(Token { tok, pos });
+                    continue;
+                }
                 let value = self.number()?;
                 tokens.push(Token {
                     tok: Tok::Number(value),
@@ -262,6 +290,38 @@ impl<'a> Lexer<'a> {
                 _ => return Ok(()),
             }
         }
+    }
+
+    /// Read a `0x`/`0b`/`0o` base-tagged integer, if one starts here.
+    ///
+    /// Returns `None` when the prefix is not followed by a valid digit, so
+    /// `0x` alone still lexes as the number `0` plus the name `x`.
+    fn try_base_number(&mut self) -> Option<Tok> {
+        if self.peek() != Some('0') {
+            return None;
+        }
+        let (base, radix) = match self.peek_at(1) {
+            Some('x') | Some('X') => (crate::ast::Base::Hex, 16),
+            Some('b') | Some('B') => (crate::ast::Base::Bin, 2),
+            Some('o') | Some('O') => (crate::ast::Base::Oct, 8),
+            _ => return None,
+        };
+        let mut look = 2;
+        while self.peek_at(look).is_some_and(|c| c.is_digit(radix)) {
+            look += 1;
+        }
+        if look == 2 {
+            return None;
+        }
+        self.advance();
+        self.advance();
+        let start = self.i;
+        while self.peek().is_some_and(|c| c.is_digit(radix)) {
+            self.advance();
+        }
+        let text: String = self.chars[start..self.i].iter().collect();
+        let value = u64::from_str_radix(&text, radix).ok()?;
+        Some(Tok::BaseNumber { value, base })
     }
 
     fn number(&mut self) -> Result<f64, TranspileError> {
@@ -425,6 +485,7 @@ impl<'a> Lexer<'a> {
             ("!=", Tok::Ne),
             ("<=", Tok::Le),
             (">=", Tok::Ge),
+            ("=>", Tok::Arrow),
         ] {
             if self.looking_at(text) {
                 self.consume(text);
@@ -472,6 +533,11 @@ fn keyword(word: &str) -> Option<Tok> {
         "label" => Tok::Label,
         "print" => Tok::Print,
         "phys" => Tok::Phys,
+        "stat" => Tok::Stat,
+        "and" => Tok::And,
+        "or" => Tok::Or,
+        "xor" => Tok::Xor,
+        "xnor" => Tok::Xnor,
         _ => return None,
     })
 }
