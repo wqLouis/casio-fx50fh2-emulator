@@ -5,7 +5,7 @@
 //! `fold`) and the assertions pin the emitted PRGM. Programs are wrapped in
 //! `fn main()` by [`common::wrap`].
 
-use fx_transpiler::transpile;
+use fx_transpiler::{Options, transpile};
 
 mod common;
 
@@ -54,14 +54,33 @@ fn the_less_than_form_still_subtracts_one() {
 
 #[test]
 fn a_constant_folds_into_an_arithmetic_use() {
-    // `k * 3` becomes `2 * 3`, which the second fold collapses to `6`.
-    prgm("let k = 2; print(k * 3);", "2→A\n6◢\n");
+    // `k * 3` becomes `2 * 3`, which the second fold collapses to `6`, and the
+    // store then has no readers.
+    prgm(
+        "let k = 2; print(k * 3);",
+        "6◢
+",
+    );
 }
 
 #[test]
-fn a_store_to_a_read_name_is_kept() {
-    // `n` is read, so its store stays; the read is then replaced by the value.
-    prgm("let n = 3; print(n);", "3→A\n3◢\n");
+fn a_store_goes_once_its_last_read_is_propagated_away() {
+    // The read becomes `3`, and the store then has nothing reading it. Running
+    // the passes to a fixpoint is what lets the second one see the first one's
+    // result.
+    prgm(
+        "let n = 3; print(n);",
+        "3◢
+",
+    );
+    // A name that is *assigned* is never propagated, so its store stays.
+    prgm(
+        "let n = input(); n = 3; print(n);",
+        "?→A
+3→A
+A◢
+",
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -82,7 +101,8 @@ fn a_condition_made_constant_by_propagation_is_decided() {
     // `n > 0` is not a literal until `n` is replaced by 3.
     prgm(
         "let n = 3; if (n > 0) { print(1); } else { print(2); }",
-        "3→A\n1◢\n",
+        "1◢
+",
     );
 }
 
@@ -93,8 +113,13 @@ fn a_zero_while_disappears() {
 
 #[test]
 fn a_while_emptied_by_propagation_disappears() {
-    // `n` is the constant 0, so `while (n)` is `while (0)`.
-    prgm("let n = 0; while (n) { print(1); } print(2);", "0→A\n2◢\n");
+    // `a` is read by nothing after propagation, so its store goes, and then the
+    // loop it fed is empty and goes too.
+    prgm(
+        "let a = 0; while (0) { print(a); } print(2);",
+        "2◢
+",
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -110,11 +135,23 @@ fn code_after_goto_is_pruned() {
 
 #[test]
 fn a_declaration_after_goto_is_kept_for_allocation() {
-    // The store cannot run, but deleting `let x` would move every later
-    // variable to a different memory, which the user can observe.
+    // A store nothing reads is deleted even though it is unreachable…
     prgm(
-        "goto 1; let x = 5; print(x); label 1; print(2);",
-        "Goto 1\n5→A\nLbl 1\n2◢\n",
+        "let a = 5; goto 1; label 1; print(2);",
+        "Goto 1
+Lbl 1
+2◢
+",
+    );
+    // …but one that *is* read afterwards keeps its place, because the memory a
+    // later variable receives is observable.
+    prgm(
+        "let a = 5; goto 1; label 1; print(a);",
+        "5→A
+Goto 1
+Lbl 1
+A◢
+",
     );
 }
 
@@ -157,12 +194,27 @@ fn an_array_element_assignment_is_left_alone() {
 }
 
 #[test]
-fn a_name_redeclared_after_free_is_not_propagated() {
-    // The second `let n` is a different binding from the first, so neither
-    // life is treated as the constant 3/5.
+fn a_write_makes_a_value_unknown() {
+    // `n` is assigned, so it is never propagated — the blunt rule that keeps a
+    // write inside a loop or a branch from being ignored.
     prgm(
-        "let n = 3; print(n); free n; let n = 5; print(n);",
-        "3→A\nA◢\n5→A\nA◢\n",
+        "let n = 3; print(n); n = 5; print(n);",
+        "3→A
+A◢
+5→A
+A◢
+",
+    );
+    // A reassigned name inside a loop must keep reading the memory, or every
+    // iteration after the first would print the first value.
+    prgm(
+        "let n = 3; while (n < 6) { print(n); n = n + 1; }",
+        "3→A
+While A<6
+A◢
+A+1→A
+WhileEnd
+",
     );
 }
 
@@ -208,19 +260,45 @@ fn a_let_is_not_propagated_into_a_const() {
 
 #[test]
 fn a_dead_branch_that_declares_is_kept() {
-    // Dropping the `else` would hand a later variable a different memory, so
-    // the whole `If` stays. The reads inside it are still propagated.
+    // The branch cannot run, but it declares `a` and `a` is read afterwards, so
+    // dropping it would hand `a` a different memory. `prune` refuses, and the
+    // `If` stays — even though `if (0)` can never take the branch.
     prgm(
-        "if (1) { print(9); } else { let dead = 4; print(dead); } print(1);",
-        "If 1\nThen\n9◢\nElse\n4→A\n4◢\nIfEnd\n1◢\n",
+        "if (0) { let a = input(); } print(a);",
+        "If 0
+Then
+?→A
+IfEnd
+A◢
+",
+    );
+    // When the branch's declaration has no reader left, it is deleted first and
+    // the branch then prunes normally.
+    prgm(
+        "if (1) { print(9); } else { let a = 4; print(a); } print(1);",
+        "9◢
+1◢
+",
     );
 }
 
 #[test]
 fn a_zero_while_that_declares_is_kept() {
+    // `while (0)` never runs, but the body declares `a` and `a` is read after the
+    // loop, so removing it would move `a` to another memory.
     prgm(
-        "while (0) { let x = 1; print(x); } print(2);",
-        "While 0\n1→A\n1◢\nWhileEnd\n2◢\n",
+        "while (0) { let a = input(); } print(a);",
+        "While 0
+?→A
+WhileEnd
+A◢
+",
+    );
+    // With no reader left, the declaration and the loop both go.
+    prgm(
+        "let a = 0; while (0) { print(a); } print(2);",
+        "2◢
+",
     );
 }
 
@@ -252,15 +330,40 @@ fn a_never_read_array_disappears() {
 }
 
 #[test]
-fn a_freed_name_is_not_a_dead_store() {
-    // A `free` is a *claim* about a lifetime, so the declaration it refers to is
-    // never eliminated: removing it would silently legalise a broken program.
-    // The declaration, its store and the release all stay in place.
-    prgm("let t = 1; free t; print(2);", "1→A\n2◢\n");
-    prgm("let t = 1; unsafe_free t; print(2);", "1→A\n2◢\n");
-    // The double free must still be reported, which is the whole point.
+fn a_freed_name_can_be_a_dead_store() {
+    // `t` is released and never read, so the declaration and the `free` that
+    // released it both go. That is only sound because the lifetime checks run on
+    // the program *as written*, before this pass — so the errors below are still
+    // reported rather than being deleted along with the declaration.
+    prgm(
+        "let t = 1; free t; print(2);",
+        "2◢
+",
+    );
+    prgm(
+        "let t = 1; unsafe_free t; print(2);",
+        "2◢
+",
+    );
+
+    // The guard rails: an invalid program stays invalid, however unread its
+    // names are.
     let error = err("let t = 1; free t; free t;");
     assert!(error.message.contains("double free"), "{}", error.message);
+    let error = err("let t = 1; let t = 2; print(3);");
+    assert!(
+        error.message.contains("already declared"),
+        "{}",
+        error.message
+    );
+    // And a name used in its own initializer, which folding would otherwise turn
+    // into a plain literal (`v - v` becomes `0`) and hide.
+    let error = err("let v = (v - v); print(v);");
+    assert!(
+        error.message.contains("its own initializer"),
+        "{}",
+        error.message
+    );
 }
 
 #[test]
@@ -278,24 +381,37 @@ fn re_declaring_a_name_blocks_elimination() {
 }
 
 #[test]
-fn a_name_freed_and_declared_again_is_not_a_dead_store() {
-    // Two lives across a `free`: eliminating either would change which lifetime
-    // the `free` releases.
-    prgm("let t = 1; free t; let t = 2; print(3);", "1→A\n2→A\n3◢\n");
+fn a_name_declared_again_after_a_free_can_be_dead() {
+    // Both lives are unread, so both stores and the `free` between them go.
+    prgm(
+        "let t = 1; free t; let t = 2; print(3);",
+        "3◢
+",
+    );
 }
 
 #[test]
-fn a_free_keeps_its_declaration_while_the_name_is_read() {
-    // `t` is read, so neither life of the binding may be removed, and the two
-    // `free`/`let` pairs stay balanced.
-    prgm("let t = 1; free t; let t = 2; print(t);", "1→A\n2→A\nA◢\n");
+fn a_read_after_a_free_uses_the_second_binding() {
+    // The read belongs to the *second* `t`, so it becomes `2` — not `1`, and not
+    // an ambiguous "some `t`". Then the stores have no readers left and go.
+    prgm(
+        "let t = 1; free t; let t = 2; print(t);",
+        "2◢
+",
+    );
 }
 
 #[test]
-fn both_lives_of_a_freed_name_are_kept() {
-    // The name is declared twice across a `free`, so it is neither a single
-    // declaration nor unreleased: the pass leaves it entirely alone.
-    prgm("let t = 1; free t; let t = 2; print(3);", "1→A\n2→A\n3◢\n");
+fn each_life_of_a_name_propagates_its_own_value() {
+    // Propagation is per *binding*, not per name: the `free` ends the first
+    // `n`'s life, so the second `let n` is a fresh variable with its own value.
+    // A single value per name could not describe this.
+    prgm(
+        "let n = 3; print(n); free n; let n = 5; print(n);",
+        "3◢
+5◢
+",
+    );
 }
 
 #[test]
@@ -354,4 +470,146 @@ fn a_name_read_in_a_branch_is_not_removed() {
         "let n = 3; let c = input(); if (c) { print(n); }",
         "3→A\n?→B\nIf B\nThen\n3◢\nIfEnd\n",
     );
+}
+
+// ---------------------------------------------------------------------------
+// Diagnostics are settled before the optimiser runs
+//
+// The optimiser deletes code, and some of that code is what a diagnostic is
+// about. These check the invariant that keeps that from hiding errors: **if the
+// raw translation is rejected, the optimised one is rejected too**. Both were
+// real bugs — each made an invalid program silently accepted.
+
+/// A raw program that is rejected must stay rejected however the optimiser
+/// changes it. This is the contract `Allocator::validate` buys by running on the
+/// program as written.
+#[test]
+fn optimisation_never_legalises_an_invalid_program() {
+    let cases: &[(&str, &str)] = &[
+        ("a double free", "let t = 1; free t; free t;"),
+        ("a re-declaration", "let t = 1; let t = 2; print(3);"),
+        (
+            "a self-referential initializer",
+            "let v = (v - v); print(v);",
+        ),
+        (
+            "a self-referential initializer inside a sum",
+            "let v = (v / 1) - v;",
+        ),
+        ("reading a freed name", "let t = 1; free t; print(t);"),
+        ("freeing an unknown name", "free nope;"),
+        ("freeing a const", "const k = 1; free k;"),
+        (
+            "a checked free inside a loop",
+            "while (1 < 2) { let t = 1; print(t); free t; }",
+        ),
+        ("indexing a scalar", "let x = 1; print(x[0]);"),
+        (
+            "an index past the end of an array",
+            "let v[3] = {1,2,3}; print(v[3]);",
+        ),
+    ];
+    for (what, source) in cases {
+        let raw = fx_transpiler::transpile_with(
+            &common::wrap(source),
+            Options {
+                ascii: false,
+                mode: None,
+                optimize: false,
+            },
+        );
+        assert!(raw.is_err(), "{what} should be rejected unoptimised");
+        let optimised = fx_transpiler::transpile(&common::wrap(source));
+        assert!(
+            optimised.is_err(),
+            "{what} was accepted once optimised: {optimised:?}"
+        );
+    }
+}
+
+/// The counterpart: a program whose *memory plan* only fits after optimisation
+/// must still compile, which is why the pre-check deliberately ignores running
+/// out of memory.
+#[test]
+fn memory_pressure_is_still_checked_after_optimising() {
+    // Eight names, but nothing reads them and the program ends in a display, so
+    // the stores go and the program fits in one memory — none.
+    prgm(
+        "let a=1; let b=1; let c=1; let d=1; let x=1; let y=1; let z=1; print(9);",
+        "9◢\n",
+    );
+    // Eight names that each have to occupy a memory cannot fit. `input()` keeps
+    // them: it is not side-effect free, so neither the stores nor the reads can
+    // be removed.
+    let error = err(
+        "let a=input(); print(a); let b=input(); print(b); let c=input(); print(c); \
+         let d=input(); print(d); let x=input(); print(x); let y=input(); print(y); \
+         let m=input(); print(m); let z=input(); print(z);",
+    );
+    assert!(
+        error.message.contains("no free memory"),
+        "{}",
+        error.message
+    );
+}
+
+// ---------------------------------------------------------------------------
+// What the program displays
+
+/// Removing statements can change which one the machine displays, when the
+/// program has no `◢` of its own. The optimiser must leave such a program alone.
+#[test]
+fn an_implicitly_displayed_ending_is_left_alone() {
+    // The last computed value is the (false) `if` condition, so the program
+    // displays `0`. Deleting the unread store and pruning the dead `if` would
+    // leave `11.25` as the last computed value instead.
+    // Propagation still runs inside the branch — it is safe, because it
+    // substitutes an *equal* value — but the store and the dead `if` stay, so
+    // the value the machine computes last is still the condition, `0`.
+    prgm(
+        "let a = 11.25; let b = a - a; if (0 > 2) { print(a); }",
+        "11.25→A\n0→B\nIf 0\nThen\n11.25◢\nIfEnd\n",
+    );
+    // Ending in a loop is the same problem.
+    prgm(
+        "let a = 1; while (0) { print(1); }",
+        "1→A\nWhile 0\n1◢\nWhileEnd\n",
+    );
+    // Once the program ends in a display, trimming is allowed again.
+    prgm(
+        "let a = 11.25; let b = a - a; if (0 > 2) { print(a); } print(7);",
+        "7◢\n",
+    );
+}
+
+/// `Ans` reads the hidden result memory, which evaluating any expression
+/// updates, so no store is local in a program that consults it.
+#[test]
+fn a_program_that_reads_ans_keeps_its_stores() {
+    prgm("let a = 6 * 7; print(ans());", "42→A\nAns◢\n");
+}
+
+/// The display rule the guard above exists for.
+///
+/// PRGM shows the value of the last *value-producing* statement it executed —
+/// a store, a bare expression or a `print` — and a control statement is not one.
+/// So a trailing loop does **not** take over from the store before it, which is
+/// why a program ending in a loop is left alone rather than trimmed.
+#[test]
+fn a_trailing_control_statement_does_not_take_over_the_display() {
+    // `5→A` is the last value produced: the `While` is control flow. Removing
+    // the store would leave the loop's `1◢` as the last value instead.
+    prgm(
+        "let a = 5; while (0) { print(1); }",
+        "5→A\nWhile 0\n1◢\nWhileEnd\n",
+    );
+    // A trailing `if` with no `else`, likewise.
+    prgm(
+        "let a = 5; if (0) { print(1); }",
+        "5→A\nIf 0\nThen\n1◢\nIfEnd\n",
+    );
+    // The loop *body* counts too: control can fall out of it into the end.
+    prgm("while (0) { let a = 5; }", "While 0\n5→A\nWhileEnd\n");
+    // Ending in a display is what makes trimming safe.
+    prgm("let a = 5; while (0) { print(1); } print(2);", "2◢\n");
 }

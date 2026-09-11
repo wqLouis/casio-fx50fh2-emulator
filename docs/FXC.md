@@ -842,7 +842,7 @@ What the passes do:
 | Pass | Does | Example |
 | --- | --- | --- |
 | constant folding | pre-calculates arithmetic on numbers | `2 * 3 + 4` → `10` |
-| constant propagation | replaces a read of a value that never changes | `i < n` → `To 3` |
+| constant propagation | replaces a read of a value that never changes, per binding | `i < n` → `To 3` |
 | simplification | drops operators that cannot change a result | `a * 1` → `a`, `-(-a)` → `a` |
 | constant conditions | decides an `if`/`while` whose condition is a constant | `if (1) {…} else {…}` → the taken branch |
 | dead stores | removes a store to a name that is never read | `let unused = 1;` → nothing |
@@ -852,28 +852,58 @@ Three things are deliberately **not** done, and the reasons matter:
 * **A symbolic value is never turned into a decimal.** `2 * pi` stays `2×π`: the
   calculator keys `π` in as its own key, so the decimal would be both less
   precise and *more* keys (ADR 0015).
-* **A name that is read anywhere is never assumed constant**, including only
-  inside a loop or a branch. When in doubt the transpiler keeps the variable.
+* **A name that is assigned anywhere is never assumed constant**, even if the
+  assignment is in a loop or a branch it might never reach. When in doubt the
+  transpiler keeps the variable:
+
+  ```c
+  let n = 3;
+  while (n < 6) { print(n); n = n + 1; }   // `n` stays a memory
+  ```
+
 * **A store whose initialiser has an effect is never removed** — `input()` shows
   a prompt, `ran()` advances the random sequence, and a call can raise an error.
   Such a store survives even if nothing reads it.
 
 A store to a name that is genuinely never read *is* removed, since it cannot
-affect what the program displays. Four things still block that, and they are the
-subtle part:
+affect what the program displays:
 
-* a name that is **freed** (`free` is a claim about a lifetime, so removing the
-declaration would legalise a double free) or **declared more than once** (which
-is a re-declaration error);
-* an initialiser with an effect (see above);
+```c
+let value = config.offsets[0] * scale;   // 20◢
+print(value);
+```
+
+Two things still block that, and they are the subtle part:
+
 * a program that reads **`ans`** — evaluating any expression updates the hidden
-result memory `ans` reads, so no store is purely local;
-* a store in a position where the program could **end without a `◢` and display
-it** (`let a = 1;` on its own displays `1`).
+  result memory `ans` reads, so no store is purely local; and
+* a program whose last statement is **not a display**. PRGM shows the value of
+  the last *value-producing* statement it ran when a program ends without `◢`
+  — a store, a bare expression or a `◢`, but not a control statement. So
+  `let a = 5; while (0) { print(1); }` displays `5`, from the store, and
+  removing that store would change the answer to `1`. Trimming is therefore
+  skipped entirely for a program that does not end in `◢` on every path. A
+  program that does end in `◢` keeps the full optimiser.
 
 Memory is otherwise left alone: a memory's final value is observable, so a store
 is not deleted merely because the name is not used again in a straight line (see
-[ADR 0023](../docs/DECISIONS.md)).
+[ADR 0023](../docs/DECISIONS.md) and ADR 0027).
+
+### Diagnostics do not depend on the optimiser
+
+The transpiler checks the program **as you wrote it**, before optimising it, so a
+mistake is reported whether or not the optimiser would have removed the code it
+is about:
+
+```c
+let v = (v - v);   // error: `v` cannot be used in its own initializer
+```
+
+That program is rejected both with and without `--no-optimize`. Without the
+ordering it would compile, because `simplify` folds `v - v` to `0` before the
+allocator ever sees the self-reference. The same holds for a double free, a
+re-declaration, a use after free, and an array index out of range — a program
+that is rejected stays rejected.
 
 ### Checking the size
 

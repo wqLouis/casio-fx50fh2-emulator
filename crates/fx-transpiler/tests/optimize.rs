@@ -58,8 +58,14 @@ fn a_constant_expression_is_precalculated_by_default() {
 
 #[test]
 fn propagation_reaches_a_use_by_default_and_not_when_disabled() {
-    assert_eq!(optimized("let n = 3; print(n + 1);"), "3→A\n4◢\n");
+    // Optimised: the read becomes `3 + 1`, which folds to `4`, and the store
+    // then has nothing reading it and goes too.
+    assert_eq!(optimized("let n = 3; print(n + 1);"), "4◢\n");
+    // Raw: the read is emitted as written.
     assert_eq!(raw("let n = 3; print(n + 1);"), "3→A\nA+1◢\n");
+    // A name that is assigned is never propagated, so its store survives
+    // whatever the optimiser does.
+    assert_eq!(optimized("let n = input(); print(n + 1);"), "?→A\nA+1◢\n");
 }
 
 #[test]

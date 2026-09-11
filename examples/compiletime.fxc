@@ -1,12 +1,14 @@
-// Compile-time data, constants, and reusing a memory.
+// Compile-time data, constants, and the optimiser.
 //
 // `#data` parses JSON while transpiling, so its values become plain literals in
 // the program and occupy none of the calculator's seven memories. `const` does
-// the same for a fixed expression. When a variable is finished with, `free`
-// hands its memory back so the next variable can use it.
+// the same for a fixed expression. Nothing here needs a memory at all, and the
+// optimiser proves it: each `value` is used once, so its store is removed and
+// the number is displayed directly.
 //
 //   fx50 build examples/compiletime.fxc
-//   fx50 regs  examples/compiletime.fxc
+//   fx50 build --no-optimize examples/compiletime.fxc   # the raw translation
+//   fx50 size  examples/compiletime.fxc                 # and what it saves
 //   fx50 test  examples/compiletime.fxc
 //
 // `#mode` is a whole-program directive, so it comes first; `#data` may sit
@@ -22,12 +24,16 @@
 const scale = config.base;
 
 fn main() {
-    // `value` takes memory A.
+    // `20◢` — the data path and the const both fold, and `value` is read once,
+    // so storing it would cost three keys to no purpose.
     let value = config.offsets[0] * scale;
     print(value);
 
-    // Done with that value, so release A. The next declaration takes it, and the
-    // whole program needs only one of the seven memories.
+    // `free` releases a memory for a later variable to reuse. It is a no-op
+    // here, because the optimiser already removed the store — but it is what
+    // makes a program with seven *live* values fit, which is the case that
+    // matters: see examples/determinant.fxc, where every one of the seven
+    // memories is in use at once.
     free value;
     let value = config.offsets[2] * scale;
     print(value);

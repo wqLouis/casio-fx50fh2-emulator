@@ -189,17 +189,35 @@ fn transpile_expanded(
     // unroll the loops that need it, so the emitter sees plain literal array
     // indices.
     program = functions::expand(program, &text, &data)?;
+
+    // **Check the program as written, before optimising it.**
+    //
+    // Both checks below are diagnostics, and the optimiser removes code: a
+    // constant condition is pruned, a self-referential expression folds away, a
+    // store nothing reads disappears. Reporting afterwards would make the
+    // verdict depend on whether the optimiser ran — `let t = 1; free t;
+    // free t;` would stop being a double-free error once unread `t` was
+    // deleted. So diagnostics are settled here, on the source the programmer
+    // wrote.
+    //
+    // `Allocator::validate` is the binding-validity half of the allocator (it
+    // deliberately ignores running out of memory, which optimisation may
+    // legitimately fix), and `validate::validate` is the mode check.
+    alloc::Allocator::validate(&program, &text, &data)?;
+    validate::validate(&program, effective, &text)?;
+
     // `fold` always runs: a `const` is inlined by the emitter and its value must
     // be pre-calculated, and the optional passes below create new constant
-    // subexpressions that `unroll` needs as literal bounds.
-    fold::fold_program(&mut program);
+    // subexpressions that `unroll` needs as literal bounds. It is given the
+    // `#data` tables so a data path resolves to its value and the arithmetic
+    // around it collapses.
+    fold::fold_program_with(&mut program, &data, &text);
     if opts.optimize {
         simplify::simplify_program(&mut program);
         propagate::propagate_program(&mut program);
-        fold::fold_program(&mut program);
+        fold::fold_program_with(&mut program, &data, &text);
     }
     unroll::unroll_program(&mut program);
-    validate::validate(&program, effective, &text)?;
     let body = emit::emit(&program, &text, opts, &data)?;
 
     if opts.mode.is_some() || header.is_some() {
@@ -245,10 +263,14 @@ fn analyze_expanded(
     // Mirror the transpiler front end, so `fx50 regs` and `fx50 build` never
     // disagree about the memory plan.
     program = functions::expand(program, &text, &data)?;
-    fold::fold_program(&mut program);
+    // Mirror the transpiler's ordering, including the check on the program as
+    // written, so `fx50 regs` and `fx50 build` never disagree about whether a
+    // program is valid.
+    alloc::Allocator::validate(&program, &text, &data)?;
+    fold::fold_program_with(&mut program, &data, &text);
     simplify::simplify_program(&mut program);
     propagate::propagate_program(&mut program);
-    fold::fold_program(&mut program);
+    fold::fold_program_with(&mut program, &data, &text);
     unroll::unroll_program(&mut program);
     let allocator = alloc::Allocator::collect(&program, &text, &data)?;
     Ok(Analysis {

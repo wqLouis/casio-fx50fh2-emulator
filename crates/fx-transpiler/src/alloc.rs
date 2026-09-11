@@ -186,10 +186,59 @@ impl Allocator {
             loop_depth: 0,
             first_loop_release: None,
             reserved: reserve_fixed(program),
+            full_check: true,
         };
         collect_consts(program, &mut scanner.consts);
         scanner.stmts(program)?;
         scanner.finish()
+    }
+
+    /// Check the program's **binding validity**, without requiring memory to be
+    /// available.
+    ///
+    /// This reports exactly the errors that do not depend on which memory a
+    /// variable receives: a double free, a use after free, freeing a
+    /// `const`/`#data`/unknown name, re-declaring a live name, a name used in
+    /// its own initializer, a checked `free` under re-entrant control flow, and
+    /// the array shape mistakes (indexing a scalar, an index out of range).
+    ///
+    /// It deliberately does **not** report running out of memory, because that
+    /// one legitimately improves when the program is optimised: eight variables
+    /// nothing reads do fit in seven memories once the stores are gone, and the
+    /// tests pin that. So memory pressure is ignored here — the scanner hands
+    /// out placeholder registers when it runs short — and [`Allocator::collect`]
+    /// still checks it properly on the way to emitting.
+    ///
+    /// ## Why this exists
+    ///
+    /// [`crate::transpile`] runs this **before** the optimisation passes, so
+    /// diagnostics are computed on the program *as written*. That is what lets
+    /// the optimiser be aggressive: without it, deleting the declaration a
+    /// diagnostic is about would silently legalise the program. It happened
+    /// twice — `let t = 1; free t; free t;` stopped being a double-free error
+    /// once the unread `t` was removed, and `let v = (v - v);` stopped being a
+    /// self-reference error once `v - v` folded to `0`.
+    pub fn validate(program: &Program, source: &str, data: &Data) -> Result<(), TranspileError> {
+        let mut scanner = Scanner {
+            source,
+            data,
+            consts: BTreeSet::new(),
+            vars: Vec::new(),
+            arrays: Vec::new(),
+            bindings: Vec::new(),
+            occupants: [None; VARIABLES.len()],
+            declaring: None,
+            has_jump: false,
+            first_checked_release: None,
+            loop_depth: 0,
+            first_loop_release: None,
+            reserved: reserve_fixed(program),
+            full_check: false,
+        };
+        collect_consts(program, &mut scanner.consts);
+        scanner.stmts(program)?;
+        scanner.finish()?;
+        Ok(())
     }
 
     /// The memory for the scalar `name` at byte offset `offset`.
@@ -342,6 +391,20 @@ struct Scanner<'a> {
     /// Memories the program addresses by their fixed PRGM letter (`M`), and
     /// which must therefore stay out of the allocator's pool.
     reserved: [bool; VARIABLES.len()],
+    /// Whether this is the full check that the emitter needs, as opposed to
+    /// [`Allocator::validate`]'s early validity check.
+    ///
+    /// The full check is strict about two things a *later* pass may still
+    /// resolve, so the early one tolerates both:
+    ///
+    /// * **Memory pressure.** Eight variables nothing reads do fit in seven
+    ///   memories once the stores are gone, so the early check hands out
+    ///   placeholder registers instead of failing.
+    /// * **A computed array index.** `m[i]` only becomes a literal once
+    ///   [`crate::unroll`] has expanded the loop, and the early check runs
+    ///   before that, so it leaves the index alone for the full check to
+    ///   report.
+    full_check: bool,
 }
 
 impl Scanner<'_> {
@@ -397,9 +460,18 @@ impl Scanner<'_> {
     fn allocate(&mut self, name: &str, pos: usize, explicit: bool) -> Result<(), TranspileError> {
         // The lowest free memory keeps the allocation deterministic and easy to
         // read, and naturally re-uses one that was just released.
-        let register = (0..VARIABLES.len())
+        let register = match (0..VARIABLES.len())
             .find(|register| self.occupants[*register].is_none() && !self.reserved[*register])
-            .ok_or_else(|| self.out_of_memory(name, pos))?;
+        {
+            Some(register) => register,
+            // Validity checking does not care where a variable would live, and
+            // the `Binding` records the memory directly, so re-using register 0
+            // as a placeholder cannot make a later check report something
+            // false. `occupants` only decides which register is chosen next and
+            // what an out-of-memory message says.
+            None if !self.full_check => 0,
+            None => return Err(self.out_of_memory(name, pos)),
+        };
         self.bindings.push(Binding {
             name: name.to_string(),
             element: None,
@@ -434,12 +506,20 @@ impl Scanner<'_> {
         let available: Vec<usize> = (0..VARIABLES.len())
             .filter(|register| self.occupants[*register].is_none() && !self.reserved[*register])
             .collect();
-        if available.len() < size {
+        if available.len() < size && self.full_check {
             return Err(self.no_room_for_array(name, size, pos, &available));
         }
+        // When only validity matters, an array larger than the free memories
+        // still has to be given *some* registers so the elements can be looked
+        // up by name; they are placeholders.
+        let chosen: Vec<usize> = available
+            .iter()
+            .copied()
+            .chain(std::iter::repeat_n(0, size))
+            .take(size)
+            .collect();
         let mut elements = Vec::with_capacity(size);
-        for (element, register) in available.iter().enumerate().take(size) {
-            let register = *register;
+        for (element, register) in chosen.into_iter().enumerate() {
             self.bindings.push(Binding {
                 name: name.to_string(),
                 element: Some(element),
@@ -643,9 +723,14 @@ impl Scanner<'_> {
             };
             return self.check_bounds(name, index, array, at);
         }
-        // A computed index that survived folder and unroller is a run-time
-        // value, which PRGM cannot address.
+        // A computed index is a run-time value, which PRGM cannot address — but
+        // only the *full* check may say so: the early one runs before
+        // [`crate::unroll`], which is what turns `m[i]` in a constant loop into
+        // `m[0]`…`m[5]`.
         if let [Accessor::IndexExpr { pos: at, .. }] = accessors {
+            if !self.full_check {
+                return Ok(());
+            }
             return Err(crate::error::computed_index_error(self.source, name, *at));
         }
         // Not a plain element reference. An array has no fields, and a scalar
@@ -921,7 +1006,12 @@ impl Scanner<'_> {
                 index: _,
                 value: _,
                 pos,
-            } => Err(crate::error::computed_index_error(self.source, name, *pos)),
+            } => {
+                if !self.full_check {
+                    return Ok(());
+                }
+                Err(crate::error::computed_index_error(self.source, name, *pos))
+            }
             Stmt::Free {
                 name,
                 pos,

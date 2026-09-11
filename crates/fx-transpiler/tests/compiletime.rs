@@ -41,7 +41,9 @@ fn a_bare_data_name_becomes_a_literal() {
 #[test]
 fn data_paths_resolve_through_objects_and_arrays() {
     let source = "#data c = { \"a\": 2, \"xs\": [5, 6] };\nlet x = c.a + c.xs[1]; print(x);\n";
-    assert_eq!(out(source), "2+6→A\nA◢\n");
+    // `out` is the *unoptimised* translation, so the store stays; the data path
+    // still folds, because `fold` is not optional.
+    assert_eq!(out(source), "8→A\nA◢\n");
 }
 
 #[test]
@@ -51,9 +53,10 @@ fn booleans_become_one_and_zero() {
 
 #[test]
 fn data_uses_no_memory() {
-    let source = "#data c = { \"a\": 1, \"b\": 2 };\nlet x = c.a; print(x + c.b);\n";
+    let source = "#data c = { \"a\": 1, \"b\": 2 };\nlet x = input(); print(x + c.a + c.b);\n";
     let analysis = analyze(&common::wrap(source), std::path::Path::new(".")).unwrap();
     assert_eq!(analysis.data, vec!["c"]);
+    // `x` is the only thing that needs a memory; the data table needs none.
     assert_eq!(analysis.allocation.bindings.len(), 1);
     assert_eq!(analysis.allocation.bindings[0].name, "x");
     assert_eq!(analysis.allocation.bindings[0].memory, 'A');
@@ -69,7 +72,8 @@ fn a_data_file_is_read_relative_to_the_source() {
     // `transpile_with_base` resolves the file against `dir`.
     let prgm = fx_transpiler::transpile_with_base(&common::wrap(source), Options::default(), &dir)
         .unwrap();
-    assert_eq!(prgm, "10×2◢\n");
+    // The `#data` path folds to its value, so the arithmetic collapses.
+    assert_eq!(prgm, "20◢\n");
     std::fs::remove_dir_all(&dir).ok();
 }
 
@@ -254,8 +258,10 @@ fn a_const_may_hold_a_calculator_constant_symbolically() {
 
 #[test]
 fn a_const_frees_a_memory_for_a_variable() {
+    // `input()` is not side-effect free, so the store survives and the plan is
+    // about `a` alone — which is the point: the `const` used no memory.
     let analysis = analyze(
-        &common::wrap("const k = 1;\nlet a = k; print(a);\n"),
+        &common::wrap("const k = 1;\nlet a = input(); print(a * k);\n"),
         std::path::Path::new("."),
     )
     .unwrap();
@@ -319,7 +325,7 @@ fn free_emits_nothing() {
 
 #[test]
 fn free_is_tracked_by_the_allocator() {
-    let source = "let t = 1;\nfree t;\nlet u = 2;\nprint(u);\n";
+    let source = "let t = input();\nfree t;\nlet u = input();\nprint(u);\n";
     let analysis = analyze(&common::wrap(source), std::path::Path::new(".")).unwrap();
     assert_eq!(analysis.allocation.freed, vec!["t"]);
     assert_eq!(
@@ -337,7 +343,7 @@ fn free_is_tracked_by_the_allocator() {
 #[test]
 fn a_program_without_free_keeps_every_memory_separate() {
     let analysis = analyze(
-        &common::wrap("let a = 1; let b = 2; print(a + b);\n"),
+        &common::wrap("let a = input(); let b = input(); print(a + b);\n"),
         std::path::Path::new("."),
     )
     .unwrap();

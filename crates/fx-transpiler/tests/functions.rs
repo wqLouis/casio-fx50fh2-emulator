@@ -99,7 +99,7 @@ fn main_becomes_the_program() {
 fn functions_do_not_consume_memories() {
     // `sq` is inlined and never allocated; only `a` uses a memory.
     let analysis = analyze(
-        "fn sq(x) = x * x;\nfn main() { let a = 3; print(sq(a)); }",
+        "fn sq(x) = x * x;\nfn main() { let a = input(); print(sq(a)); }",
         Path::new("."),
     )
     .unwrap();
@@ -545,8 +545,9 @@ fn a_top_level_const_reaches_functions_but_costs_no_memory() {
         "6◢\n",
     );
     // `k` is inlined, so even the inlined body uses no memory for it.
+    // `input()` keeps the store alive, so there is a plan to inspect.
     let analysis = analyze(
-        "const k = 2;\nfn scale(x) = x * k;\nfn main() { let a = 3; print(scale(a)); }",
+        "const k = 2;\nfn scale(x) = x * k;\nfn main() { let a = input(); print(scale(a)); }",
         Path::new("."),
     )
     .unwrap();
@@ -557,8 +558,10 @@ fn a_top_level_const_reaches_functions_but_costs_no_memory() {
 #[test]
 fn a_data_table_reaches_functions() {
     glyph(
+        // `glyph` is the unoptimised translation, but the data path still folds
+        // (folding is not optional), so the argument is multiplied out.
         "#data cfg = { \"n\": 4 };\nfn scale(x) = x * cfg.n;\nfn main() { print(scale(2)); }",
-        "2×4◢\n",
+        "8◢\n",
     );
 }
 
@@ -599,8 +602,12 @@ fn included_libraries_do_not_pollute_the_calling_namespace() {
         "#include \"lib.fxc\"\nfn main() { let total = 100; print(sum_to(3)); print(total); }\n",
     );
     let prgm = transpile_file(&main, Options::default()).unwrap();
-    // The two `total`s are separate memories; the library's cannot touch the
-    // caller's 100.
-    assert!(prgm.contains("100→"), "{prgm}");
-    assert!(!prgm.contains("100→A\n100→A"), "{prgm}");
+    // The two `total`s are separate: the library's accumulates in a memory, and
+    // the caller's 100 is propagated as a literal and needs no memory at all —
+    // which is the strongest possible proof that the library never touched it.
+    assert!(prgm.ends_with("100◢\n"), "{prgm}");
+    assert!(
+        !prgm.contains("100→"),
+        "the caller's 100 needs no memory: {prgm}"
+    );
 }

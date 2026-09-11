@@ -12,6 +12,12 @@
 //! * Comparisons of number literals, which the machine evaluates to `1`/`0`.
 //! * References to an earlier numeric `const`, which is inlined and then folded
 //!   (`const k = 6; print(k + 1);` becomes `7◢`).
+//! * **`#data` paths**, which [`fold_program_with`] resolves to their value so
+//!   the arithmetic around them can collapse: `config.offsets[0] * 2` becomes
+//!   `20` rather than `10×2`. The emitter resolves paths as well, so this is not
+//!   required for correctness — it exists to give the folding something to work
+//!   with. A path that does *not* resolve is left alone, so the emitter still
+//!   reports it with the message and position it always had.
 //!
 //! ## What is deliberately *not* folded
 //!
@@ -28,30 +34,45 @@
 //!   machine would key in.
 
 use crate::ast::{Accessor, BinOp, Expr, ForStmt, Program, Stmt, UnOp};
+use crate::data::Data;
 
-/// Fold every constant subexpression in `program`, in place.
+/// Fold every constant subexpression in `program`, resolving `#data` paths.
 ///
 /// Run after parsing and after [`crate::unroll`] has substituted loop
 /// induction variables, then again on any expression built during emission
 /// (the `for` offset).
-pub fn fold_program(program: &mut Program) {
-    Folder::default().stmts(program);
+///
+/// `source` is only used to describe a path that fails to resolve, and such a
+/// failure is ignored here — the emitter reports it.
+pub fn fold_program_with(program: &mut Program, data: &Data, source: &str) {
+    Folder::new(Some((data, source))).stmts(program);
 }
 
 /// Fold one expression in place, leaving symbolic values alone.
 pub fn fold_expr(expr: &mut Expr) {
-    Folder::default().expr(expr);
+    Folder::new(None).expr(expr);
 }
 
-#[derive(Default)]
-struct Folder {
+struct Folder<'a> {
     /// `const` values declared so far, in order. A reference to a *numeric*
     /// `const` is replaced by its value; a symbolic one (`2 * pi`) is left for
     /// the emitter to inline, so its symbol survives.
     consts: Vec<(String, Expr)>,
+    /// The compile-time tables, and the source text to describe a bad path, for
+    /// resolving `#data` paths. `None` when folding without them.
+    data: Option<(&'a Data, &'a str)>,
 }
 
-impl Folder {
+impl<'a> Folder<'a> {
+    fn new(data: Option<(&'a Data, &'a str)>) -> Self {
+        Folder {
+            consts: Vec::new(),
+            data,
+        }
+    }
+}
+
+impl Folder<'_> {
     fn stmts(&mut self, stmts: &mut [Stmt]) {
         for stmt in stmts {
             self.stmt(stmt);
@@ -146,11 +167,24 @@ impl Folder {
                     self.expr(arg);
                 }
             }
-            Expr::Data { accessors, .. } => {
-                for accessor in accessors {
+            Expr::Data {
+                accessors,
+                name,
+                pos,
+            } => {
+                for accessor in accessors.iter_mut() {
                     if let Accessor::IndexExpr { expr, .. } = accessor {
                         self.expr(expr);
                     }
+                }
+                // Resolve the path so the arithmetic around it can collapse.
+                // A failure is not reported here: the emitter resolves the same
+                // path and produces the diagnostic, with the same message and
+                // position it would have had without this module.
+                if let Some((data, source)) = self.data
+                    && let Ok(value) = data.resolve(name, accessors, source, *pos)
+                {
+                    *expr = Expr::Number(value);
                 }
             }
             // A reference to a numeric `const` is replaced by its value. The
@@ -285,7 +319,20 @@ mod tests {
     fn folded(source: &str) -> String {
         let tokens = lex(source).unwrap();
         let mut program = parse(&tokens, source).unwrap();
-        fold_program(&mut program);
+        fold_program_with(&mut program, &Data::default(), source);
+        format!("{program:?}")
+    }
+
+    /// Fold a source that may carry `#data` directives, so the paths can be
+    /// resolved. Goes through the real extraction path rather than faking a
+    /// table up.
+    fn folded_with_data(source: &str) -> String {
+        let here = std::path::Path::new(".");
+        let expanded = crate::include::expand(source, None, here).unwrap();
+        let (text, data) = crate::data::extract(&expanded, here).unwrap();
+        let tokens = lex(&text).unwrap();
+        let mut program = parse(&tokens, &text).unwrap();
+        fold_program_with(&mut program, &data, &text);
         format!("{program:?}")
     }
 
@@ -336,6 +383,35 @@ mod tests {
     #[test]
     fn a_numeric_const_is_inlined_before_folding() {
         assert!(folded("const k = 2 * 3;\nprint(k + 1);").contains("Number(7.0)"));
+    }
+
+    /// A `#data` path is a compile-time number, so `fold_program_with` resolves
+    /// it and the arithmetic around it collapses. Without this the emitter
+    /// would still resolve the path, but the operator would survive and cost
+    /// keys: `c.o[0] * 2` would emit `10×2`, not `20`.
+    #[test]
+    fn a_data_path_is_resolved_before_folding() {
+        let folded =
+            folded_with_data("#data c = { \"a\": 10, \"o\": [10, 30] };\nprint(c.o[0] * 2);");
+        assert!(folded.contains("Number(20.0)"), "{folded}");
+    }
+
+    /// A nested path folds, and so does a `const` that names one.
+    #[test]
+    fn a_nested_data_path_is_resolved_before_folding() {
+        let folded = folded_with_data(
+            "#data c = { \"n\": { \"k\": 2 }, \"o\": [10, 30] };\n\
+             const k = c.n.k;\nprint(c.o[1] * k - 60);",
+        );
+        assert!(folded.contains("Number(0.0)"), "{folded}");
+    }
+
+    /// A path that does not resolve is left alone, so the emitter reports it
+    /// with the message and position it always had.
+    #[test]
+    fn an_unresolvable_data_path_is_left_for_the_emitter() {
+        let folded = folded_with_data("#data c = { \"o\": [1] };\nprint(c.o[9]);");
+        assert!(folded.contains("Data"), "{folded}");
     }
 
     #[test]

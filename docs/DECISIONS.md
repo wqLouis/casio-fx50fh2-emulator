@@ -1050,3 +1050,97 @@ JSON and so balances before the directive ends.
 `stray top-level statements` still get the "a program needs an entry point"
 message when nothing at all is defined, because that is the more useful thing to
 say to someone who typed `print(1);` at the top level.
+
+## ADR 0027 — Diagnostics are computed before the optimiser runs
+
+ADR 0023 relaxed dead-store elimination, and the relaxation was wrong twice, in
+the same way. Both bugs are worth recording because the fix is not a more careful
+rule but an **ordering**.
+
+* `let t = 1; free t; free t;` stopped being a double-free error. `t` is never
+  read, so the unread-store pass deleted the declaration — and then the `free`s,
+  since `free` is name-based and would otherwise dangle — leaving a program with
+  no error at all.
+* `let v = (v - v);` stopped being a self-reference error. `simplify` folds
+  `v - v` to `0`, so the allocator's "a name cannot be used in its own
+  initializer" check never saw the reference.
+
+Each was a real language error silently accepted, and neither is caught by being
+more conservative inside the optimiser: the optimiser's whole job is to delete
+code, and sometimes that code is what a diagnostic is about.
+
+**The rule is the ordering.** `transpile` now runs
+`alloc::Allocator::validate` — the binding-validity half of the allocator — and
+the mode check on the program *as written*, after parsing and function
+expansion but before `fold`, `simplify` and `propagate`. `emit` then runs the
+full allocator as before, so the emitted program is still completely checked.
+
+`Allocator::validate` tolerates exactly two things a later pass resolves, which
+is what makes it usable that early:
+
+* **memory pressure.** Eight variables nothing reads do fit in seven memories
+  once the stores are gone, and that is a legitimate improvement — so it hands
+  out placeholder registers instead of failing. The full check still reports it.
+* **a computed array index.** `m[i]` only becomes literal once `unroll` has
+  expanded the loop, and this check runs before that, so it leaves the index for
+  the full check to report.
+
+With the diagnostics settled up front, the optimiser is free to be aggressive,
+so a second relaxation also becomes possible: propagation is now **per binding**
+rather than per name. The value travels in the flow state, so `free n; let n =
+5;` is a fresh variable with its own value, and `let n = 3; print(n); free n;
+let n = 5; print(n);` emits `3◢` / `5◢` with no memory at all. The old
+whole-program design had to refuse any name that was freed or declared twice.
+
+The one thing that keeps propagation sound is a deliberately blunt rule: **a
+name that is assigned anywhere is never propagated**, even if the assignment is
+inside a loop the analysis cannot reason about. Otherwise
+
+```c
+let n = 3;
+while (n < 6) { print(n); n = n + 1; }
+```
+
+would rewrite `print(n)` to `print(3)` and print `3` on every iteration.
+
+**The invariant that falls out** is worth stating plainly, because it is what the
+tests and the fuzzer check: *if the unoptimised translation is rejected, the
+optimised one is rejected too*. `tests/propagate.rs` pins it for a double free,
+a re-declaration, a self-referential initializer, a use after free, freeing a
+`const`, a checked `free` inside a loop, indexing a scalar and an index out of
+range; a differential fuzzer compares both forms for verdict and output over
+several thousand generated programs.
+
+### The display rule, corrected
+
+The removal of stores is licensed by "a program's contract is its output", and
+that licence has a precise shape, which the first attempt got wrong. PRGM shows
+the value of the last **value-producing** statement it executed when a program
+ends without `◢` — a store, a bare expression or a `◢`, but *not* a control
+statement:
+
+| program | displays |
+| --- | --- |
+| `5→A` | `5` |
+| `5→A:While 0:1◢:WhileEnd` | `5` — the loop is control flow, so the store is still the last value produced |
+| `If 0:Then:1◢:IfEnd` | nothing |
+| `5→A:7` | `7` |
+
+So a trailing loop does **not** take over the display from the store before it. A
+guard that only asked "does the program end in a store" allowed trimming there
+and changed the answer: a fuzzer found
+
+```c
+for (let i = 0; i < 2; i = i + 1) { print(i + 1); }
+let v = 5;
+let w = v;
+if (0) { print(w * v); }
+```
+
+displaying `5` untrimmed and `2` trimmed, because the stores holding `v` and `w`
+were the last values produced. The guard is now the strong one — **the program
+must end in a display on every path** — and it gates pruning as well as store
+removal, since pruning can remove the statement that held the display.
+
+That is deliberately conservative: whether a loop body ran is a run-time
+question, so a program ending in a loop is left untrimmed rather than guessed at.

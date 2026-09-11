@@ -127,9 +127,13 @@ fn self_operations_around_calls_are_left_alone() {
 #[test]
 fn base_tagged_literals_are_simplified_too() {
     // `fold` does not evaluate base-tagged literals, so these reach the pass.
-    assert_eq!(out("print(0x2 / 0x2);"), "1◢\n");
-    assert_eq!(out("print(0x5 - 0x5);"), "0◢\n");
-    assert_eq!(out("print(0x3 * 0);"), "0◢\n");
+    //
+    // Base literals need BASE mode, and the mode check runs on the program *as
+    // written* — before this pass could simplify the literal away — so the
+    // program has to declare the mode it uses.
+    assert_eq!(out("#mode BASE\nprint(0x2 / 0x2);"), "#mode BASE\n1◢\n");
+    assert_eq!(out("#mode BASE\nprint(0x5 - 0x5);"), "#mode BASE\n0◢\n");
+    assert_eq!(out("#mode BASE\nprint(0x3 * 0);"), "#mode BASE\n0◢\n");
 }
 
 // ---------------------------------------------------------------------------
@@ -158,12 +162,14 @@ fn simplifications_expose_each_other_bottom_up() {
 
 #[test]
 fn removing_a_use_keeps_the_store() {
-    // Memory is observable, so `b` is still assigned even though every read of
-    // it was replaced by the constant zero.
+    // The store goes with the read, because `a * 0` is `0` and nothing reads `b`
+    // afterwards — but the `input()` that prompted for `a` has an effect, so its
+    // store stays even though nothing reads `a` either.
     assert_eq!(
         out("let a = input(); let b = a * 0; print(b);"),
-        "?→A\n0→B\n0◢\n"
+        "?→A\n0◢\n"
     );
+    assert_eq!(out("let a = input(); print(1);"), "?→A\n1◢\n");
 }
 
 #[test]

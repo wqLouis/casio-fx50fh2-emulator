@@ -848,7 +848,7 @@ mod tests {
     fn transpile(source: &str) -> String {
         let tokens = lex(source).unwrap();
         let mut program = parse(&tokens, source).unwrap();
-        fold::fold_program(&mut program);
+        fold::fold_program_with(&mut program, &crate::data::Data::default(), source);
         unroll_program(&mut program);
         // The emitter is the real output path; this test only needs to know
         // that the computed indices were resolved away.

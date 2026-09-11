@@ -547,8 +547,11 @@ fn a_run_time_index_is_a_transpile_error() {
 
 #[test]
 fn an_unrollable_loop_explains_the_missing_index() {
-    // A `free` in the body stops the unroll, so the computed index survives.
-    let error = err("let m[3];\nfor (let i = 0; i < 3; i = i + 1) { m[i] = 1; free m; }\n");
+    // A run-time bound stops the unroll, so the computed index survives. (A
+    // `free` in the body would too, but that is rejected earlier and for a
+    // different reason — see `alloc.rs`.)
+    let error =
+        err("let m[3];\nlet n = input();\nfor (let i = 0; i < n; i = i + 1) { m[i] = 1; }\n");
     assert!(
         error.message.contains("compile-time index"),
         "{}",

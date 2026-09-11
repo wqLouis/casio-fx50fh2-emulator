@@ -121,7 +121,11 @@ fn regs_reports_the_memory_plan() {
     let dir = TempDir::new("regs");
     let program = dir.write(
         "prog.fxc",
-        "#data config = { \"n\": 3 };\nconst k = config.n;\nfn main() {\n    let total = k;\n    free total;\n    let next = 1;\n    print(next);\n}\n",
+        // `input()` keeps both stores: they have effects, so the optimiser
+        // cannot remove them, and there is a memory plan to report. A constant
+        // `let` would be propagated into its read and then deleted.
+        "#data config = { \"n\": 3 };\nconst k = config.n;\nfn main() {\n    \
+         let total = input();\n    free total;\n    let next = input();\n    print(next);\n}\n",
     );
 
     let out = fx50().arg("regs").arg(&program).output().unwrap();
