@@ -151,18 +151,83 @@ mod runs {
     /// The optimiser must not change what a program computes.
     #[test]
     fn both_forms_compute_the_same_thing() {
+        // This is the load-bearing test for the whole optimisation story: the
+        // passes are on by default, so a rewrite that changes behaviour is a
+        // silent wrong answer. The cases deliberately span every construct the
+        // passes touch — arithmetic, comparisons, loops, arrays, functions,
+        // statistics, sexagesimal, `ans`, and declarations nothing reads — and
+        // both forms are run on the real interpreter and compared.
         let cases: &[(&str, &[f64])] = &[
+            // Arithmetic and the identities `simplify` removes.
             ("let a = 5; print(a * 2);", &[]),
-            ("let x = 1; let y = 2; print(x + y);", &[]),
             ("let a = input(); print(a * 1 + 0);", &[7.0]),
+            ("let a = input(); print(-(-a));", &[7.0]),
+            ("let a = input(); print(a - a);", &[7.0]),
+            ("let a = input(); print(a * 0);", &[7.0]),
+            ("let a = input(); print(a / a);", &[3.0]),
+            ("print(2 * 3 + 4);", &[]),
+            ("print(2 * pi);", &[]),
+            // Comparisons, which are folded when both sides are fixed.
+            ("let a = 1; let b = 2; print(a < b); print(a == b);", &[]),
+            ("let a = input(); print(a > 0); print(a <= 0);", &[5.0]),
+            // Propagation into a loop bound, and the dead store left behind.
             (
                 "let n = 3; for (let i = 0; i < n; i = i + 1) { print(i); }",
                 &[],
             ),
-            ("if (1) { print(9); } else { print(8); }", &[]),
             ("let unused = 1; print(2);", &[]),
-            ("const k = 6; print(k + 1);", &[]),
+            ("let k = 42; print(7);", &[]),
+            // Constant conditions, both ways round.
+            ("if (1) { print(9); } else { print(8); }", &[]),
+            ("if (0) { print(9); } else { print(8); }", &[]),
+            ("while (0) { print(1); } print(2);", &[]),
+            (
+                "let a = input(); if (a > 0) { print(1); } else { print(2); }",
+                &[-1.0],
+            ),
+            // Loops that are *not* constant-foldable.
+            (
+                "let s = 0; let i = 1; while (i <= 5) { s = s + i; i = i + 1; } print(s);",
+                &[],
+            ),
+            (
+                "for (let i = 1; i <= 4; i = i + 1) { if (i == 2) { print(99); } }",
+                &[],
+            ),
+            // Arrays, including the unrolling that makes an index literal.
             ("let v[3] = {1,2,3}; print(v[0] + v[2]);", &[]),
+            ("let v[3]; v[0] = 1; v[1] = 2; v[2] = 3; print(v[1]);", &[]),
+            (
+                "let v[2] = {input(), input()}; print(v[0] + v[1]);",
+                &[3.0, 4.0],
+            ),
+            // Functions are inlined, so the optimiser sees through the call.
+            (
+                "fn dbl(x) = x * 2;\nfn main() { let a = 4; print(dbl(a)); }",
+                &[],
+            ),
+            (
+                "fn sum_to(n) { let t = 0; for (let i = 1; i <= n; i = i + 1) { t = t + i; } return t; }\nfn main() { print(sum_to(4)); }",
+                &[],
+            ),
+            // `const` is inlined either way.
+            ("const k = 6; print(k + 1);", &[]),
+            (
+                "const scale = 3; let a = input(); print(a * scale);",
+                &[2.0],
+            ),
+            // Sexagesimal and statistics must survive the passes intact.
+            ("print(dms(2, 15, 18));", &[]),
+            (
+                "#mode SD\nfn main() { clrstat(); dt(2); dt(4); print(stat.meanx); }",
+                &[],
+            ),
+            // Statements whose stores must **not** be removed: one that prompts,
+            // one that is displayed because nothing follows it, and one whose
+            // result a later `ans()` reads.
+            ("let a = input(); print(3);", &[42.0]),
+            ("let a = 1;", &[]),
+            ("let a = input(); print(ans());", &[6.0]),
         ];
         for (source, inputs) in cases {
             let optimized = optimized(source);
