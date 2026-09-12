@@ -11,7 +11,7 @@
 //!
 //! * [`api`] — every operation as `&str -> String`, plain Rust, no wasm types.
 //!   This is where the behaviour lives, and `cargo test` covers it directly.
-//! * [`abi`] — the three `extern "C"` exports, and the pointer dance.
+//! * `abi` — the three `extern "C"` exports, and the pointer dance.
 //! * `mod.js`/the web page — reads the JSON and draws it.
 //!
 //! # Calling it
@@ -40,8 +40,5 @@
 //!
 //! The operations and the request/response shapes are documented on [`api`].
 
-pub mod abi;
+mod abi;
 pub mod api;
-
-/// The version a host should show and use to spot a stale cached module.
-pub const VERSION: &str = env!("CARGO_PKG_VERSION");

@@ -15,7 +15,7 @@ pub enum Base {
 
 impl Base {
     /// The radix, for `u32::from_str_radix`.
-    pub fn radix(self) -> u32 {
+    pub(crate) fn radix(self) -> u32 {
         match self {
             Base::Dec => 10,
             Base::Hex => 16,
@@ -26,7 +26,7 @@ impl Base {
 
     /// The word size in bits.  Binary uses 10 bits, octal 30, and
     /// decimal/hexadecimal 32.
-    pub fn bits(self) -> u32 {
+    pub(crate) fn bits(self) -> u32 {
         match self {
             Base::Dec | Base::Hex => 32,
             Base::Bin => 10,
@@ -35,7 +35,7 @@ impl Base {
     }
 
     /// The display suffix.
-    pub fn suffix(self) -> char {
+    pub(crate) fn suffix(self) -> char {
         match self {
             Base::Dec => 'd',
             Base::Hex => 'h',
@@ -55,14 +55,14 @@ impl Base {
 
     /// Convert a number to its unsigned word representation (truncating toward
     /// zero and masking to the word size).
-    pub fn to_word(self, x: f64) -> u32 {
+    pub(crate) fn encode(self, x: f64) -> u32 {
         let truncated = if x.is_finite() { x.trunc() } else { 0.0 };
         let as_int = truncated as i64 as u64;
         (as_int & self.mask()) as u32
     }
 
     /// Interpret a word as a signed value in this base.
-    pub fn from_word(self, word: u32) -> f64 {
+    pub(crate) fn decode(self, word: u32) -> f64 {
         let masked = (word as u64) & self.mask();
         let sign_bit = 1u64 << (self.bits() - 1);
         if masked & sign_bit != 0 {
@@ -73,15 +73,15 @@ impl Base {
     }
 
     /// Wrap a number into the signed range of this base.
-    pub fn wrap(self, x: f64) -> f64 {
-        self.from_word(self.to_word(x))
+    pub(crate) fn wrap(self, x: f64) -> f64 {
+        self.decode(self.encode(x))
     }
 
     /// Format a number in this base with its suffix.
-    pub fn format(self, x: f64) -> String {
-        let word = self.to_word(x);
+    pub(crate) fn format(self, x: f64) -> String {
+        let word = self.encode(x);
         match self {
-            Base::Dec => format!("{}d", self.from_word(word) as i64),
+            Base::Dec => format!("{}d", self.decode(word) as i64),
             Base::Hex => format!("{:X}h", word),
             Base::Bin => format!("{:b}b", word),
             Base::Oct => format!("{:o}o", word),
@@ -92,7 +92,7 @@ impl Base {
     ///
     /// Returns `None` if the text does not carry a recognised suffix or the
     /// digits are not valid for that base.
-    pub fn parse(text: &str) -> Option<f64> {
+    pub(crate) fn parse(text: &str) -> Option<f64> {
         let text = text.trim();
         let (body, base) = match text.chars().last()? {
             'd' | 'D' => (&text[..text.len() - 1], Base::Dec),
@@ -121,7 +121,7 @@ impl Base {
                 } else {
                     magnitude
                 };
-                Some(base.from_word((word & base.mask()) as u32))
+                Some(base.decode((word & base.mask()) as u32))
             }
         }
     }
@@ -132,7 +132,7 @@ impl Base {
     /// should confirm the literal parses first.  Returns `None` for an
     /// untagged decimal number, so `2B` (meaning `2 × B`) is not mistaken for
     /// a binary literal.
-    pub fn tag_of(text: &str) -> Option<Base> {
+    pub(crate) fn tag_of(text: &str) -> Option<Base> {
         match text.chars().last()? {
             'd' | 'D' => Some(Base::Dec),
             'h' | 'H' => Some(Base::Hex),
@@ -160,8 +160,8 @@ mod tests {
     fn wraps_signed_words() {
         let base = Base::Dec;
         assert_eq!(base.wrap(4294967295.0), -1.0);
-        assert_eq!(base.to_word(-1.0), 0xFFFF_FFFF);
-        assert_eq!(format!("{}", base.from_word(0xFFFF_FFFF)), "-1");
+        assert_eq!(base.encode(-1.0), 0xFFFF_FFFF);
+        assert_eq!(format!("{}", base.decode(0xFFFF_FFFF)), "-1");
     }
 
     #[test]

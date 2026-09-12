@@ -977,9 +977,10 @@ anything else is a transpile error naming the path that failed. A bare data name
 Data names share the namespace with variables and `const`s, so they must be
 unique, and `#data` may appear anywhere.
 
-The JSON parser is the crate's own (`fx_transpiler::json`), so `fx-transpiler`
-has no dependencies; it is strict, and rejects duplicate object keys, comments,
-trailing commas and lone surrogates rather than guessing.
+JSON is parsed strictly, and rejects duplicate object keys, comments, trailing
+commas and lone surrogates rather than guessing. The parser is `serde_json` with
+a duplicate-key check on top; the strictness is the crate's own choice, not the
+library's default (see [ADR 0032](DECISIONS.md)).
 
 `#tests` is exactly `#data tests = ...`, which is how the test runner below is
 an ordinary consumer of this facility rather than a special case.

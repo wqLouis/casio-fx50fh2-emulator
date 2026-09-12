@@ -21,14 +21,38 @@ use crate::error::CalcError;
 use crate::token::{BinOp, FuncName, Token, TokenKind};
 use crate::value::ComplexFormat;
 
-pub fn parse(tokens: Vec<Token>) -> Result<Vec<Stmt>, CalcError> {
-    Parser { tokens, current: 0 }.program()
+pub(crate) fn parse(tokens: Vec<Token>) -> Result<Vec<Stmt>, CalcError> {
+    Parser {
+        tokens,
+        current: 0,
+        depth: 0,
+    }
+    .program()
 }
 
 struct Parser {
     tokens: Vec<Token>,
     current: usize,
+    /// How many expression levels are currently open. See [`MAX_DEPTH`].
+    depth: usize,
 }
+
+/// How deep expressions may nest before the machine reports `Stack ERROR`.
+///
+/// The hardware has a finite calculation stack and shows `Stack ERROR` when it
+/// overflows. This interpreter had no bound at all, so deeply nested input did
+/// not produce that screen — it overflowed the *host* stack and aborted the
+/// process with `SIGABRT`. The two entry points that recurse, [`Parser::expression`]
+/// and [`Parser::unary`], now count levels and report the machine's error
+/// instead.
+///
+/// The number is a safety bound, **not** the hardware's figure: the machine's
+/// exact stack depth is not recorded in the documentation this project has
+/// available, and being permissive is the safer error — a limit set too low
+/// would reject programs the real calculator runs, whereas one set too high
+/// only accepts input the hardware would have refused. Tune it here when the
+/// manual turns up.
+const MAX_DEPTH: usize = 256;
 
 impl Parser {
     // -- token helpers ------------------------------------------------------
@@ -413,6 +437,22 @@ impl Parser {
     // -- expressions --------------------------------------------------------
 
     fn expression(&mut self, allow_assignment: bool) -> Result<Expr, CalcError> {
+        self.enter()?;
+        let result = self.expression_inner(allow_assignment);
+        self.depth -= 1;
+        result
+    }
+
+    /// Count one open expression level, or report the machine's `Stack ERROR`.
+    fn enter(&mut self) -> Result<(), CalcError> {
+        if self.depth >= MAX_DEPTH {
+            return Err(CalcError::Stack);
+        }
+        self.depth += 1;
+        Ok(())
+    }
+
+    fn expression_inner(&mut self, allow_assignment: bool) -> Result<Expr, CalcError> {
         let expr = self.or()?;
         if allow_assignment && self.matches(&TokenKind::Assign) {
             if !self.check_var() {
@@ -528,6 +568,15 @@ impl Parser {
     }
 
     fn unary(&mut self) -> Result<Expr, CalcError> {
+        // `-(-(-…))` recurses through this function without passing through
+        // `expression`, so it needs counting too.
+        self.enter()?;
+        let result = self.unary_inner();
+        self.depth -= 1;
+        result
+    }
+
+    fn unary_inner(&mut self) -> Result<Expr, CalcError> {
         if let TokenKind::Op(BinOp::Sub) = self.peek().kind {
             self.advance();
             let expr = self.unary()?;

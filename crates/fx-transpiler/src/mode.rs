@@ -43,7 +43,7 @@ impl Mode {
     }
 
     /// The canonical uppercase name, as written after `#mode`.
-    pub fn name(self) -> &'static str {
+    pub(crate) fn name(self) -> &'static str {
         match self {
             Mode::Comp => "COMP",
             Mode::Cmplx => "CMPLX",
@@ -55,32 +55,32 @@ impl Mode {
 
     /// Whether the mode offers floating-point mathematics (trig, logs, `π`,
     /// `e`, …). Every mode except BASE does.
-    pub fn allows_float_math(self) -> bool {
+    pub(crate) fn allows_float_math(self) -> bool {
         !matches!(self, Mode::Base)
     }
 
     /// Complex numbers (`i`, `∠`, `arg`, `Conjg`, `▶a+b𝑖`).
-    pub fn allows_complex(self) -> bool {
+    pub(crate) fn allows_complex(self) -> bool {
         matches!(self, Mode::Cmplx)
     }
 
     /// Statistics data entry and statistical variables.
-    pub fn allows_stats(self) -> bool {
+    pub(crate) fn allows_stats(self) -> bool {
         matches!(self, Mode::Sd | Mode::Reg)
     }
 
     /// Paired-variable statistics and regression (`y` statistics, `regA`…).
-    pub fn allows_regression(self) -> bool {
+    pub(crate) fn allows_regression(self) -> bool {
         matches!(self, Mode::Reg)
     }
 
     /// Base-n: `Dec`/`Hex`/`Bin`/`Oct`, tagged literals, bitwise operators.
-    pub fn allows_base(self) -> bool {
+    pub(crate) fn allows_base(self) -> bool {
         matches!(self, Mode::Base)
     }
 
     /// Display and angle setup commands (`Fix`, `Sci`, `Norm`, `Deg`, …).
-    pub fn allows_setup(self) -> bool {
+    pub(crate) fn allows_setup(self) -> bool {
         !matches!(self, Mode::Base)
     }
 }

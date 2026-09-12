@@ -1,7 +1,7 @@
 //! Abstract syntax tree for the C-like `.fxc` language.
 
 /// A parsed program is just a list of statements.
-pub type Program = Vec<Stmt>;
+pub(crate) type Program = Vec<Stmt>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BinOp {
@@ -189,19 +189,8 @@ pub enum RegType {
 }
 
 impl RegType {
-    /// Every model, in the machine's menu order.
-    pub const ALL: [RegType; 7] = [
-        RegType::Lin,
-        RegType::Log,
-        RegType::Exp,
-        RegType::Pwr,
-        RegType::Inv,
-        RegType::Quad,
-        RegType::ABExp,
-    ];
-
     /// The menu label (and the PRGM token).
-    pub fn glyph(self) -> &'static str {
+    pub(crate) fn glyph(self) -> &'static str {
         use RegType::*;
         match self {
             Lin => "Lin",
@@ -215,27 +204,12 @@ impl RegType {
     }
 
     /// The ASCII spelling.  The regression menu is already ASCII.
-    pub fn ascii(self) -> &'static str {
+    pub(crate) fn ascii(self) -> &'static str {
         self.glyph()
     }
 
-    /// Parse a regression-menu label.
-    pub fn parse(name: &str) -> Option<RegType> {
-        use RegType::*;
-        Some(match name {
-            "Lin" => Lin,
-            "Log" => Log,
-            "Exp" => Exp,
-            "Pwr" => Pwr,
-            "Inv" => Inv,
-            "Quad" => Quad,
-            "AB-Exp" | "ABExp" | "abexp" => ABExp,
-            _ => return None,
-        })
-    }
-
     /// The `.fxc` statement that selects this model.
-    pub fn call_name(self) -> &'static str {
+    pub(crate) fn call_name(self) -> &'static str {
         use RegType::*;
         match self {
             Lin => "reg_lin",
@@ -246,11 +220,6 @@ impl RegType {
             Quad => "reg_quad",
             ABExp => "reg_abexp",
         }
-    }
-
-    /// Whether this model has the third coefficient `c`.
-    pub fn has_c(self) -> bool {
-        matches!(self, RegType::Quad)
     }
 }
 
@@ -265,7 +234,7 @@ pub enum Base {
 
 impl Base {
     /// The digit suffix used by a PRGM tagged literal.
-    pub fn suffix(self) -> char {
+    pub(crate) fn suffix(self) -> char {
         match self {
             Base::Dec => 'd',
             Base::Hex => 'h',
@@ -274,18 +243,8 @@ impl Base {
         }
     }
 
-    /// The lexer keyword that selects the base (`Hex`, `Bin`, …).
-    pub fn keyword(self) -> &'static str {
-        match self {
-            Base::Dec => "Dec",
-            Base::Hex => "Hex",
-            Base::Bin => "Bin",
-            Base::Oct => "Oct",
-        }
-    }
-
     /// Format a non-negative integer as a tagged PRGM literal.
-    pub fn tag(self, value: u64) -> String {
+    pub(crate) fn tag(self, value: u64) -> String {
         match self {
             Base::Dec => format!("{value}{}", self.suffix()),
             Base::Hex => format!("{value:X}{}", self.suffix()),
@@ -323,7 +282,7 @@ pub enum Setup {
 
 impl Setup {
     /// The PRGM spelling in glyph mode.
-    pub fn glyph(self) -> String {
+    pub(crate) fn glyph(self) -> String {
         match self {
             Setup::Deg => "Deg".into(),
             Setup::Rad => "Rad".into(),
@@ -344,7 +303,7 @@ impl Setup {
     }
 
     /// The PRGM spelling in ASCII mode.
-    pub fn ascii(self) -> String {
+    pub(crate) fn ascii(self) -> String {
         match self {
             Setup::Cartesian => ">a+bi".into(),
             Setup::Polar => ">rangle".into(),
@@ -355,16 +314,8 @@ impl Setup {
         }
     }
 
-    /// Whether the command is a `Fix`/`Sci`/`Norm` with a digit argument.
-    pub fn argument(self) -> Option<u8> {
-        match self {
-            Setup::Fix(n) | Setup::Sci(n) | Setup::Norm(n) => Some(n),
-            _ => None,
-        }
-    }
-
     /// The `.fxc` call that produces this setup.
-    pub fn call_name(self) -> &'static str {
+    pub(crate) fn call_name(self) -> &'static str {
         match self {
             Setup::Deg => "deg",
             Setup::Rad => "rad",
@@ -449,12 +400,12 @@ pub enum Expr {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ForStmt {
     pub init_name: String,
-    pub init_value: Expr,
+    pub(crate) init_value: Expr,
     /// `true` when written as `for (let i = ...)` (a declaration).
-    pub is_decl: bool,
-    pub cond: Expr,
-    pub update_name: String,
-    pub update_value: Expr,
+    pub(crate) is_decl: bool,
+    pub(crate) cond: Expr,
+    pub(crate) update_name: String,
+    pub(crate) update_value: Expr,
     pub body: Vec<Stmt>,
     pub pos: usize,
 }
@@ -470,7 +421,7 @@ pub struct FnDef {
     pub name: String,
     pub params: Vec<String>,
     /// `Some` for the `= expr` form; `None` for a block body.
-    pub expr: Option<Expr>,
+    pub(crate) expr: Option<Expr>,
     /// The block body. Empty for the expression form.
     pub body: Vec<Stmt>,
     /// Byte offset of the `fn` keyword.

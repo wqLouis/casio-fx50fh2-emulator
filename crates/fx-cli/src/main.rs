@@ -333,7 +333,6 @@ fn read_source(file: &Path) -> Result<String, Fail> {
 ///
 /// `FILE` may be a `.fxc` program (whose embedded `#tests` table is used, or a
 /// sibling `<name>.tests.json` if it has none) or a `.tests.json` suite.
-#[cfg(feature = "transpiler")]
 fn test_command(file: &Path, filter: Option<&str>, as_json: bool) -> Result<(), Fail> {
     use fx_transpiler::testing;
 
@@ -365,13 +364,6 @@ fn test_command(file: &Path, filter: Option<&str>, as_json: bool) -> Result<(), 
     }
 }
 
-#[cfg(not(feature = "transpiler"))]
-fn test_command(_file: &Path, _filter: Option<&str>, _as_json: bool) -> Result<(), Fail> {
-    Err(Fail::Message(
-        "test suites are not compiled in (rebuild with `--features transpiler`)".to_string(),
-    ))
-}
-
 // ---------------------------------------------------------------------------
 // Memory plan
 
@@ -382,7 +374,6 @@ fn test_command(_file: &Path, _filter: Option<&str>, _as_json: bool) -> Result<(
 /// are left. Values that need no memory at all (`const` and `#data`) are listed
 /// too, because they are the reason a program fits — an array element is one
 /// memory and no program bytes, since `a[0]` is resolved while transpiling.
-#[cfg(feature = "transpiler")]
 fn regs_command(file: &Path) -> Result<(), Fail> {
     let source = read_source(file)?;
     let base_dir = file.parent().unwrap_or(Path::new("."));
@@ -390,13 +381,6 @@ fn regs_command(file: &Path) -> Result<(), Fail> {
         .map_err(|e| Fail::Message(format!("{}: {e}", file.display())))?;
     print_memory_plan(file, &analysis);
     Ok(())
-}
-
-#[cfg(not(feature = "transpiler"))]
-fn regs_command(_file: &Path) -> Result<(), Fail> {
-    Err(Fail::Message(
-        "the transpiler is not compiled in (rebuild with `--features transpiler`)".to_string(),
-    ))
 }
 
 // ---------------------------------------------------------------------------
@@ -408,7 +392,6 @@ fn regs_command(_file: &Path) -> Result<(), Fail> {
 /// share a single 680-byte store, so the key count *is* the number the memory
 /// display counts down. This is the measurement every optimisation is judged
 /// by, and the answer to "will it fit?".
-#[cfg(feature = "transpiler")]
 fn size_command(
     file: &Path,
     ascii: bool,
@@ -465,19 +448,6 @@ fn size_command(
     Ok(())
 }
 
-#[cfg(not(feature = "transpiler"))]
-fn size_command(
-    _file: &Path,
-    _ascii: bool,
-    _mode: Option<Mode>,
-    _no_optimize: bool,
-) -> Result<(), Fail> {
-    Err(Fail::Message(
-        "the transpiler is not compiled in (rebuild with `--features transpiler`)".to_string(),
-    ))
-}
-
-#[cfg(feature = "transpiler")]
 fn print_memory_plan(file: &Path, analysis: &fx_transpiler::Analysis) {
     let allocation = &analysis.allocation;
     println!("Memory plan for {}", file.display());
@@ -552,7 +522,6 @@ fn print_memory_plan(file: &Path, analysis: &fx_transpiler::Analysis) {
     }
 }
 
-#[cfg(feature = "transpiler")]
 fn print_test_report(report: &fx_transpiler::testing::SuiteReport) {
     println!("{}", report.name);
     for case in &report.cases {
@@ -568,7 +537,6 @@ fn print_test_report(report: &fx_transpiler::testing::SuiteReport) {
 }
 
 /// Print a labelled value, indenting any continuation lines under the label.
-#[cfg(feature = "transpiler")]
 fn print_test_field(label: &str, text: &str) {
     let pad = " ".repeat(8 + label.len() + 2);
     let mut lines = text.lines();
@@ -674,13 +642,11 @@ fn write_completions(shell: Shell) {
 // Optional integrations (compiled in with the `transpiler` / `lsp` features)
 
 /// Transpile a `.fxc` file, resolving `#include` relative to that file.
-#[cfg(feature = "transpiler")]
 fn transpile_file(file: &Path, options: fx_transpiler::Options) -> Result<String, Fail> {
     fx_transpiler::transpile_file(file, options).map_err(|e| Fail::Message(e.to_string()))
 }
 
 /// Build the transpiler options the CLI's flags describe.
-#[cfg(feature = "transpiler")]
 fn transpiler_options(
     ascii: bool,
     mode: Option<Mode>,
@@ -693,15 +659,7 @@ fn transpiler_options(
     }
 }
 
-#[cfg(not(feature = "transpiler"))]
-fn transpile_file(_file: &Path, _options: fx_transpiler::Options) -> Result<String, Fail> {
-    Err(Fail::Message(
-        "transpiler support is not compiled in (rebuild with `--features transpiler`)".to_string(),
-    ))
-}
-
 /// The transpiler keeps its own `Mode` so it can build without the core crate.
-#[cfg(feature = "transpiler")]
 fn to_transpiler_mode(mode: Mode) -> fx_transpiler::Mode {
     match mode {
         Mode::Comp => fx_transpiler::Mode::Comp,

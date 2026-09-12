@@ -38,7 +38,8 @@ pub struct PhysicalConstant {
 
 impl PhysicalConstant {
     /// A label such as `proton mass (mp)`.
-    pub fn label(&self) -> String {
+    #[cfg(test)]
+    pub(crate) fn label(&self) -> String {
         format!("{} ({})", self.description, self.name)
     }
 }
@@ -373,7 +374,8 @@ pub fn by_code(code: u8) -> Option<&'static PhysicalConstant> {
 }
 
 /// The constant with the given ASCII [`name`](PhysicalConstant::name).
-pub fn by_name(name: &str) -> Option<&'static PhysicalConstant> {
+#[cfg(test)]
+pub(crate) fn by_name(name: &str) -> Option<&'static PhysicalConstant> {
     CONSTANTS.iter().find(|c| c.name == name)
 }
 
@@ -382,7 +384,7 @@ pub fn by_name(name: &str) -> Option<&'static PhysicalConstant> {
 ///
 /// The elementary charge is the one exception. Its symbol is `e`, which source
 /// text reserves for Euler's number, so it can only be reached as `eq`.
-pub fn lookup(spelling: &str) -> Option<&'static PhysicalConstant> {
+pub(crate) fn lookup(spelling: &str) -> Option<&'static PhysicalConstant> {
     CONSTANTS
         .iter()
         .find(|c| c.name == spelling || (c.symbol == spelling && c.symbol != "e"))

@@ -211,19 +211,17 @@ fn the_json_report_round_trips_through_a_parser() {
     let report = run_suite_file(&suite, None).unwrap();
     let json = report.to_json_pretty();
 
-    let value = fx_transpiler::json::parse(&json).expect("the report is valid JSON");
+    let value: serde_json::Value = serde_json::from_str(&json).expect("the report is valid JSON");
     assert_eq!(
-        value
-            .get("failed")
-            .and_then(fx_transpiler::json::Json::as_f64),
+        value.get("failed").and_then(serde_json::Value::as_f64),
         Some(0.0)
     );
     assert_eq!(
         value
             .get("cases")
-            .and_then(|cases| cases.index(0))
+            .and_then(|cases| cases.get(0))
             .and_then(|case| case.get("passed"))
-            .and_then(fx_transpiler::json::Json::as_bool),
+            .and_then(serde_json::Value::as_bool),
         Some(true)
     );
 }

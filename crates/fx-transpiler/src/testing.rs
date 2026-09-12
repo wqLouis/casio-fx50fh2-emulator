@@ -3,7 +3,7 @@
 //! A suite pairs a program with cases, each giving the values to feed to `?`
 //! prompts and the display lines (or the error) to expect. The cases live
 //! **in the program**, in a `#tests` table — the same compile-time data
-//! facility [`crate::data`] provides for anything else:
+//! facility `data` provides for anything else:
 //!
 //! ```text
 //! // factorial.fxc
@@ -59,49 +59,34 @@
 //! that the program displays nothing. `error` is matched case-insensitively as
 //! a substring of the label, so `"Math"` matches `Math ERROR`.
 
-use std::fmt;
 use std::path::{Path, PathBuf};
 
 use casio_fx50fh2::{Interpreter, MockHost};
+use serde_json::Value;
 
-use crate::json::{self, Json};
+use crate::strict_json;
 use crate::{Mode, Options, data, include, transpile_with_loader};
 
 // ---------------------------------------------------------------------------
 // Errors
 
 /// Why a suite could not be loaded or run.
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum TestError {
     /// The JSON itself is malformed.
+    #[error("invalid JSON at line {line}, column {column}: {message}")]
     Json {
         message: String,
         line: usize,
         column: usize,
     },
     /// A referenced file could not be read.
+    #[error("cannot read `{}`: {message}", path.display())]
     Io { path: PathBuf, message: String },
     /// The JSON parsed but does not describe a valid suite.
+    #[error("invalid test suite: {0}")]
     Schema(String),
 }
-
-impl fmt::Display for TestError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            TestError::Json {
-                message,
-                line,
-                column,
-            } => write!(f, "invalid JSON at line {line}, column {column}: {message}"),
-            TestError::Io { path, message } => {
-                write!(f, "cannot read `{}`: {message}", path.display())
-            }
-            TestError::Schema(message) => write!(f, "invalid test suite: {message}"),
-        }
-    }
-}
-
-impl std::error::Error for TestError {}
 
 // ---------------------------------------------------------------------------
 // Suite model
@@ -112,15 +97,15 @@ pub struct TestSuite {
     /// Suite label (from `name`, or the file name).
     pub name: String,
     /// The `.fxc` source under test.
-    pub program: String,
+    pub(crate) program: String,
     /// Directory that `#include` and `#data` paths in the program resolve
     /// against: the program's own directory when it came from a file,
     /// otherwise the directory holding the suite.
-    pub base_dir: PathBuf,
+    pub(crate) base_dir: PathBuf,
     /// Operating mode override, if the suite specified one.
-    pub mode: Option<Mode>,
+    pub(crate) mode: Option<Mode>,
     /// Whether to transpile with ASCII aliases.
-    pub ascii: bool,
+    pub(crate) ascii: bool,
     pub cases: Vec<TestCase>,
 }
 
@@ -129,11 +114,11 @@ pub struct TestSuite {
 pub struct TestCase {
     pub name: String,
     /// Values fed to `?` prompts, in order.
-    pub input: Vec<f64>,
+    pub(crate) input: Vec<f64>,
     /// Expected `◢` display lines. Empty when [`TestCase::error`] is set.
-    pub output: Vec<String>,
+    pub(crate) output: Vec<String>,
     /// Expected error, matched against the calculator label.
-    pub error: Option<String>,
+    pub(crate) error: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -162,7 +147,7 @@ fn schema(message: impl Into<String>) -> TestError {
 
 /// Decode a suite document. `allow_program` is false for an embedded `#tests`
 /// table, where the program is the file the table lives in.
-fn decode_suite(value: &Json, allow_program: bool) -> Result<RawSuite, TestError> {
+fn decode_suite(value: &Value, allow_program: bool) -> Result<RawSuite, TestError> {
     // A bare array is a list of cases.
     if let Some(items) = value.as_array() {
         let mut cases = Vec::with_capacity(items.len());
@@ -179,10 +164,10 @@ fn decode_suite(value: &Json, allow_program: bool) -> Result<RawSuite, TestError
         });
     }
 
-    let Json::Object(entries) = value else {
+    let Value::Object(entries) = value else {
         return Err(schema(format!(
             "expected an object or an array of cases, found {}",
-            value.type_name()
+            strict_json::type_name(value)
         )));
     };
 
@@ -206,21 +191,21 @@ fn decode_suite(value: &Json, allow_program: bool) -> Result<RawSuite, TestError
     let string_field = |key: &str| -> Result<Option<String>, TestError> {
         match value.get(key) {
             None => Ok(None),
-            Some(Json::String(text)) => Ok(Some(text.clone())),
+            Some(Value::String(text)) => Ok(Some(text.clone())),
             Some(other) => Err(schema(format!(
                 "`{key}` must be a string, found {}",
-                other.type_name()
+                strict_json::type_name(other)
             ))),
         }
     };
 
     let ascii = match value.get("ascii") {
         None => false,
-        Some(Json::Bool(flag)) => *flag,
+        Some(Value::Bool(flag)) => *flag,
         Some(other) => {
             return Err(schema(format!(
                 "`ascii` must be a boolean, found {}",
-                other.type_name()
+                strict_json::type_name(other)
             )));
         }
     };
@@ -231,7 +216,7 @@ fn decode_suite(value: &Json, allow_program: bool) -> Result<RawSuite, TestError
     let items = cases_value.as_array().ok_or_else(|| {
         schema(format!(
             "`cases` must be an array, found {}",
-            cases_value.type_name()
+            strict_json::type_name(cases_value)
         ))
     })?;
     let mut cases = Vec::with_capacity(items.len());
@@ -249,11 +234,11 @@ fn decode_suite(value: &Json, allow_program: bool) -> Result<RawSuite, TestError
     })
 }
 
-fn decode_case(value: &Json, positional: &str) -> Result<RawCase, TestError> {
-    let Json::Object(entries) = value else {
+fn decode_case(value: &Value, positional: &str) -> Result<RawCase, TestError> {
+    let Value::Object(entries) = value else {
         return Err(schema(format!(
             "{positional} must be an object, found {}",
-            value.type_name()
+            strict_json::type_name(value)
         )));
     };
     for (key, _) in entries {
@@ -269,11 +254,11 @@ fn decode_case(value: &Json, positional: &str) -> Result<RawCase, TestError> {
 
     let name = match value.get("name") {
         None => positional.to_string(),
-        Some(Json::String(text)) => text.clone(),
+        Some(Value::String(text)) => text.clone(),
         Some(other) => {
             return Err(schema(format!(
                 "{positional}: `name` must be a string, found {}",
-                other.type_name()
+                strict_json::type_name(other)
             )));
         }
     };
@@ -281,12 +266,12 @@ fn decode_case(value: &Json, positional: &str) -> Result<RawCase, TestError> {
     let mut input = Vec::new();
     match value.get("input") {
         None => {}
-        Some(Json::Array(items)) => {
+        Some(Value::Array(items)) => {
             for (index, item) in items.iter().enumerate() {
                 let number = item.as_f64().ok_or_else(|| {
                     schema(format!(
                         "{name}: `input[{index}]` must be a number, found {}",
-                        item.type_name()
+                        strict_json::type_name(item)
                     ))
                 })?;
                 input.push(number);
@@ -295,20 +280,20 @@ fn decode_case(value: &Json, positional: &str) -> Result<RawCase, TestError> {
         Some(other) => {
             return Err(schema(format!(
                 "{name}: `input` must be an array, found {}",
-                other.type_name()
+                strict_json::type_name(other)
             )));
         }
     }
 
     let output = match value.get("output") {
         None => None,
-        Some(Json::Array(items)) => {
+        Some(Value::Array(items)) => {
             let mut lines = Vec::with_capacity(items.len());
             for (index, item) in items.iter().enumerate() {
                 let line = item.as_str().ok_or_else(|| {
                     schema(format!(
                         "{name}: `output[{index}]` must be a string, found {}",
-                        item.type_name()
+                        strict_json::type_name(item)
                     ))
                 })?;
                 lines.push(line.to_string());
@@ -318,18 +303,18 @@ fn decode_case(value: &Json, positional: &str) -> Result<RawCase, TestError> {
         Some(other) => {
             return Err(schema(format!(
                 "{name}: `output` must be an array of strings, found {}",
-                other.type_name()
+                strict_json::type_name(other)
             )));
         }
     };
 
     let error = match value.get("error") {
         None => None,
-        Some(Json::String(text)) => Some(text.clone()),
+        Some(Value::String(text)) => Some(text.clone()),
         Some(other) => {
             return Err(schema(format!(
                 "{name}: `error` must be a string, found {}",
-                other.type_name()
+                strict_json::type_name(other)
             )));
         }
     };
@@ -394,7 +379,7 @@ fn assemble(
 // Loading
 
 /// The conventional suite path for a program: `dir/stem.tests.json`.
-pub fn sibling_suite_path(program: &Path) -> PathBuf {
+pub(crate) fn sibling_suite_path(program: &Path) -> PathBuf {
     let mut name = program
         .file_stem()
         .map(|s| s.to_string_lossy().into_owned())
@@ -414,7 +399,7 @@ pub fn parse_suite(
     base_dir: &Path,
     fallback_program: Option<&Path>,
 ) -> Result<TestSuite, TestError> {
-    let value = json::parse(json_text).map_err(|e| TestError::Json {
+    let value = strict_json::parse(json_text).map_err(|e| TestError::Json {
         message: e.message,
         line: e.line,
         column: e.column,
@@ -469,7 +454,7 @@ pub fn parse_suite(
 /// `None` means the program declares no `#tests` table, which lets the caller
 /// fall back to a sibling `.tests.json`. A malformed table, or one that is not
 /// valid suite JSON, is an error.
-pub fn parse_embedded_suite(
+pub(crate) fn parse_embedded_suite(
     source: &str,
     name: &str,
     base_dir: &Path,
@@ -477,10 +462,10 @@ pub fn parse_embedded_suite(
     parse_embedded_suite_with_loader(source, name, base_dir, &crate::loader::FsLoader)
 }
 
-/// Like [`parse_embedded_suite`], but reads `#include`d libraries and `#data`
+/// Like `parse_embedded_suite`, but reads `#include`d libraries and `#data`
 /// files through `loader`.
 ///
-/// The suite that comes out is self-contained — [`assemble`] does no I/O — so a
+/// The suite that comes out is self-contained — `assemble` does no I/O — so a
 /// host with no filesystem can run the embedded tests of a program it holds in
 /// memory.
 pub fn parse_embedded_suite_with_loader(
@@ -619,23 +604,31 @@ impl SuiteReport {
 
     /// Render the report as pretty-printed JSON, for machine consumers.
     ///
-    /// Kept here so callers (such as the CLI) need not depend on the JSON
-    /// module or know the report's shape.
+    /// Kept here so callers (such as the CLI) need not know the report's
+    /// shape.
     pub fn to_json_pretty(&self) -> String {
-        let cases = Json::array(self.cases.iter().map(|case| {
-            Json::object([
-                ("name", Json::string(case.name.as_str())),
-                ("passed", Json::Bool(case.passed)),
-                ("expected", Json::string(case.expected.as_str())),
-                ("actual", Json::string(case.actual.as_str())),
-            ])
-        }));
-        json::to_string_pretty(&Json::object([
-            ("name", Json::string(self.name.as_str())),
-            ("passed", Json::Number(self.passed() as f64)),
-            ("failed", Json::Number(self.failed() as f64)),
-            ("cases", cases),
-        ]))
+        let cases = Value::Array(
+            self.cases
+                .iter()
+                .map(|case| {
+                    serde_json::json!({
+                        "name": case.name,
+                        "passed": case.passed,
+                        "expected": case.expected,
+                        "actual": case.actual,
+                    })
+                })
+                .collect(),
+        );
+        let report = serde_json::json!({
+            "name": self.name,
+            "passed": self.passed(),
+            "failed": self.failed(),
+            "cases": cases,
+        });
+        // Serializing a `Value` cannot fail; the fallback keeps the return type
+        // total rather than panicking on a path that cannot error.
+        serde_json::to_string_pretty(&report).unwrap_or_default()
     }
 }
 
@@ -1094,14 +1087,14 @@ mod tests {
         let json = r.to_json_pretty();
         assert!(json.contains("\"passed\": true"), "{json}");
         // And the output is itself valid JSON with the expected shape.
-        let value = json::parse(&json).unwrap();
-        assert_eq!(value.get("failed").and_then(Json::as_f64), Some(0.0));
+        let value = strict_json::parse(&json).unwrap();
+        assert_eq!(value.get("failed").and_then(Value::as_f64), Some(0.0));
         assert_eq!(
             value
                 .get("cases")
-                .and_then(|c| c.index(0))
+                .and_then(|c| c.get(0))
                 .and_then(|c| c.get("name"))
-                .and_then(Json::as_str),
+                .and_then(Value::as_str),
             Some("case 1")
         );
     }

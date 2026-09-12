@@ -17,23 +17,30 @@
  */
 
 // ---------------------------------------------------------------------------
-// Positions
+// The LSP shapes
 //
-// LSP-style: zero-based line and character, so an editor can use them without
-// translation. This is the one place the wasm API deliberately disagrees with
-// the `fx50` command line, which prints one-based columns for people.
+// The four editor operations return the language server's own types rather than
+// an encoding of them, serialised straight from `lsp-types` on the Rust side.
+// So the types are not written out here: they are the published LSP types, and
+// `vscode-languageserver-types` is that schema for TypeScript. It also supplies
+// the enum values (`DiagnosticSeverity.Error` is `1`, `CompletionItemKind`,
+// `SymbolKind`, `InsertTextFormat`), which is precisely what the old bespoke
+// string encoding forced callers to re-derive by hand.
+//
+// Positions are zero-based, as LSP defines them. That is the one place this API
+// deliberately disagrees with the `fx50` command line, which prints one-based
+// columns for people.
 
-/** A zero-based position in a document. */
-export interface Position {
-	line: number;
-	character: number;
-}
+import type {
+	CompletionItem,
+	Diagnostic,
+	DocumentSymbol,
+	Hover,
+	Position,
+	Range
+} from 'vscode-languageserver-types';
 
-/** A zero-based range in a document. */
-export interface Range {
-	start: Position;
-	end: Position;
-}
+export type { CompletionItem, Diagnostic, DocumentSymbol, Hover, Position, Range };
 
 // ---------------------------------------------------------------------------
 // The response envelope
@@ -42,9 +49,9 @@ export interface Range {
 export interface FxError {
 	message: string;
 	/** The file the position refers to, when the request involved more than one. */
-	file?: string | null;
+	file?: string;
 	/** Where the problem is, when it has a position. */
-	range?: Range | null;
+	range?: Range;
 }
 
 /**
@@ -120,8 +127,14 @@ export interface TranspileOptions extends SourceOptions {
 
 /** Options for `run`. */
 export interface RunOptions extends TranspileOptions {
-	/** Values for the `?` prompts, in order. */
-	inputs?: (number | string)[];
+	/**
+	 * Values for the `?` prompts, in order.
+	 *
+	 * Numbers only: the calculator's `?` reads a real, so a caller holding text
+	 * parses it where it can report the failure rather than having it silently
+	 * dropped here.
+	 */
+	inputs?: number[];
 }
 
 // ---------------------------------------------------------------------------
@@ -231,27 +244,10 @@ export interface TestReport {
 	cases: TestCase[];
 }
 
-/** One editor marker. */
-export interface Diagnostic {
-	message: string;
-	severity: string;
-	range: Range;
-	code: string | number | null;
-}
-
 /** The result of `diagnostics`. */
 export interface DiagnosticsResult {
 	language: string;
 	diagnostics: Diagnostic[];
-}
-
-/** One completion. */
-export interface CompletionItem {
-	label: string;
-	insertText: string;
-	detail: string | null;
-	/** An LSP `CompletionItemKind` name, e.g. `Function` or `Keyword`. */
-	kind: string;
 }
 
 /** The result of `completions`. */
@@ -260,26 +256,9 @@ export interface CompletionsResult {
 	items: CompletionItem[];
 }
 
-/** Documentation at a position. */
-export interface HoverInfo {
-	/** Markdown. */
-	contents: string;
-	range: Range | null;
-}
-
 /** The result of `hover`. `hover` is `null` when there is nothing there. */
 export interface HoverResult {
-	hover: HoverInfo | null;
-}
-
-/** One entry in the document outline. */
-export interface DocumentSymbol {
-	name: string;
-	detail: string | null;
-	kind: string;
-	range: Range;
-	selectionRange: Range;
-	children: DocumentSymbol[] | null;
+	hover: Hover | null;
 }
 
 /** The result of `symbols`. */

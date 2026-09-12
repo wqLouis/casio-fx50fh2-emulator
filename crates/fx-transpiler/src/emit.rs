@@ -22,26 +22,26 @@ use std::collections::BTreeSet;
 /// Operator precedence levels for the `.fxc` grammar, mirroring
 /// [`crate::parser`]. Higher binds tighter.
 mod prec {
-    pub const BITWISE_OR: u8 = 1;
-    pub const BITWISE_AND: u8 = 2;
-    pub const EQUALITY: u8 = 3;
-    pub const COMPARISON: u8 = 4;
-    pub const ADDITIVE: u8 = 5;
-    pub const MULTIPLICATIVE: u8 = 6;
+    pub(crate) const BITWISE_OR: u8 = 1;
+    pub(crate) const BITWISE_AND: u8 = 2;
+    pub(crate) const EQUALITY: u8 = 3;
+    pub(crate) const COMPARISON: u8 = 4;
+    pub(crate) const ADDITIVE: u8 = 5;
+    pub(crate) const MULTIPLICATIVE: u8 = 6;
     /// `nPr`, `nCr`.
-    pub const PERM: u8 = 7;
-    pub const UNARY: u8 = 8;
+    pub(crate) const PERM: u8 = 7;
+    pub(crate) const UNARY: u8 = 8;
     /// The `┘` fraction key.
-    pub const FRACTION: u8 = 9;
-    pub const POWER: u8 = 10;
-    pub const POSTFIX: u8 = 11;
-    pub const ATOM: u8 = 12;
+    pub(crate) const FRACTION: u8 = 9;
+    pub(crate) const POWER: u8 = 10;
+    pub(crate) const POSTFIX: u8 = 11;
+    pub(crate) const ATOM: u8 = 12;
 }
 
 /// Transpile a parsed program into PRGM source.
 ///
 /// `data` supplies the `#data` tables that data paths resolve against.
-pub fn emit(
+pub(crate) fn emit(
     program: &Program,
     source: &str,
     opts: Options,

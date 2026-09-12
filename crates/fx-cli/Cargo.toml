@@ -10,9 +10,10 @@ name = "fx50"
 path = "src/main.rs"
 
 [features]
-# Everything is wired together now; the sibling crates are libraries.
-default = ["transpiler", "lsp"]
-transpiler = ["dep:fx-transpiler"]
+# Everything is wired together now; the sibling crates are libraries. `lsp` is
+# optional because a transpiler-only `fx50` is a coherent thing to build;
+# `fx-transpiler` is not, so it is a plain dependency -- see ADR 0033.
+default = ["lsp"]
 lsp = ["dep:fx-lsp"]
 
 [dependencies]
@@ -31,5 +32,5 @@ codespan-reporting = "0.13"
 # Platform-correct location for the REPL history file.
 dirs = "7"
 
-fx-transpiler = { path = "../fx-transpiler", optional = true, default-features = false, features = ["testing"] }
+fx-transpiler = { path = "../fx-transpiler", default-features = false, features = ["testing"] }
 fx-lsp = { path = "../fx-lsp", optional = true }

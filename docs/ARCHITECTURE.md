@@ -99,7 +99,9 @@ source ──► lexer ──► parser ──► flat Vec<Stmt> ──► tree-
 * **`src/format.rs`** — approximates the two-line display (`Norm1`/`Norm2`,
   `Fix n`, `Sci n`).
 
-The core crate is **std-only** by policy (see [DECISIONS.md](DECISIONS.md)).
+The core crate is **`std`-only** — by judgement rather than rule: nothing has yet
+earned a place in it
+([ADR 0032](DECISIONS.md#adr-0032--dependencies-are-a-judgement-not-a-rule)).
 
 ## The `.fxc` front end
 
@@ -178,7 +180,7 @@ The CLI exposes it as `fx50 lsp`. Editor wiring is described in
 | User-defined functions (`fn`, inlined; `fn main()` entry point, scoped bodies) | ✅ |
 | Full PRGM key coverage: postfix/infix keys, `stat.` and `phys.` namespaces, setup/clear/data keys, `and`-family, `⇒`, base literals | ✅ |
 | `#include` for sharing libraries (transpile-time, top-level, C-style) | ✅ |
-| `#data` / `#tests` compile-time JSON, and a zero-dependency JSON parser | ✅ |
+| `#data` / `#tests` compile-time JSON (parsed with `serde_json`) | ✅ |
 | JSON test suites, embedded in the program or standalone (`fx50 test`) | ✅ |
 | Memory plan report (`fx50 regs`) | ✅ |
 | Language server (`fx50 lsp`) | ✅ (PRGM **and** `.fxc`) |

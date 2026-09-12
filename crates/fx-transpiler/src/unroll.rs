@@ -41,7 +41,7 @@ const MAX_ITERATIONS: usize = 256;
 const MAX_STATEMENTS: usize = 512;
 
 /// Unroll the loops in `program` that need it, in place.
-pub fn unroll_program(program: &mut Program) {
+pub(crate) fn unroll_program(program: &mut Program) {
     let totals = reference_totals(program);
     let mut remaining = MAX_STATEMENTS;
     rewrite_stmts(program, &[], &totals, &mut remaining);

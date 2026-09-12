@@ -163,8 +163,7 @@ fn analysis_uses_the_loader_too() {
 /// "operation not supported on this platform".
 ///
 /// `testing` is behind a feature (it needs the interpreter to run cases), so
-/// this only exists when the feature is on — which is what keeps
-/// `--no-default-features` dependency-free.
+/// this only exists when the feature is on.
 #[cfg(feature = "testing")]
 #[test]
 fn a_tested_program_can_include_a_library_from_memory() {

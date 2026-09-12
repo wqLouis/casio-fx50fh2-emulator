@@ -72,7 +72,9 @@ rustc-style caret under the offending source.
 
 **Alternatives considered.** `miette` is excellent but expects the error type
 to implement `miette::Diagnostic`. That would add a dependency *and* a trait
-impl to the core crate, which the project keeps dependency-free (std only).
+impl to the core crate. The core is `std`-only — by judgement since
+[ADR 0032](#adr-0032--dependencies-are-a-judgement-not-a-rule), not by rule — and
+the objection here is the trait impl as much as the crate.
 `ariadne` can do the job but is oriented at multi-span reports; the
 `codespan-reporting` label API matches a single byte offset most directly.
 
@@ -94,6 +96,12 @@ build-time dependency and a less direct mapping to the hardware's rules.
 
 **Decision.** `casio-fx50fh2` depends only on `std`. Dependencies live in the
 leaf crates (`fx-cli`, `fx-lsp`).
+
+> **Superseded as a rule by [ADR 0032](#adr-0032--dependencies-are-a-judgement-not-a-rule).**
+> The ban is withdrawn; a dependency is now allowed wherever it earns its keep.
+> The *outcome* here still stands, for a better reason: nothing has yet passed
+> that test for this crate, so it remains `std`-only — by judgement rather than
+> by rule.
 
 **Why.** The interpreter is the part most likely to be embedded (in a WASM
 build, an editor plugin, a test harness); keeping it pure `std` keeps that
@@ -340,6 +348,13 @@ to recognising this repository by its root `Cargo.toml` — necessary because
 `target/` is gitignored and the worktree file API cannot see ignored paths.
 
 ## ADR 0014 — JSON is hand-written, and compile-time data is a language feature
+
+> **Superseded in part by [ADR 0032](#adr-0032--dependencies-are-a-judgement-not-a-rule).**
+> The premise that the transpiler must have zero dependencies is withdrawn, and
+> the hand-written parser is gone in favour of `serde_json`. The rest of this
+> ADR still holds: `#data` is a language feature rather than an add-on, and the
+> crate has exactly one JSON implementation, so nothing can disagree with
+> anything else.
 
 `#data` lets a `.fxc` program read JSON while it is transpiled, and `#tests` is
 the same mechanism under a shorter name. Since `fx-transpiler` must build with
@@ -1303,10 +1318,11 @@ fx_call(ptr, len) -> *mut u8          // [len: u32 LE][json]
 ```
 
 **No `wasm-bindgen`.** The boundary here is a request object and a response
-object — a JSON string either way — and the project already ships a
-zero-dependency JSON reader *and writer* ([ADR 0014](#adr-0014--json-is-hand-written-and-compile-time-data-is-a-language-feature)).
-Adding `wasm-bindgen` would mean a dependency *and* a CLI whose version has to
-match the crate exactly, to generate glue for a boundary that is already strings.
+object — a JSON string either way — and serialising both is what `serde` and
+`serde_json` are for, both of which are already in the dependency graph for the
+language logic's sake. Adding `wasm-bindgen` would mean a dependency *and* a CLI
+whose version has to match the crate exactly, to generate glue for a boundary
+that is already strings.
 The result of not doing it is a module that is a plain `wasm32-unknown-unknown`
 binary with **no imports at all** — a test asserts it — which any host can
 instantiate with no tooling whatsoever, and which Node can load in a test. That
@@ -1331,8 +1347,104 @@ gzipped. A probe build without the language server put the floor — interpreter
 plus transpiler — at 453 KB, so the editor layer costs 185 KB. Nearly all of that
 is `serde`/`serde_json`/`url` arriving only because `lsp-types` derives them; the
 ICU data is dropped by LTO already (the binary has 87 KB of data and no ICU
-strings). Moving `logic` onto its own types would recover most of those 185 KB and
-would make the logic layer dependency-free, which fits this project's character.
-It was **not** done, because ~60 KB gzipped is not worth a refactor across ~15
-types and 45 existing language-server tests, and because the editor layer is not
-the dominant cost. It remains available if the module ever needs to be small.
+strings). Moving `logic` onto its own types would recover most of those 185 KB.
+It was **not** done, and [ADR 0032](#adr-0032--dependencies-are-a-judgement-not-a-rule)
+settles the question the other way: `lsp-types` is the standard description of
+this protocol, the editor operations now return its types rather than a bespoke
+encoding that had to be kept in step with them, and ~60 KB gzipped is not worth
+hand-maintaining fifteen types and their conversions to avoid.
+
+## ADR 0032 — Dependencies are a judgement, not a rule
+
+**Decision.** The project no longer bans third-party dependencies anywhere, the
+transpiler included. A dependency is allowed when it removes more maintenance
+than it adds, and the test for that is written down rather than left to taste:
+
+1. **Is the job generic?** JSON, argument parsing, the LSP protocol, terminal
+   line editing — yes, and we are not uniquely positioned to do them better.
+   Calculator precision, PRGM emission, register allocation for seven memories,
+   key-size measurement — no: those *are* the product, and a crate cannot know
+   the machine.
+2. **Is it the standard for that job?** `serde_json` for JSON, `lsp-types` for
+   the protocol. A crate that merely exists is not enough.
+3. **Does it preserve semantics we chose deliberately?** If it silently accepts
+   what we reject, that is a behaviour change to make consciously and document,
+   not to discover later.
+4. **Does it earn its transitive cost?** A proc-macro crate drags in `syn`,
+   `quote` and `proc-macro2`, which is fine for `serde` and pointless for
+   something saving ten lines.
+
+**Why the ban had to go.** It was never really project-wide: `fx-cli` has used
+`clap`, `clap_complete`, `rustyline`, `codespan-reporting` and `dirs` from the
+start, and nobody thought that was wrong. The rule applied only to the two
+crates that had not yet needed anything, and what it bought there was 896 lines
+of hand-written JSON parser and writer in `fx-transpiler` — a generic problem,
+solved generically, badly, by us. Meanwhile the parts of the codebase that
+*should* be hand-written — the lexer, the parser, the allocator, the emitter,
+the precision model — were never the ones under threat. The rule was aimed at
+the wrong target and hit the wrong target.
+
+**What it changed.** `fx-transpiler`'s JSON module is deleted in favour of
+`serde_json`; `fx-wasm`'s hand-assembled JSON is replaced by `serde`; and the
+editor operations now return real `lsp-types` values instead of a bespoke
+encoding that turned the protocol's defined integer enums into strings and made
+the frontend turn them back again.
+
+**What it did not change, which is the point of writing the test down.** The core
+crate stays dependency-free — not because a rule says so, but because nothing
+passes. `thiserror` was considered and declined: `CalcError`'s `Display` is
+genuinely custom, because `label()` and `detail()` exist separately (the CLI
+shows the calculator's own error screen *and* an explanatory note beneath it), so
+the derive would have replaced twenty lines with about fifteen plus a helper,
+removed one of the three places a new variant must be recorded, and added a
+proc-macro dependency. That is not a trade worth making, and saying so is the
+policy working — not an exception to it.
+
+**Consequences.** `--no-default-features` on `fx-transpiler` still exists and
+still means "without the interpreter"; it no longer means "without dependencies".
+The two were only ever the same thing by coincidence, and conflating them is what
+produced the mess in the first place. For the future: "we could write this
+ourselves" is not a reason to, and "we have to write this ourselves" needs an
+argument.
+
+## ADR 0033 — `fx50` always includes the transpiler
+
+**Decision.** `fx-cli` no longer has a `transpiler` cargo feature. `fx-transpiler`
+is a plain dependency. The `lsp` feature stays optional, because it works.
+
+**How this was found.** A dead-code pass asked a simple question of the `lsp` and
+`transpiler` features: are they actually switchable? `lsp` is — `cargo build -p
+fx-cli --no-default-features --features transpiler` builds and its tests run. The
+`transpiler` feature was a lie:
+
+```
+$ cargo build -p fx-cli --no-default-features
+error[E0425]: cannot find function `transpiler_options` in this scope
+error[E0433]: cannot find module or crate `fx_transpiler` in this scope
+```
+
+Four functions were gated behind `#[cfg(feature = "transpiler")]` with
+`#[cfg(not(...))]` stubs for the other side: `test_command`, `regs_command`,
+`size_command` and `transpile_file`. But `build`, `run_file` and
+`transpiler_options` were *not* gated, so turning the feature off broke
+compilation outright — and the stub for `transpile_file` had a signature naming
+`fx_transpiler::Options`, a type that cannot resolve without the very feature it
+was standing in for. It had never been compiled. The stubs and the nine
+always-true `cfg` gates around the real implementations were dead code, and the
+feature had never once been exercised in its "off" state.
+
+**Why the transpiler is not optional while the LSP is.** `fx50` exists to take
+`.fxc` to PRGM and run it; `build`, `run`, `size`, `regs` and `test` are that,
+and the memory and size reports are only meaningful next to the transpiler. A
+binary without it is a different and smaller tool that nobody asked for. The
+language server, by contrast, is genuinely separable — it is a mode (`fx50 lsp`)
+whose dependencies (`tower-lsp`, `tokio`) a person may reasonably not want to
+compile — and `--no-default-features` now yields a working transpiler-only
+binary, which it could not before.
+
+**The general lesson, which is the same one as [ADR 0032](#adr-0032--dependencies-are-a-judgement-not-a-rule).**
+A cargo feature is an interface: it is a promise that both configurations build
+and work. An unexercised feature is worse than no feature, because it advertises
+a configuration that does not exist, and the dead `cfg` branches it leaves behind
+cannot be caught by the compiler *or* by a test suite that only ever runs the
+default. When adding one, build both sides.

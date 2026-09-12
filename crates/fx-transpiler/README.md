@@ -18,18 +18,22 @@ fx50 size  program.fxc          # show how many of the 680 program bytes it need
 fx50 test  program.fxc          # run the cases the program carries
 ```
 
-## Zero dependencies
+## Dependencies
 
-With
+`serde_json` (for `#data` and `#tests`), `serde` and `thiserror`. There is still
+**no** dependency on `casio-fx50fh2`: the interpreter sits behind the optional
+`execute`/`testing` features, so
 
 ```bash
 cargo build -p fx-transpiler --no-default-features
 ```
 
-the crate has **no** dependency on `casio-fx50fh2` and no third-party crates at
-all — including its own JSON parser (`fx_transpiler::json`, used by `#data` and
-`#tests`). See [ADR 0014](../../docs/DECISIONS.md) for why JSON is hand-written
-rather than taken from `serde_json`.
+builds the transpiler on its own. What that configuration no longer means is
+"no dependencies" — the blanket ban was retired in
+[ADR 0032](../../docs/DECISIONS.md) because it had produced a hand-written JSON
+parser to no purpose, and [ADR 0014](../../docs/DECISIONS.md) is what survives of
+it: `#data` is a language feature rather than an add-on, and JSON is parsed
+strictly and in exactly one place.
 
 The `execute` feature (on by default) is what lets the interpreter-backed tests
 in `tests/execute.rs` compile and run; it is also what the `fx50` binary uses

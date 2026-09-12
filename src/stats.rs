@@ -34,18 +34,6 @@ pub enum RegType {
 }
 
 impl RegType {
-    /// Every regression model, in the machine's menu order.  Used by the
-    /// `.fxc` coverage test.
-    pub const ALL: [RegType; 7] = [
-        RegType::Lin,
-        RegType::Log,
-        RegType::Exp,
-        RegType::Pwr,
-        RegType::Inv,
-        RegType::Quad,
-        RegType::ABExp,
-    ];
-
     /// The menu label (and the PRGM token) for this model.
     pub fn glyph(self) -> &'static str {
         use RegType::*;
@@ -60,14 +48,8 @@ impl RegType {
         }
     }
 
-    /// The ASCII spelling.  The regression menu is already ASCII, so this is
-    /// the same as [`RegType::glyph`].
-    pub fn ascii(self) -> &'static str {
-        self.glyph()
-    }
-
     /// Parse a regression-menu label.
-    pub fn parse(name: &str) -> Option<RegType> {
+    pub(crate) fn parse(name: &str) -> Option<RegType> {
         use RegType::*;
         Some(match name {
             "Lin" => Lin,
@@ -79,25 +61,6 @@ impl RegType {
             "AB-Exp" | "ABExp" | "abexp" => ABExp,
             _ => return None,
         })
-    }
-
-    /// The `.fxc` statement that selects this model.
-    pub fn call_name(self) -> &'static str {
-        use RegType::*;
-        match self {
-            Lin => "reg_lin",
-            Log => "reg_log",
-            Exp => "reg_exp",
-            Pwr => "reg_pwr",
-            Inv => "reg_inv",
-            Quad => "reg_quad",
-            ABExp => "reg_abexp",
-        }
-    }
-
-    /// Whether this model has the third coefficient `c`.
-    pub fn has_c(self) -> bool {
-        matches!(self, RegType::Quad)
     }
 }
 
@@ -156,12 +119,12 @@ impl StatVar {
 #[derive(Debug, Clone)]
 pub struct Stats {
     data: Vec<(f64, f64, f64)>,
-    pub freq_on: bool,
-    pub reg_type: RegType,
+    pub(crate) freq_on: bool,
+    pub(crate) reg_type: RegType,
 }
 
 /// The machine accepts at most 40 SD/REG data points.
-pub const MAX_DATA: usize = 40;
+const MAX_DATA: usize = 40;
 
 impl Default for Stats {
     fn default() -> Self {
@@ -174,13 +137,16 @@ impl Default for Stats {
 }
 
 impl Stats {
-    pub fn new() -> Self {
+    // Only the unit tests below build a bare `Stats`; interpreter code uses
+    // `Stats::default()`.
+    #[cfg(test)]
+    fn new() -> Self {
         Stats::default()
     }
 
     /// Append a data point. `freq` is stored regardless of `freq_on`; the
     /// accessors decide whether to honour it.
-    pub fn add(&mut self, x: f64, y: f64, freq: f64) -> Result<(), CalcError> {
+    pub(crate) fn add(&mut self, x: f64, y: f64, freq: f64) -> Result<(), CalcError> {
         if self.data.len() >= MAX_DATA {
             return Err(CalcError::DataFull);
         }
@@ -196,16 +162,8 @@ impl Stats {
         Ok(())
     }
 
-    pub fn clr(&mut self) {
+    pub(crate) fn clr(&mut self) {
         self.data.clear();
-    }
-
-    pub fn len(&self) -> usize {
-        self.data.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.data.is_empty()
     }
 
     fn weight(&self, freq: f64) -> f64 {
@@ -216,23 +174,23 @@ impl Stats {
         normalize(self.data.iter().map(|d| self.weight(d.2)).sum())
     }
 
-    pub fn sum_x(&self) -> f64 {
+    pub(crate) fn sum_x(&self) -> f64 {
         normalize(self.data.iter().map(|d| self.weight(d.2) * d.0).sum())
     }
 
-    pub fn sum_x2(&self) -> f64 {
+    pub(crate) fn sum_x2(&self) -> f64 {
         normalize(self.data.iter().map(|d| self.weight(d.2) * d.0 * d.0).sum())
     }
 
-    pub fn sum_y(&self) -> f64 {
+    pub(crate) fn sum_y(&self) -> f64 {
         normalize(self.data.iter().map(|d| self.weight(d.2) * d.1).sum())
     }
 
-    pub fn sum_y2(&self) -> f64 {
+    pub(crate) fn sum_y2(&self) -> f64 {
         normalize(self.data.iter().map(|d| self.weight(d.2) * d.1 * d.1).sum())
     }
 
-    pub fn sum_xy(&self) -> f64 {
+    pub(crate) fn sum_xy(&self) -> f64 {
         normalize(self.data.iter().map(|d| self.weight(d.2) * d.0 * d.1).sum())
     }
 
@@ -245,7 +203,7 @@ impl Stats {
         }
     }
 
-    pub fn mean_y(&self) -> f64 {
+    pub(crate) fn mean_y(&self) -> f64 {
         let n = self.n();
         if n == 0.0 {
             0.0
@@ -255,11 +213,11 @@ impl Stats {
     }
 
     /// Population standard deviation `σx`.
-    pub fn sigma_x(&self) -> f64 {
+    pub(crate) fn sigma_x(&self) -> f64 {
         self.population_sigma(self.sum_x2(), self.mean_x())
     }
 
-    pub fn sigma_y(&self) -> f64 {
+    pub(crate) fn sigma_y(&self) -> f64 {
         self.population_sigma(self.sum_y2(), self.mean_y())
     }
 
@@ -273,11 +231,11 @@ impl Stats {
     }
 
     /// Sample standard deviation `sx`.
-    pub fn s_x(&self) -> f64 {
+    pub(crate) fn s_x(&self) -> f64 {
         self.sample_sigma(self.sum_x2(), self.mean_x())
     }
 
-    pub fn s_y(&self) -> f64 {
+    pub(crate) fn s_y(&self) -> f64 {
         self.sample_sigma(self.sum_y2(), self.mean_y())
     }
 
@@ -290,19 +248,19 @@ impl Stats {
         normalize(variance.sqrt())
     }
 
-    pub fn min_x(&self) -> f64 {
+    pub(crate) fn min_x(&self) -> f64 {
         self.minimum(|d| d.0)
     }
 
-    pub fn max_x(&self) -> f64 {
+    pub(crate) fn max_x(&self) -> f64 {
         self.maximum(|d| d.0)
     }
 
-    pub fn min_y(&self) -> f64 {
+    pub(crate) fn min_y(&self) -> f64 {
         self.minimum(|d| d.1)
     }
 
-    pub fn max_y(&self) -> f64 {
+    pub(crate) fn max_y(&self) -> f64 {
         self.maximum(|d| d.1)
     }
 
@@ -455,24 +413,24 @@ impl Stats {
     }
 
     /// Intercept `a` of the selected regression model.
-    pub fn reg_a(&self) -> f64 {
+    pub(crate) fn reg_a(&self) -> f64 {
         self.coefficients().0
     }
 
     /// Slope (or exponent) `b` of the selected regression model.
-    pub fn reg_b(&self) -> f64 {
+    pub(crate) fn reg_b(&self) -> f64 {
         self.coefficients().1
     }
 
     /// Quadratic coefficient `c`; `0` for every model except
     /// [`RegType::Quad`].
-    pub fn reg_c(&self) -> f64 {
+    pub(crate) fn reg_c(&self) -> f64 {
         self.coefficients().2
     }
 
     /// Correlation coefficient `r`.  For [`RegType::Quad`] this is the multiple
     /// correlation coefficient.
-    pub fn reg_r(&self) -> f64 {
+    pub(crate) fn reg_r(&self) -> f64 {
         if self.reg_type == RegType::Quad {
             return self.quadratic_r();
         }
@@ -590,7 +548,7 @@ impl Stats {
     }
 
     /// Evaluate a statistical variable.
-    pub fn value(&self, var: StatVar) -> f64 {
+    pub(crate) fn value(&self, var: StatVar) -> f64 {
         match var {
             StatVar::N => self.n(),
             StatVar::SumX => self.sum_x(),

@@ -19,8 +19,9 @@ import { readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { load, type FxResponse } from '../src/lib/fx50';
+import { load, type FxResponse, type Hover } from '../src/lib/fx50';
 import { examples, libraries } from '../src/lib/examples.generated';
+import { DiagnosticSeverity } from 'vscode-languageserver-types';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const bytes = await readFile(join(here, '..', 'static', 'fx_wasm.wasm'));
@@ -40,6 +41,23 @@ function expectErr<T>(response: FxResponse<T>): string {
 
 /** A request for a single-file program, which is the common shape. */
 const source = (text: string) => ({ source: text, entry: 'main.fxc' });
+
+/**
+ * The text of a hover.
+ *
+ * LSP lets `contents` be a `MarkupContent`, a string, or an array of either, so
+ * this narrows the union rather than assuming the shape our server happens to
+ * send today.
+ */
+function hoverText(hover: Hover | null): string {
+	if (!hover) return '';
+	const { contents } = hover;
+	if (typeof contents === 'string') return contents;
+	if (Array.isArray(contents)) {
+		return contents.map((part) => (typeof part === 'string' ? part : part.value)).join('\n\n');
+	}
+	return contents.value;
+}
 
 describe('the module', () => {
 	test('exports exactly the three ABI functions, and memory', () => {
@@ -241,14 +259,21 @@ describe('run', () => {
 		assert.equal(result.state.mode, 'COMP');
 	});
 
-	test('non-numeric inputs are ignored rather than becoming NaN', () => {
-		const result = expectOk(
-			fx.run({
-				...source('fn main() { let a = input(); print(a); }'),
-				inputs: ['7', 'not a number']
-			})
-		);
-		assert.deepEqual(result.outputs, ['7']);
+	test('rejects a non-numeric input instead of silently dropping it', () => {
+		// The calculator's `?` reads a real, so an input must be a number. A
+		// caller holding text parses it where it can report the failure; passing
+		// a string is a contract violation and must not be quietly ignored.
+		// `call` is used directly because the typed helpers refuse this at
+		// compile time, and what is being tested is the wire contract.
+		const response = fx.run({
+			...source('fn main() { let a = input(); print(a); }'),
+			inputs: [7]
+		} as never);
+		assert.deepEqual(expectOk(response).outputs, ['7']);
+
+		const bad = fx.call({ op: 'run', ...source('fn main() { print(1); }'), inputs: ['7'] });
+		assert.equal(bad.ok, false);
+		assert.match(expectErr(bad), /invalid request/);
 	});
 
 	test('accepts a PRGM program directly', () => {
@@ -366,7 +391,7 @@ describe('editor features', () => {
 		const result = expectOk(fx.diagnostics(source('fn main() { print(1 +); }')));
 		assert.equal(result.language, 'fxc');
 		assert.equal(result.diagnostics.length, 1);
-		assert.equal(result.diagnostics[0].severity, 'error');
+		assert.equal(result.diagnostics[0].severity, DiagnosticSeverity.Error);
 		assert.ok(result.diagnostics[0].range);
 	});
 
@@ -398,7 +423,19 @@ describe('editor features', () => {
 		const result = expectOk(
 			fx.hover({ ...source('fn main() { print(sqrt(4)); }'), position: { line: 0, character: 18 } })
 		);
-		assert.match(result.hover?.contents ?? '', /sqrt/);
+		assert.match(hoverText(result.hover), /sqrt/);
+		// The standard `MarkupContent`, not a flattened string.
+		const contents = result.hover?.contents;
+		if (
+			contents &&
+			typeof contents === 'object' &&
+			!Array.isArray(contents) &&
+			'kind' in contents
+		) {
+			assert.equal(contents.kind, 'markdown');
+		} else {
+			assert.fail(`expected markup contents, got ${JSON.stringify(contents)}`);
+		}
 	});
 
 	test('hover over nothing is null, not an error', () => {

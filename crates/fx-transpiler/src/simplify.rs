@@ -63,7 +63,7 @@ use crate::ast::{Accessor, BinOp, Expr, ForStmt, Program, Stmt, UnOp};
 ///
 /// The rewrite is bottom-up, so a simplification can expose another one at the
 /// parent: `(a * 1) - a` first becomes `a - a` and then `0`.
-pub fn simplify_program(program: &mut Program) {
+pub(crate) fn simplify_program(program: &mut Program) {
     simplify_stmts(program);
 }
 

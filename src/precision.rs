@@ -386,7 +386,7 @@ fn parse_signed(negative: bool, text: &str) -> f64 {
 /// The only escape hatch is `y` subnormal: then `ulp(y)` is fixed and can
 /// dwarf the relative decimal spacing, so the round-trip can move the tail
 /// digits.  That requires `|x|` to be within half a 15-digit ulp of
-/// `f64::MIN_POSITIVE`; for anything below [`FUSED_MIN_MAGNITUDE`] we simply
+/// `f64::MIN_POSITIVE`; for anything below `FUSED_MIN_MAGNITUDE` we simply
 /// fall back to the reference two-step path.
 pub fn normalize(x: f64) -> f64 {
     if !x.is_finite() || x == 0.0 {

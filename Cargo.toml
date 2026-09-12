@@ -12,8 +12,6 @@ autobins = false
 name = "casio_fx50fh2"
 path = "src/lib.rs"
 
-[dependencies]
-
 [workspace]
 members = [
     "crates/fx-transpiler",

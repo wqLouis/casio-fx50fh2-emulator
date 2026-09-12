@@ -18,3 +18,9 @@ testing = ["execute"]
 
 [dependencies]
 casio-fx50fh2 = { path = "../..", optional = true }
+# No `derive` feature: this crate reads JSON into `serde_json::Value` and never
+# derives `Serialize`/`Deserialize` on its own types, so `serde_derive` would be
+# pulled in for nothing.
+serde = "1.0.229"
+serde_json = "1.0.151"
+thiserror = "2.0.20"

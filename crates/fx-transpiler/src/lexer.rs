@@ -80,7 +80,7 @@ pub enum Tok {
 
 impl Tok {
     /// Short description used in parser error messages.
-    pub fn describe(&self) -> String {
+    pub(crate) fn describe(&self) -> String {
         match self {
             Tok::Ident(name) => format!("identifier `{name}`"),
             Tok::Number(value) => format!("number `{value}`"),
@@ -137,8 +137,8 @@ impl Tok {
 /// A token plus its byte offset in the source.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Token {
-    pub tok: Tok,
-    pub pos: usize,
+    pub(crate) tok: Tok,
+    pub(crate) pos: usize,
 }
 
 /// Tokenize `source`, appending an [`Tok::Eof`] sentinel.

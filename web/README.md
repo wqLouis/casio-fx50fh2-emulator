@@ -85,11 +85,19 @@ output (which would ignore `_app/`).
 ## Testing
 
 ```bash
-bun run build:wasm && bun test
+bun test
 ```
 
-This is the only place the real artifact — the `.wasm` file a browser downloads —
-is exercised. `cargo test` cannot catch a broken export, a wrong length prefix, or
+`test` rebuilds the module first, on purpose. These tests load
+`static/fx_wasm.wasm` — the artifact a browser actually downloads — and a plain
+`cargo build` writes to `target/`, so without the rebuild it is easy to sit
+looking at a **stale module** and draw conclusions from the wrong code. That
+happened once while this was being written, which is why `test` depends on
+`build:wasm` rather than trusting the file to be current. In exchange, `test` is
+the one command here that needs a Rust toolchain; `dev`, `build` and
+`build:examples` still do not.
+
+This is the only place the real artifact is exercised. `cargo test` cannot catch a broken export, a wrong length prefix, or
 memory freed twice; instantiating the module and calling it can. Bun has a full
 `WebAssembly` implementation, so no browser is needed, and the suite includes
 running the embedded `#tests` of **every** bundled example.

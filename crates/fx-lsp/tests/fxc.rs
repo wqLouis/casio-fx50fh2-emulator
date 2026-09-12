@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 
 use fx_lsp::Language;
 use fx_lsp::logic::{completion_items, diagnostics, document_symbols, hover, range_from_line_col};
-use tower_lsp::lsp_types::{
+use lsp_types::{
     CompletionItemKind, Diagnostic, Hover, HoverContents, InsertTextFormat, NumberOrString,
     Position, Range,
 };

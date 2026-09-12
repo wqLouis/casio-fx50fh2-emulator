@@ -15,7 +15,8 @@
 //! Nothing of the JSON reaches the calculator: `config.size` and
 //! `offsets.scale` are resolved here and emitted as number literals, and only
 //! numbers and booleans can be used in a program at all. The JSON itself is
-//! parsed by [`crate::json`], the crate's single JSON implementation.
+//! parsed by the crate's strict wrapper around `serde_json`, so a `#data`
+//! typo cannot silently change a value.
 //!
 //! `#tests` is exactly `#data tests = ...`, so the test runner is an ordinary
 //! consumer of this facility rather than a special case.
@@ -36,10 +37,12 @@
 
 use std::path::{Path, PathBuf};
 
+use serde_json::Value;
+
 use crate::ast::Accessor;
 use crate::error::TranspileError;
 use crate::include::Expanded;
-use crate::json::{self, Json};
+use crate::strict_json;
 
 /// Names a data table may not use, because the language already claims them.
 const RESERVED: [&str; 14] = [
@@ -49,52 +52,41 @@ const RESERVED: [&str; 14] = [
 
 /// One declared data table.
 #[derive(Debug, Clone, PartialEq)]
-pub struct DataTable {
+pub(crate) struct DataTable {
     /// The name the program refers to it by.
-    pub name: String,
-    /// Byte offset of the `#data` directive in the expanded source.
-    pub offset: usize,
+    pub(crate) name: String,
     /// The JSON value, already resolved (a file reference has been read).
-    pub value: Json,
+    ///
+    /// This is a [`serde_json::Value`]: the crate's own `Json` enum is gone now
+    /// that `serde_json` is an ordinary dependency.
+    pub(crate) value: Value,
 }
 
 /// Every compile-time data table in a program, in declaration order.
 #[derive(Debug, Clone, Default, PartialEq)]
-pub struct Data {
+pub(crate) struct Data {
     tables: Vec<DataTable>,
 }
 
 impl Data {
     /// Look a table up by name.
-    pub fn get(&self, name: &str) -> Option<&DataTable> {
+    pub(crate) fn get(&self, name: &str) -> Option<&DataTable> {
         self.tables.iter().find(|table| table.name == name)
     }
 
     /// Whether `name` is a declared table.
-    pub fn contains(&self, name: &str) -> bool {
+    pub(crate) fn contains(&self, name: &str) -> bool {
         self.get(name).is_some()
     }
 
-    /// The declared tables, in order.
-    pub fn iter(&self) -> impl Iterator<Item = &DataTable> {
-        self.tables.iter()
-    }
-
     /// The declared names.
-    pub fn names(&self) -> impl Iterator<Item = &str> {
+    pub(crate) fn names(&self) -> impl Iterator<Item = &str> {
         self.tables.iter().map(|table| table.name.as_str())
     }
 
-    pub fn len(&self) -> usize {
-        self.tables.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.tables.is_empty()
-    }
-
     /// The `#tests` table, if the program declares one.
-    pub fn tests(&self) -> Option<&Json> {
+    #[cfg(feature = "testing")]
+    pub(crate) fn tests(&self) -> Option<&Value> {
         self.get("tests").map(|table| &table.value)
     }
 
@@ -103,7 +95,7 @@ impl Data {
     ///
     /// `pos` points at the name, so a bad path is reported where it was
     /// written; each accessor carries its own offset for a precise column.
-    pub fn resolve(
+    pub(crate) fn resolve(
         &self,
         name: &str,
         accessors: &[Accessor],
@@ -122,15 +114,17 @@ impl Data {
                     name: field,
                     pos: at,
                 } => {
-                    let Json::Object(entries) = value else {
+                    let Value::Object(entries) = value else {
                         return Err(TranspileError::at(
                             source,
                             format!("`{path}` is {} and has no field `{field}`", describe(value)),
                             *at,
                         ));
                     };
-                    let Some((_, next)) = entries.iter().find(|(key, _)| key == field) else {
-                        let keys: Vec<&str> = entries.iter().map(|(key, _)| key.as_str()).collect();
+                    let Some(next) = entries.get(field) else {
+                        // `serde_json` keeps object keys sorted, so this hint is
+                        // alphabetical rather than in document order.
+                        let keys: Vec<&str> = entries.keys().map(String::as_str).collect();
                         let hint = if keys.is_empty() {
                             "it has no fields".to_string()
                         } else {
@@ -150,7 +144,7 @@ impl Data {
                     return Err(crate::error::computed_index_error(source, name, *at));
                 }
                 Accessor::Index { index, pos: at } => {
-                    let Json::Array(items) = value else {
+                    let Value::Array(items) = value else {
                         return Err(TranspileError::at(
                             source,
                             format!("`{path}` is {} and cannot be indexed", describe(value)),
@@ -173,7 +167,7 @@ impl Data {
             }
         }
 
-        value.as_number().ok_or_else(|| {
+        strict_json::as_number(value).ok_or_else(|| {
             TranspileError::at(
                 source,
                 format!(
@@ -187,8 +181,8 @@ impl Data {
 }
 
 /// `a number`, `an object`, … for diagnostics.
-fn describe(value: &Json) -> String {
-    let kind = value.type_name();
+fn describe(value: &Value) -> String {
+    let kind = strict_json::type_name(value);
     match kind {
         "array" | "object" => format!("an {kind}"),
         "null" => "null".to_string(),
@@ -196,17 +190,8 @@ fn describe(value: &Json) -> String {
     }
 }
 
-/// Remove `#data`/`#tests` directives from `expanded`, returning the text to
-/// lex and the tables they declared.
-///
-/// `base_dir` resolves file references in an anonymous root; a directive that
-/// came from an included file resolves against that file instead.
-pub fn extract(expanded: &Expanded, base_dir: &Path) -> Result<(String, Data), TranspileError> {
-    extract_with(expanded, base_dir, &crate::loader::FsLoader)
-}
-
 /// Like [`extract`], but reads referenced data files through `loader`.
-pub fn extract_with(
+pub(crate) fn extract_with(
     expanded: &Expanded,
     base_dir: &Path,
     loader: &dyn crate::loader::FileLoader,
@@ -369,13 +354,14 @@ impl<'a> Extractor<'a> {
 
         // The JSON value, which may span lines.
         let value_byte = self.byte(cur);
-        let (value, consumed) = json::parse_prefix(&self.source[value_byte..]).map_err(|e| {
-            TranspileError::at(
-                self.source,
-                format!("invalid JSON in the `{name}` data table: {}", e.message),
-                value_byte + e.offset,
-            )
-        })?;
+        let (value, consumed) =
+            strict_json::parse_prefix(&self.source[value_byte..]).map_err(|e| {
+                TranspileError::at(
+                    self.source,
+                    format!("invalid JSON in the `{name}` data table: {}", e.message),
+                    value_byte + e.offset,
+                )
+            })?;
         let after_value = value_byte + consumed;
 
         // `;`, then the rest of the line must be blank or a comment.
@@ -399,7 +385,7 @@ impl<'a> Extractor<'a> {
 
         // Resolve a top-level string as a file reference.
         let value = match value {
-            Json::String(path) => self.load_file(&path, value_byte)?,
+            Value::String(path) => self.load_file(&path, value_byte)?,
             other => other,
         };
 
@@ -417,11 +403,7 @@ impl<'a> Extractor<'a> {
                 start_byte,
             ));
         }
-        self.data.tables.push(DataTable {
-            name,
-            offset: start_byte,
-            value,
-        });
+        self.data.tables.push(DataTable { name, value });
 
         // Blank from `#` to the end of the line holding the `;`, keeping
         // newlines so every line number stays valid.
@@ -491,7 +473,7 @@ impl<'a> Extractor<'a> {
     }
 
     /// Read a JSON data file relative to the file that declared it.
-    fn load_file(&self, path: &str, at: usize) -> Result<Json, TranspileError> {
+    fn load_file(&self, path: &str, at: usize) -> Result<Value, TranspileError> {
         let line = crate::error::line_col(self.source, at).0;
         let dir = self
             .expanded
@@ -508,7 +490,7 @@ impl<'a> Extractor<'a> {
                 at,
             )
         })?;
-        json::parse(&text)
+        strict_json::parse(&text)
             .map_err(|e| TranspileError::at(&text, e.message, e.offset).in_file(Some(&target)))
     }
 }
@@ -519,22 +501,24 @@ mod tests {
     use crate::include;
 
     fn extract_text(source: &str) -> (String, Data) {
-        let expanded = include::expand(source, None, Path::new(".")).unwrap();
-        extract(&expanded, Path::new(".")).unwrap()
+        let expanded =
+            include::expand_with(source, None, Path::new("."), &crate::loader::FsLoader).unwrap();
+        extract_with(&expanded, Path::new("."), &crate::loader::FsLoader).unwrap()
     }
 
     fn error(source: &str) -> TranspileError {
-        let expanded = include::expand(source, None, Path::new(".")).unwrap();
-        extract(&expanded, Path::new(".")).unwrap_err()
+        let expanded =
+            include::expand_with(source, None, Path::new("."), &crate::loader::FsLoader).unwrap();
+        extract_with(&expanded, Path::new("."), &crate::loader::FsLoader).unwrap_err()
     }
 
     #[test]
     fn extracts_an_inline_table() {
         let (text, data) = extract_text("#data config = { \"n\": 3 };\nprint(1);\n");
-        assert_eq!(data.len(), 1);
+        assert_eq!(data.tables.len(), 1);
         assert_eq!(
             data.get("config").unwrap().value.get("n"),
-            Some(&Json::Number(3.0))
+            Some(&Value::from(3.0))
         );
         // The text keeps its line count and shrinks only in width.
         assert_eq!(text.lines().count(), 2);
@@ -554,7 +538,10 @@ mod tests {
     #[test]
     fn tests_is_sugar_for_a_data_table_named_tests() {
         let (_, data) = extract_text("#tests = [{\"name\": \"a\"}];\n");
-        assert_eq!(data.tests().unwrap().as_array().unwrap().len(), 1);
+        assert_eq!(
+            data.get("tests").unwrap().value.as_array().unwrap().len(),
+            1
+        );
     }
 
     #[test]
@@ -616,7 +603,7 @@ mod tests {
             )
             .unwrap_err();
         assert!(e.message.contains("has no field `nope`"), "{e}");
-        assert!(e.message.contains("fields: xs, s"), "{e}");
+        assert!(e.message.contains("fields: s, xs"), "{e}");
 
         let e = data
             .resolve(
@@ -685,7 +672,7 @@ mod tests {
         let source = "// #data a = 1;\n/*\n#data b = 2;\n*/\nprint(1);\n";
         let (_, data) = extract_text(source);
         assert!(
-            data.is_empty(),
+            data.tables.is_empty(),
             "found {:?}",
             data.names().collect::<Vec<_>>()
         );
@@ -694,7 +681,7 @@ mod tests {
     #[test]
     fn other_hash_directives_are_left_for_the_lexer() {
         let (text, data) = extract_text("#mode CMPLX\n#reg x = A\n");
-        assert!(data.is_empty());
+        assert!(data.tables.is_empty());
         assert!(text.contains("#mode CMPLX"));
         assert!(text.contains("#reg x = A"));
     }
@@ -708,7 +695,7 @@ mod tests {
         let (_, data) = extract_text(&format!("#data v = \"{}\";\n", path.display()));
         assert_eq!(
             data.get("v").unwrap().value.get("n"),
-            Some(&Json::Number(42.0))
+            Some(&Value::from(42.0))
         );
         std::fs::remove_dir_all(&dir).ok();
     }

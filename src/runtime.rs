@@ -49,7 +49,7 @@ pub struct Environment {
     /// How complex results are rendered.
     pub complex_format: ComplexFormat,
     /// Which part of a complex result the display shows (`Re⇔Im`).
-    pub complex_part: ComplexPart,
+    complex_part: ComplexPart,
     /// The operating mode the program declared with `#mode` (default COMP).
     pub mode: Mode,
 }
@@ -84,11 +84,11 @@ impl Environment {
         }
     }
 
-    pub fn set(&mut self, var: VarName, value: f64) {
+    pub(crate) fn set(&mut self, var: VarName, value: f64) {
         self.set_value(var, Value::Real(value));
     }
 
-    pub fn set_value(&mut self, var: VarName, value: Value) {
+    pub(crate) fn set_value(&mut self, var: VarName, value: Value) {
         match var {
             VarName::Ans => self.ans = value,
             other => self.vars[other.slot().expect("Ans handled above")] = value,
@@ -103,22 +103,14 @@ impl Environment {
         self.ans
     }
 
-    pub fn hidden(&self) -> f64 {
-        self.hidden.re()
-    }
-
-    pub fn hidden_value(&self) -> Value {
-        self.hidden
-    }
-
-    pub fn reset_memory(&mut self) {
+    pub(crate) fn reset_memory(&mut self) {
         self.vars = [Value::Real(0.0); 7];
         self.ans = Value::Real(0.0);
         self.hidden = Value::Real(0.0);
     }
 
     /// Format a real value the way the lower display line would show it.
-    pub fn format(&self, value: f64) -> String {
+    pub(crate) fn format(&self, value: f64) -> String {
         if let Some(base) = self.base {
             return base.format(value);
         }
@@ -160,7 +152,7 @@ pub trait Host {
 /// Handy for tests.
 #[derive(Debug, Default)]
 pub struct MockHost {
-    pub inputs: std::collections::VecDeque<f64>,
+    inputs: std::collections::VecDeque<f64>,
     pub output: Vec<String>,
 }
 
@@ -257,16 +249,8 @@ impl<H: Host> Interpreter<H> {
         &self.stats
     }
 
-    pub fn stats_mut(&mut self) -> &mut Stats {
-        &mut self.stats
-    }
-
     pub fn host(&self) -> &H {
         &self.host
-    }
-
-    pub fn host_mut(&mut self) -> &mut H {
-        &mut self.host
     }
 
     pub fn into_host(self) -> H {
@@ -734,7 +718,7 @@ impl<H: Host> Interpreter<H> {
     // -- expression evaluation ---------------------------------------------
 
     /// Evaluate an expression to a real or complex value.
-    pub fn eval(&mut self, expr: &Expr) -> Result<Value, CalcError> {
+    pub(crate) fn eval(&mut self, expr: &Expr) -> Result<Value, CalcError> {
         let value = match expr {
             Expr::Number(v) => Value::Real(*v),
             Expr::Sexagesimal(value, _) => Value::Sexagesimal(*value),
@@ -853,8 +837,8 @@ impl<H: Host> Interpreter<H> {
             })?;
             let a = require_real(l, "bitwise operator")?;
             let b = require_real(r, "bitwise operator")?;
-            let wa = base.to_word(a);
-            let wb = base.to_word(b);
+            let wa = base.encode(a);
+            let wb = base.encode(b);
             let word = match op {
                 BinOp::And => wa & wb,
                 BinOp::Or => wa | wb,
@@ -862,7 +846,7 @@ impl<H: Host> Interpreter<H> {
                 BinOp::Xnor => !(wa ^ wb),
                 _ => unreachable!(),
             };
-            return Ok(Value::Real(base.from_word(word)));
+            return Ok(Value::Real(base.decode(word)));
         }
 
         let value = match op {
@@ -968,13 +952,13 @@ impl<H: Host> Interpreter<H> {
                     .base
                     .ok_or_else(|| CalcError::Math("`Not`/`Neg` need a number base".to_string()))?;
                 let x = require_real(args[0], "Not/Neg")?;
-                let word = base.to_word(x);
+                let word = base.encode(x);
                 let result = match func {
                     FuncName::Not => !word,
                     FuncName::Neg => (!word).wrapping_add(1),
                     _ => unreachable!(),
                 };
-                return Ok(Value::Real(base.from_word(result)));
+                return Ok(Value::Real(base.decode(result)));
             }
             _ => {}
         }
@@ -1109,13 +1093,6 @@ fn require_real(value: Value, what: &str) -> Result<f64, CalcError> {
 
 fn bool_num(b: bool) -> f64 {
     if b { 1.0 } else { 0.0 }
-}
-
-/// Round to 15 significant digits and apply the machine's autocorrection.
-///
-/// Kept under its historical name for API compatibility.
-pub fn r15(x: f64) -> f64 {
-    normalize(x)
 }
 
 fn round_sig(x: f64, digits: i32) -> f64 {

@@ -13,23 +13,22 @@ pub mod ast;
 pub mod bases;
 pub mod check;
 pub mod constants;
-pub mod error;
+pub(crate) mod error;
 pub mod format;
 pub mod lexer;
-pub mod mode;
-pub mod parser;
+pub(crate) mod mode;
+pub(crate) mod parser;
 pub mod precision;
-pub mod runtime;
+pub(crate) mod runtime;
 pub mod stats;
 pub mod token;
 pub mod value;
 
-pub use constants::{CONSTANTS, PhysicalConstant};
+pub use constants::CONSTANTS;
 pub use error::CalcError;
 pub use mode::Mode;
 pub use runtime::{AngleMode, DisplayMode, Environment, Host, Interpreter, MockHost};
-pub use stats::{RegType, StatVar, Stats};
-pub use value::{ComplexFormat, ComplexPart, Value};
+pub use value::Value;
 
 /// Lex, parse and mode-check a program into a flat list of statements.
 ///
@@ -64,7 +63,7 @@ pub fn compile_with(source: &str, mode: Option<Mode>) -> Result<Vec<ast::Stmt>, 
 
 /// Run a program with the given host and return the interpreter (so callers can
 /// inspect memory or the host afterwards).
-pub fn run<H: Host>(source: &str, host: H) -> Result<Interpreter<H>, CalcError> {
+fn run<H: Host>(source: &str, host: H) -> Result<Interpreter<H>, CalcError> {
     let program = compile(source)?;
     let mut interp = Interpreter::new(program, host);
     interp.run()?;

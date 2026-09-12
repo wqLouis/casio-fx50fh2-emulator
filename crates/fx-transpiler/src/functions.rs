@@ -103,7 +103,11 @@ const MAX_DEPTH: usize = 64;
 ///
 /// Compile-time `const`s and `#data` tables stay available to every function,
 /// because they occupy no memory and cannot be assigned.
-pub fn expand(program: Program, source: &str, data: &Data) -> Result<Program, TranspileError> {
+pub(crate) fn expand(
+    program: Program,
+    source: &str,
+    data: &Data,
+) -> Result<Program, TranspileError> {
     let mut defs: BTreeMap<String, FnDef> = BTreeMap::new();
     let mut rest: Vec<Stmt> = Vec::new();
 

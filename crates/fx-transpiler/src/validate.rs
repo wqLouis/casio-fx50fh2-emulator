@@ -19,7 +19,7 @@ use crate::mode::Mode;
 ///
 /// Returns the first violation in source order, pointing at the offending
 /// construct.
-pub fn validate(program: &Program, mode: Mode, source: &str) -> Result<(), TranspileError> {
+pub(crate) fn validate(program: &Program, mode: Mode, source: &str) -> Result<(), TranspileError> {
     Checker { mode, source }.stmts(program)
 }
 

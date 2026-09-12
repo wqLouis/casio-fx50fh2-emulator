@@ -44,12 +44,12 @@ use crate::data::Data;
 ///
 /// `source` is only used to describe a path that fails to resolve, and such a
 /// failure is ignored here — the emitter reports it.
-pub fn fold_program_with(program: &mut Program, data: &Data, source: &str) {
+pub(crate) fn fold_program_with(program: &mut Program, data: &Data, source: &str) {
     Folder::new(Some((data, source))).stmts(program);
 }
 
 /// Fold one expression in place, leaving symbolic values alone.
-pub fn fold_expr(expr: &mut Expr) {
+pub(crate) fn fold_expr(expr: &mut Expr) {
     Folder::new(None).expr(expr);
 }
 
@@ -328,8 +328,10 @@ mod tests {
     /// table up.
     fn folded_with_data(source: &str) -> String {
         let here = std::path::Path::new(".");
-        let expanded = crate::include::expand(source, None, here).unwrap();
-        let (text, data) = crate::data::extract(&expanded, here).unwrap();
+        let expanded =
+            crate::include::expand_with(source, None, here, &crate::loader::FsLoader).unwrap();
+        let (text, data) =
+            crate::data::extract_with(&expanded, here, &crate::loader::FsLoader).unwrap();
         let tokens = lex(&text).unwrap();
         let mut program = parse(&tokens, &text).unwrap();
         fold_program_with(&mut program, &data, &text);

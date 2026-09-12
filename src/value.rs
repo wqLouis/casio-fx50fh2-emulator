@@ -27,7 +27,7 @@ pub enum ComplexFormat {
 /// press shows only the imaginary part (with the `𝑖` suffix the manual
 /// describes).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum ComplexPart {
+pub(crate) enum ComplexPart {
     /// Show the whole number (`a+b𝑖`, or `r∠θ` in polar format).
     #[default]
     Both,
@@ -54,20 +54,12 @@ impl Value {
     // The plan fixes these helper names; they intentionally mirror the
     // arithmetic operators without implementing `std::ops` traits.
     #![allow(clippy::should_implement_trait)]
-    pub const fn real(x: f64) -> Self {
-        Value::Real(x)
-    }
-
-    pub const fn complex(re: f64, im: f64) -> Self {
-        Value::Complex(re, im)
-    }
-
     /// `r∠θ`, with `theta` given in radians.
-    pub fn from_polar(r: f64, theta: f64) -> Self {
+    pub(crate) fn from_polar(r: f64, theta: f64) -> Self {
         Value::Complex(normalize(r * theta.cos()), normalize(r * theta.sin()))
     }
 
-    pub fn is_real(&self) -> bool {
+    pub(crate) fn is_real(&self) -> bool {
         !self.is_complex()
     }
 
@@ -78,7 +70,7 @@ impl Value {
         matches!(self, Value::Complex(_, _))
     }
 
-    pub fn is_zero(&self) -> bool {
+    pub(crate) fn is_zero(&self) -> bool {
         match self {
             Value::Real(x) | Value::Sexagesimal(x) => *x == 0.0,
             Value::Complex(re, im) => *re == 0.0 && *im == 0.0,
@@ -92,7 +84,7 @@ impl Value {
 
     /// Flip the sexagesimal display flag.  A complex value is unchanged: the
     /// conversion only applies to real numbers.
-    pub fn toggle_sexagesimal(self) -> Value {
+    pub(crate) fn toggle_sexagesimal(self) -> Value {
         match self {
             Value::Real(x) => Value::Sexagesimal(x),
             Value::Sexagesimal(x) => Value::Real(x),
@@ -103,7 +95,7 @@ impl Value {
     /// Numeric equality, ignoring whether a real carries the sexagesimal
     /// display flag: `2` and `2°0′0″` are the same number.  A complex value
     /// compares part by part and is never equal to a real one.
-    pub fn equals(self, other: Value) -> bool {
+    pub(crate) fn equals(self, other: Value) -> bool {
         match (self, other) {
             (Value::Complex(ar, ai), Value::Complex(br, bi)) => ar == br && ai == bi,
             (Value::Complex(..), _) | (_, Value::Complex(..)) => false,
@@ -127,17 +119,7 @@ impl Value {
         }
     }
 
-    /// Extract the real part, or fail with a `Math ERROR` if this is complex.
-    pub fn as_real(&self) -> Result<f64, CalcError> {
-        match self {
-            Value::Real(x) | Value::Sexagesimal(x) => Ok(*x),
-            Value::Complex(..) => Err(CalcError::Math(
-                "a complex value is not allowed here".to_string(),
-            )),
-        }
-    }
-
-    pub fn add(self, other: Value) -> Value {
+    pub(crate) fn add(self, other: Value) -> Value {
         match (self, other) {
             (Value::Real(a), Value::Real(b)) => Value::Real(normalize(a + b)),
             (Value::Complex(..), _) | (_, Value::Complex(..)) => Value::Complex(
@@ -155,7 +137,7 @@ impl Value {
         }
     }
 
-    pub fn sub(self, other: Value) -> Value {
+    pub(crate) fn sub(self, other: Value) -> Value {
         match (self, other) {
             (Value::Real(a), Value::Real(b)) => Value::Real(normalize(a - b)),
             (Value::Complex(..), _) | (_, Value::Complex(..)) => Value::Complex(
@@ -173,7 +155,7 @@ impl Value {
         }
     }
 
-    pub fn mul(self, other: Value) -> Value {
+    pub(crate) fn mul(self, other: Value) -> Value {
         match (self, other) {
             (Value::Real(a), Value::Real(b)) => Value::Real(normalize(a * b)),
             (Value::Complex(..), _) | (_, Value::Complex(..)) => {
@@ -192,7 +174,7 @@ impl Value {
         }
     }
 
-    pub fn div(self, other: Value) -> Result<Value, CalcError> {
+    pub(crate) fn div(self, other: Value) -> Result<Value, CalcError> {
         match (self, other) {
             (Value::Real(a), Value::Real(b)) => {
                 if b == 0.0 {
@@ -224,7 +206,7 @@ impl Value {
         }
     }
 
-    pub fn neg(self) -> Value {
+    pub(crate) fn neg(self) -> Value {
         match self {
             Value::Real(x) => Value::Real(normalize(-x)),
             Value::Sexagesimal(x) => Value::Sexagesimal(normalize(-x)),
@@ -233,7 +215,7 @@ impl Value {
     }
 
     /// The modulus `|z|`.
-    pub fn abs(self) -> f64 {
+    pub(crate) fn abs(self) -> f64 {
         match self {
             Value::Real(x) | Value::Sexagesimal(x) => x.abs(),
             Value::Complex(re, im) => (re * re + im * im).sqrt(),
@@ -241,7 +223,7 @@ impl Value {
     }
 
     /// The argument in radians.
-    pub fn arg(self) -> f64 {
+    pub(crate) fn arg(self) -> f64 {
         match self {
             Value::Real(x) | Value::Sexagesimal(x) => {
                 if x >= 0.0 {
@@ -260,7 +242,7 @@ impl Value {
         }
     }
 
-    pub fn conjg(self) -> Value {
+    pub(crate) fn conjg(self) -> Value {
         match self {
             Value::Real(x) => Value::Real(x),
             Value::Sexagesimal(x) => Value::Sexagesimal(x),
@@ -268,15 +250,15 @@ impl Value {
         }
     }
 
-    pub fn square(self) -> Value {
+    pub(crate) fn square(self) -> Value {
         self.mul(self)
     }
 
-    pub fn cube(self) -> Value {
+    pub(crate) fn cube(self) -> Value {
         self.mul(self).mul(self)
     }
 
-    pub fn inverse(self) -> Result<Value, CalcError> {
+    pub(crate) fn inverse(self) -> Result<Value, CalcError> {
         match self {
             Value::Real(x) => {
                 if x == 0.0 {
@@ -305,7 +287,7 @@ impl Value {
 
     /// Principal square root.  A negative real yields a purely imaginary
     /// complex result.
-    pub fn sqrt(self) -> Value {
+    pub(crate) fn sqrt(self) -> Value {
         match self {
             Value::Real(x) | Value::Sexagesimal(x) if x >= 0.0 => Value::Real(normalize(x.sqrt())),
             Value::Real(x) | Value::Sexagesimal(x) => Value::Complex(0.0, normalize((-x).sqrt())),
@@ -325,7 +307,7 @@ impl Value {
     }
 
     /// Principal natural logarithm `ln z = ln|z| + i·arg(z)` (radians).
-    pub fn ln(self) -> Result<Value, CalcError> {
+    pub(crate) fn ln(self) -> Result<Value, CalcError> {
         if self.is_zero() {
             return Err(CalcError::Math("ln domain".to_string()));
         }
@@ -333,7 +315,7 @@ impl Value {
     }
 
     /// `e^z`.
-    pub fn exp(self) -> Value {
+    pub(crate) fn exp(self) -> Value {
         let magnitude = self.re().exp();
         Value::Complex(
             normalize(magnitude * self.im().cos()),
@@ -363,7 +345,7 @@ impl fmt::Display for Value {
 }
 
 /// The imaginary-unit glyph used by the display (`𝑖`, U+1D456).
-pub const IMAGINARY_UNIT: &str = "𝑖";
+pub(crate) const IMAGINARY_UNIT: &str = "𝑖";
 
 /// Render a real number as `d°m′s″`.
 ///
@@ -371,7 +353,7 @@ pub const IMAGINARY_UNIT: &str = "𝑖";
 /// places, so a value that was entered (or produced by the conversion key) as
 /// whole degrees/minutes/seconds prints that way again despite binary floating
 /// point, and a rounded `60` carries into the minutes and degrees.
-pub fn format_sexagesimal(value: f64) -> String {
+pub(crate) fn format_sexagesimal(value: f64) -> String {
     if value.is_nan() {
         return "Math ERROR".to_string();
     }
@@ -423,7 +405,7 @@ fn trim_number(value: f64) -> String {
 }
 
 /// Render `a+b𝑖`, omitting the real part when it is zero.
-pub fn format_cartesian(re: f64, im: f64, fmt: &impl Fn(f64) -> String) -> String {
+pub(crate) fn format_cartesian(re: f64, im: f64, fmt: &impl Fn(f64) -> String) -> String {
     if im == 0.0 {
         return fmt(re);
     }
@@ -438,6 +420,6 @@ pub fn format_cartesian(re: f64, im: f64, fmt: &impl Fn(f64) -> String) -> Strin
 }
 
 /// Render `r∠θ`.
-pub fn format_polar(r: f64, theta: f64, fmt: &impl Fn(f64) -> String) -> String {
+pub(crate) fn format_polar(r: f64, theta: f64, fmt: &impl Fn(f64) -> String) -> String {
     format!("{}∠{}", fmt(r), fmt(theta))
 }

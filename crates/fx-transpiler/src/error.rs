@@ -1,6 +1,5 @@
 //! Errors produced while transpiling `.fxc` source into PRGM.
 
-use std::fmt;
 use std::path::Path;
 
 /// A transpile error carrying the message plus both the byte offset and the
@@ -10,7 +9,8 @@ use std::path::Path;
 /// included library, or the root file when transpiling from a path. It is
 /// `None` for anonymous source, in which case `line`/`column` refer to that
 /// text directly.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{} ({})", message, self.location())]
 pub struct TranspileError {
     /// Human-readable description of what went wrong.
     pub message: String,
@@ -26,7 +26,12 @@ pub struct TranspileError {
 
 impl TranspileError {
     /// Build an error from an explicit position.
-    pub fn new(message: impl Into<String>, offset: usize, line: usize, column: usize) -> Self {
+    pub(crate) fn new(
+        message: impl Into<String>,
+        offset: usize,
+        line: usize,
+        column: usize,
+    ) -> Self {
         TranspileError {
             message: message.into(),
             offset,
@@ -37,38 +42,29 @@ impl TranspileError {
     }
 
     /// Build an error, deriving line/column from `source` and `offset`.
-    pub fn at(source: &str, message: impl Into<String>, offset: usize) -> Self {
+    pub(crate) fn at(source: &str, message: impl Into<String>, offset: usize) -> Self {
         let (line, column) = line_col(source, offset);
         TranspileError::new(message, offset, line, column)
     }
 
     /// Attribute the error to `file`, unless it already names one.
-    pub fn in_file(mut self, file: Option<&Path>) -> Self {
+    pub(crate) fn in_file(mut self, file: Option<&Path>) -> Self {
         if self.file.is_none() {
             self.file = file.map(|p| p.display().to_string());
         }
         self
     }
-}
 
-impl fmt::Display for TranspileError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    /// The parenthesised position, whose shape depends on whether the error
+    /// names a file. Kept as a method so the `thiserror` message stays exactly
+    /// what the hand-written `Display` produced.
+    fn location(&self) -> String {
         match &self.file {
-            Some(file) => write!(
-                f,
-                "{} ({}:{}:{})",
-                self.message, file, self.line, self.column
-            ),
-            None => write!(
-                f,
-                "{} (line {}, column {})",
-                self.message, self.line, self.column
-            ),
+            Some(file) => format!("{file}:{}:{}", self.line, self.column),
+            None => format!("line {}, column {}", self.line, self.column),
         }
     }
 }
-
-impl std::error::Error for TranspileError {}
 
 /// The error for an array index that is still not a literal after folding and
 /// unrolling.
@@ -92,7 +88,7 @@ pub(crate) fn computed_index_error(source: &str, name: &str, pos: usize) -> Tran
 ///
 /// The column counts `char`s, not bytes, and offsets past the end of the
 /// source clamp to the final position.
-pub fn line_col(source: &str, offset: usize) -> (usize, usize) {
+pub(crate) fn line_col(source: &str, offset: usize) -> (usize, usize) {
     let limit = offset.min(source.len());
     let mut line = 1usize;
     let mut column = 1usize;

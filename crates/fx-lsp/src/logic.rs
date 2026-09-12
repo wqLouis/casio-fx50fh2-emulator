@@ -4,11 +4,6 @@
 //! to LSP structures: byte offsets to [`Position`]s, diagnostics produced by
 //! the core lexer/parser, completion items, hover text and document symbols.
 
-// The core enums are not `#[non_exhaustive]`, so the wildcard arms that exist
-// purely for forward compatibility are unreachable today.  Keep them (so a new
-// core variant does not break this crate) and silence the lint.
-#![allow(unreachable_patterns)]
-
 use std::path::Path;
 
 use casio_fx50fh2::CalcError;
@@ -73,14 +68,6 @@ impl Language {
             Language::Fxc => "fxc",
         }
     }
-
-    /// A human-readable label for logs and documentation.
-    pub fn label(self) -> &'static str {
-        match self {
-            Language::Prgm => "PRGM",
-            Language::Fxc => "C-like",
-        }
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -93,7 +80,7 @@ impl Language {
 /// the protocol requires.  Offsets that are not on a UTF-8 boundary (which a
 /// well-behaved lexer never produces) are rounded down, and offsets past the
 /// end of the document are clamped.
-pub fn offset_to_position(source: &str, offset: usize) -> Position {
+fn offset_to_position(source: &str, offset: usize) -> Position {
     let mut offset = offset.min(source.len());
     while offset > 0 && !source.is_char_boundary(offset) {
         offset -= 1;
@@ -113,7 +100,7 @@ pub fn offset_to_position(source: &str, offset: usize) -> Position {
 /// Convert an LSP [`Position`] to a byte offset into `source`.
 ///
 /// Returns `None` when the position lies on a line that does not exist.
-pub fn position_to_offset(source: &str, position: Position) -> Option<usize> {
+fn position_to_offset(source: &str, position: Position) -> Option<usize> {
     let mut line_start = 0usize;
     let mut current_line = 0u32;
     while current_line < position.line {
@@ -152,7 +139,7 @@ fn next_char_boundary(source: &str, offset: usize) -> usize {
 }
 
 /// A one-character range starting at `offset`.
-pub fn range_for_offset(source: &str, offset: usize) -> Range {
+fn range_for_offset(source: &str, offset: usize) -> Range {
     let start = offset_to_position(source, offset);
     let end = offset_to_position(source, next_char_boundary(source, offset));
     Range::new(start, end)
@@ -215,7 +202,7 @@ fn char_col_offset(line: &str, char_col: usize) -> usize {
 }
 
 /// The range covering `token`'s lexeme.
-pub fn token_range(source: &str, token: &Token) -> Range {
+fn token_range(source: &str, token: &Token) -> Range {
     let start = offset_to_position(source, token.pos);
     let end = if token.lexeme.is_empty() {
         offset_to_position(source, token.pos)
@@ -234,7 +221,7 @@ pub fn token_range(source: &str, token: &Token) -> Range {
 /// Both `Syntax` and `Mode` errors carry a position; errors without one (for
 /// example a mode violation produced by the checker, which has no single
 /// offending byte) fall back to the start of the document.
-pub fn error_position(err: &CalcError) -> Option<usize> {
+fn error_position(err: &CalcError) -> Option<usize> {
     err.pos()
 }
 
@@ -945,7 +932,6 @@ fn var_description(var: &VarName) -> &'static str {
         VarName::Y => "Memory Y",
         VarName::M => "Independent memory M",
         VarName::Ans => "The last computed answer",
-        _ => "Calculator memory",
     }
 }
 
@@ -1021,7 +1007,6 @@ fn postfix_description(p: &Postfix) -> &'static str {
         Postfix::Cube => "Cube (x³)",
         Postfix::Fact => "Factorial (x!)",
         Postfix::Percent => "Percent (x%)",
-        _ => "Postfix operator",
     }
 }
 
@@ -1359,11 +1344,35 @@ pub fn document_symbols(source: &str, language: Language) -> Vec<DocumentSymbol>
     }
 }
 
+/// Build a [`DocumentSymbol`] whose range is the declaration's start.
+///
+/// `lsp-types` 0.94 still requires the deprecated `deprecated` field in a
+/// struct literal even though `tags` supersedes it, so it is always `None`
+/// here; the field is skipped when serialised.
+///
+/// `expect` rather than `allow`: the day `lsp-types` drops the field this stops
+/// compiling, instead of the suppression quietly outliving its reason.
+#[expect(
+    deprecated,
+    reason = "lsp-types 0.94 has no Default for DocumentSymbol"
+)]
+fn document_symbol(name: String, detail: &str, kind: SymbolKind, range: Range) -> DocumentSymbol {
+    DocumentSymbol {
+        name,
+        detail: Some(detail.to_string()),
+        kind,
+        tags: None,
+        deprecated: None,
+        range,
+        selection_range: range,
+        children: None,
+    }
+}
+
 /// One symbol per `Lbl` marker in the program.
 ///
 /// Tokens are scanned directly rather than walking the AST so that symbols
 /// still work while the rest of the document has a syntax error.
-#[allow(deprecated)]
 fn prgm_document_symbols(source: &str) -> Vec<DocumentSymbol> {
     let Ok(tokens) = lex(source) else {
         return Vec::new();
@@ -1388,16 +1397,12 @@ fn prgm_document_symbols(source: &str) -> Vec<DocumentSymbol> {
             None => ("Lbl".to_string(), token_range(source, token)),
         };
 
-        symbols.push(DocumentSymbol {
+        symbols.push(document_symbol(
             name,
-            detail: Some("jump label".to_string()),
-            kind: SymbolKind::FUNCTION,
-            tags: None,
-            deprecated: None,
+            "jump label",
+            SymbolKind::FUNCTION,
             range,
-            selection_range: range,
-            children: None,
-        });
+        ));
     }
     symbols
 }
@@ -1530,7 +1535,6 @@ fn collect_fxc_symbols(
 }
 
 /// Build a `.fxc` [`DocumentSymbol`] whose range is the declaration's start.
-#[allow(deprecated)]
 fn fxc_symbol(
     name: String,
     kind: SymbolKind,
@@ -1538,17 +1542,7 @@ fn fxc_symbol(
     source: &str,
     offset: usize,
 ) -> DocumentSymbol {
-    let range = range_for_offset(source, offset);
-    DocumentSymbol {
-        name,
-        detail: Some(detail.to_string()),
-        kind,
-        tags: None,
-        deprecated: None,
-        range,
-        selection_range: range,
-        children: None,
-    }
+    document_symbol(name, detail, kind, range_for_offset(source, offset))
 }
 
 // ---------------------------------------------------------------------------
@@ -1923,11 +1917,9 @@ mod tests {
     }
 
     #[test]
-    fn language_ids_and_labels() {
+    fn language_ids() {
         assert_eq!(Language::Prgm.id(), "fx");
         assert_eq!(Language::Fxc.id(), "fxc");
-        assert_eq!(Language::Prgm.label(), "PRGM");
-        assert_eq!(Language::Fxc.label(), "C-like");
     }
 
     // -- range_from_line_col ------------------------------------------------

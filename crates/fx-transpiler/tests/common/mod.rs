@@ -5,8 +5,6 @@
 //! source here. Wrapping does not change the emitted PRGM: `main`'s body is
 //! allocated and emitted in statement order, exactly as the old top level was.
 
-#![allow(dead_code)]
-
 /// Wrap `source` in `fn main() { … }`.
 ///
 /// * Leading `#mode`/`#data`/`#tests`/`#include` directives are left at the top

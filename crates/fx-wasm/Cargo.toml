@@ -23,3 +23,5 @@ fx-lsp = { path = "../fx-lsp", default-features = false }
 # Named only so the API can build `Position`s and read `Diagnostic`s; `fx-lsp`
 # re-exports it from `tower-lsp`, so this is the same version in the graph.
 lsp-types = "0.94"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"

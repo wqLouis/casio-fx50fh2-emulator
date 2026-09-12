@@ -23,4 +23,4 @@ fx-transpiler = { path = "../fx-transpiler", default-features = false }
 # tokio) when the `server` feature is off.
 lsp-types = "0.94"
 tower-lsp = { version = "0.20", optional = true }
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "io-std"], optional = true }
+tokio = { version = "1", features = ["rt-multi-thread", "io-std"], optional = true }

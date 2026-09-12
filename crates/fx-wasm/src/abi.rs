@@ -14,11 +14,12 @@
 //!
 //! # Why raw exports rather than `wasm-bindgen`
 //!
-//! The interface is strings and numbers, which the WASM ABI already has, and the
-//! project already ships a zero-dependency JSON reader and writer (ADR 0014).
-//! Using `wasm-bindgen` would add a dependency *and* require its CLI at a
-//! version that must match the crate exactly — for a boundary that is a JSON
-//! string in and a JSON string out. This way the artifact is a plain
+//! The interface is strings and numbers, which the WASM ABI already has, and
+//! serialising both is what `serde` and `serde_json` are for — both already in
+//! the dependency graph for the language logic's sake (ADR 0031). Using
+//! `wasm-bindgen` would add a dependency *and* require its CLI at a version that
+//! must match the crate exactly — for a boundary that is a JSON string in and a
+//! JSON string out. This way the artifact is a plain
 //! `wasm32-unknown-unknown` module that any host can `WebAssembly.instantiate`
 //! with no tooling at all, which is also what makes it testable from Node.
 //!

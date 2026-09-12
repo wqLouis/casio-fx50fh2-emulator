@@ -144,11 +144,9 @@ editors/zed/
 
 * The `fx` grammar accepts `//` line comments in `extras` so that the shipped
   `.fx` examples parse, even though the calculator's keypad has no comment key.
-  Because of that, `languages/fx/config.toml` leaves `line_comments = []`
-  (toggle-comment is disabled for `fx`); change it to `["// "]` if you would
-  rather have toggle-comment insert `//`.
-* `line_comments` in `[language_servers]` is `["fx", "fxc"]` as required by
-  this repository's fixed contract. Zed's documentation notes that entries
-  should match the `name` field of the language's `config.toml`; if the server
-  does not attach, use the display names instead
-  (`["fx-50FH II PRGM", "fx-50FH II C-like"]`).
+  `languages/fx/config.toml` therefore enables toggle-comment
+  (`line_comments = ["// "]`); set it to `[]` to disable that.
+* `[language_servers.fx50]` lists the two languages by the display names from
+  `extension.toml` (`"fx-50FH II PRGM"`, `"fx-50FH II C-like"`), which match
+  the `name` in each `languages/<dir>/config.toml`, and maps them back to the
+  short LSP ids (`fx`, `fxc`) the server expects.

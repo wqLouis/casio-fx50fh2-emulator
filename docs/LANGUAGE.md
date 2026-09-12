@@ -90,8 +90,12 @@ the lexer rejects them.
 2. postfix `x² x³ x⁻¹ ! %` and `^(`, `x√(`
 3. fractions `┘`
 4. prefix `-`
-5. statistical estimated values (regression estimates live on
-   [`crate::stats::Stats`] as `est_y`/`est_x`; there is no keystroke yet)
+5. statistical estimated values — **the level exists, the syntax does not**. The
+   machine has this precedence level, and `Stats` implements the estimates as
+   `est_y`/`est_x`, but no PRGM key or `.fxc` spelling reaches them, so nothing
+   can currently sit at this level. It is kept because the level is the
+   *machine's* and not ours: when the syntax is added it belongs exactly here,
+   between prefix `-` and `nPr`.
 6. `nPr`, `nCr`
 7. `×`, `÷` and omitted multiplication (`2π`, `4AC`, `2(3+4)`)
 8. `+`, `-`

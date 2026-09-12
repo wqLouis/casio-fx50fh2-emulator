@@ -16,8 +16,6 @@ pub enum CalcError {
     Go(u8),
     /// `Nesting ERROR` — control structures nested too deeply / mismatched.
     Nesting(String),
-    /// `Memory ERROR`
-    Memory(String),
     /// `Data Full`
     DataFull,
     /// A construct used in a mode that does not offer it.
@@ -33,14 +31,14 @@ pub enum CalcError {
 }
 
 impl CalcError {
-    pub fn syntax(message: impl Into<String>, pos: usize) -> Self {
+    pub(crate) fn syntax(message: impl Into<String>, pos: usize) -> Self {
         CalcError::Syntax {
             message: message.into(),
             pos: Some(pos),
         }
     }
 
-    pub fn syntax_here(message: impl Into<String>) -> Self {
+    pub(crate) fn syntax_here(message: impl Into<String>) -> Self {
         CalcError::Syntax {
             message: message.into(),
             pos: None,
@@ -48,7 +46,11 @@ impl CalcError {
     }
 
     /// A construct that the declared mode does not offer.
-    pub fn mode(mode: crate::mode::Mode, message: impl Into<String>, pos: Option<usize>) -> Self {
+    pub(crate) fn mode(
+        mode: crate::mode::Mode,
+        message: impl Into<String>,
+        pos: Option<usize>,
+    ) -> Self {
         CalcError::Mode {
             message: message.into(),
             mode,
@@ -65,7 +67,6 @@ impl CalcError {
             CalcError::Arg(_) => "Argument ERROR",
             CalcError::Go(_) => "Go ERROR",
             CalcError::Nesting(_) => "Nesting ERROR",
-            CalcError::Memory(_) => "Memory ERROR",
             CalcError::DataFull => "Data Full",
             CalcError::Mode { .. } => "Mode ERROR",
         }
@@ -92,7 +93,6 @@ impl CalcError {
             CalcError::Arg(m) => m.clone(),
             CalcError::Go(n) => format!("label {n} not found"),
             CalcError::Nesting(m) => m.clone(),
-            CalcError::Memory(m) => m.clone(),
             CalcError::DataFull => "too many statistical data points".to_string(),
             CalcError::Mode { message, .. } => message.clone(),
         }
@@ -111,7 +111,6 @@ impl fmt::Display for CalcError {
             CalcError::Arg(m) => write!(f, "Argument ERROR: {m}"),
             CalcError::Go(n) => write!(f, "Go ERROR: label {n} not found"),
             CalcError::Nesting(m) => write!(f, "Nesting ERROR: {m}"),
-            CalcError::Memory(m) => write!(f, "Memory ERROR: {m}"),
             CalcError::DataFull => write!(f, "Data Full"),
             CalcError::Mode { message, mode, .. } => {
                 write!(f, "Mode ERROR: {message} (mode {mode})")

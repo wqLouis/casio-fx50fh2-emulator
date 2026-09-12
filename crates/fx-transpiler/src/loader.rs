@@ -60,27 +60,6 @@ impl MemoryLoader {
         self.files.insert(normalize(path.as_ref()), text.into());
     }
 
-    /// Whether `path` names a file here, by the same forgiving rules as
-    /// [`FileLoader::read`].
-    pub fn contains(&self, path: &Path) -> bool {
-        self.lookup(path).is_some()
-    }
-
-    /// How many files were provided.
-    pub fn len(&self) -> usize {
-        self.files.len()
-    }
-
-    /// Whether no files were provided.
-    pub fn is_empty(&self) -> bool {
-        self.files.is_empty()
-    }
-
-    /// The paths, normalised, in sorted order.
-    pub fn paths(&self) -> impl Iterator<Item = &Path> {
-        self.files.keys().map(PathBuf::as_path)
-    }
-
     fn lookup(&self, path: &Path) -> Option<&String> {
         let wanted = normalize(path);
         if let Some(text) = self.files.get(&wanted) {
@@ -117,7 +96,7 @@ impl FileLoader for MemoryLoader {
 /// cannot be used for in-memory sources and it resolves symlinks differently on
 /// different machines. Cycle detection wants the opposite: the same answer
 /// everywhere, from the text of the path alone.
-pub fn normalize(path: &Path) -> PathBuf {
+pub(crate) fn normalize(path: &Path) -> PathBuf {
     let mut out = PathBuf::new();
     for component in path.components() {
         match component {
@@ -184,13 +163,10 @@ mod tests {
             "lib/./pack.fxc",
             "src/../lib/pack.fxc",
         ] {
-            assert!(
-                files.contains(Path::new(spelling)),
-                "`{spelling}` should find `lib/pack.fxc`"
-            );
             assert_eq!(
                 files.read(Path::new(spelling)).unwrap(),
-                "fn pack(x, y) = x + y * i();"
+                "fn pack(x, y) = x + y * i();",
+                "`{spelling}` should find `lib/pack.fxc`"
             );
         }
     }
@@ -203,7 +179,7 @@ mod tests {
         // A bare name is ambiguous, so it must not silently pick one.
         assert_eq!(files.read(Path::new("a/pack.fxc")).unwrap(), "first");
         assert_eq!(files.read(Path::new("b/pack.fxc")).unwrap(), "second");
-        assert!(!files.contains(Path::new("c/pack.fxc")));
+        assert!(files.read(Path::new("c/pack.fxc")).is_err());
     }
 
     #[test]
@@ -218,7 +194,8 @@ mod tests {
         let mut files = MemoryLoader::new();
         files.insert("./a.fxc", "one");
         files.insert("a.fxc", "two");
-        assert_eq!(files.len(), 1);
+        // Both spellings normalize to one key, so the second replaces the first.
+        assert_eq!(files.files.len(), 1);
         assert_eq!(files.read(Path::new("a.fxc")).unwrap(), "two");
     }
 

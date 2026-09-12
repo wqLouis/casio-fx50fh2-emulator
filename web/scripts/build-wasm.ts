@@ -16,7 +16,7 @@
  *   rustup target add wasm32-unknown-unknown
  */
 import { $ } from 'bun';
-import { copyFile, mkdir, stat } from 'node:fs/promises';
+import { copyFile, mkdir } from 'node:fs/promises';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 

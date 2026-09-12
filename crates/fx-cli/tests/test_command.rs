@@ -1,6 +1,4 @@
 //! End-to-end tests for `fx50 test`, driven through the real binary.
-#![cfg(feature = "transpiler")]
-
 use std::path::PathBuf;
 use std::process::Command;
 

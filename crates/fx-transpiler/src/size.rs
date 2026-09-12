@@ -12,8 +12,8 @@
 //! machine does**, not counting characters: `log(` is 1 key, not 4, and `12` is
 //! 2 keys, not 1. The interpreter's own PRGM lexer (`src/lexer.rs` in the
 //! repository root) is the authority on the key set; this module mirrors it
-//! while staying free of the interpreter dependency, since `fx-transpiler`
-//! builds with `--no-default-features` and **zero third-party dependencies**.
+//! while staying free of the interpreter, which the transpiler cannot reach when
+//! it is built with `--no-default-features`.
 //!
 //! ## The key set, as `src/lexer.rs` defines it
 //!
@@ -24,7 +24,7 @@
 //!   (`Σx`, `x̄`, `sumx`, …) and the 40 scientific constants (`R∞`, `λcp`,
 //!   `sigma`, …);
 //! * a **prefix function together with the opening parenthesis it inserts**.
-//!   The lexer emits the `(` as a separate [`LParen`] token because the parser
+//!   The lexer emits the `(` as a separate `LParen` token because the parser
 //!   needs it, but the machine's `log` key inserts `log(`, so `log(` is one
 //!   key. The same applies to the glyph forms (`√(`), the parenthetical
 //!   binary keys (`^(`, `x√(`) and `10^(`, `e^(`. See
@@ -159,9 +159,9 @@ fn settle(size: &mut Size, current: &mut usize) {
 /// A character cursor over a PRGM listing.
 ///
 /// This deliberately re-implements the token scan of the interpreter's
-/// `src/lexer.rs` rather than depending on it: `fx-transpiler` must keep
-/// building with `--no-default-features` and no third-party crates, and the
-/// interpreter's lexer also lives in a crate the transpiler cannot reach.
+/// `src/lexer.rs` rather than depending on it: the interpreter's lexer lives in
+/// a crate the transpiler cannot reach when it is built with
+/// `--no-default-features`.
 struct Scanner {
     chars: Vec<char>,
     i: usize,

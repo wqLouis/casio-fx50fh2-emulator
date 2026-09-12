@@ -28,11 +28,11 @@ fx_call(ptr: *const u8, len: usize) -> *mut u8   // [len: u32 LE][json]
 ```
 
 There is deliberately no `wasm-bindgen` here (see [ADR 0031](../../docs/DECISIONS.md)):
-the boundary is a string, the project already ships a zero-dependency JSON reader
-and writer ([ADR 0014](../../docs/DECISIONS.md)), and this way the module is a
-plain `wasm32-unknown-unknown` binary with **no imports at all** that any host can
-instantiate with no tooling. `web/src/lib/fx50.ts` is the JavaScript side, and
-typed.
+the boundary is a JSON string, and serialising it is what `serde` and `serde_json`
+are for — both already in the dependency graph for the language logic's sake. This
+way the module is a plain `wasm32-unknown-unknown` binary with **no imports at
+all** that any host can instantiate with no tooling. `web/src/lib/fx50.ts` is the
+JavaScript side, and typed.
 
 ## Three layers
 

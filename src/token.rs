@@ -27,7 +27,7 @@ pub enum VarName {
 
 impl VarName {
     /// Stable index used by [`crate::runtime::Environment`] for A..=M.
-    pub fn slot(self) -> Option<usize> {
+    pub(crate) fn slot(self) -> Option<usize> {
         Some(match self {
             VarName::A => 0,
             VarName::B => 1,
@@ -73,16 +73,6 @@ pub enum ConstName {
     /// enum variant per constant, so that adding or correcting a constant
     /// touches a single table.
     Physical(u8),
-}
-
-impl ConstName {
-    /// The table entry behind a [`ConstName::Physical`], if there is one.
-    pub fn physical(&self) -> Option<&'static crate::constants::PhysicalConstant> {
-        match self {
-            ConstName::Physical(code) => crate::constants::by_code(*code),
-            _ => None,
-        }
-    }
 }
 
 /// Parenthetical functions (`sin(`, `log(`, …).
@@ -319,7 +309,7 @@ pub enum TokenKind {
 
 impl TokenKind {
     /// Human-readable name used in parser errors.
-    pub fn describe(&self) -> &'static str {
+    pub(crate) fn describe(&self) -> &'static str {
         match self {
             TokenKind::Number(_) => "number",
             TokenKind::ModeDirective(_) => "mode directive",

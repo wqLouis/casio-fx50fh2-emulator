@@ -1,6 +1,6 @@
 //! Transpiler from a small C-like language (`fxc`) to fx-50FH II PRGM source.
 //!
-//! The pipeline is [`lexer::lex`] → [`parser::parse`] → [`emit`] and is exposed
+//! The pipeline is [`lexer::lex`] → [`parser::parse`] → `emit` and is exposed
 //! through [`transpile`] / [`transpile_with`]. Programs use ordinary names such
 //! as `total` or `i`; the emitter assigns them to the calculator's seven
 //! memories (`A B C D X Y M`) in first-seen order.
@@ -20,32 +20,30 @@
 //! assert_eq!(prgm, "A<=Bdisp\n");
 //! ```
 
+mod alloc;
 pub mod ast;
 pub mod builtins;
 pub mod constants;
-pub mod data;
-pub mod error;
-pub mod include;
-pub mod json;
-pub mod lexer;
-pub mod loader;
-pub mod mode;
-pub mod parser;
-pub mod size;
-#[cfg(feature = "testing")]
-pub mod testing;
-
-mod alloc;
+mod data;
 mod emit;
+pub mod error;
 mod fold;
 mod functions;
+mod include;
+pub mod lexer;
+mod loader;
+mod mode;
+pub mod parser;
 mod propagate;
 mod simplify;
+pub mod size;
+mod strict_json;
+#[cfg(feature = "testing")]
+pub mod testing;
 mod unroll;
 mod validate;
 
 pub use alloc::Allocation;
-pub use data::{Data, DataTable};
 pub use loader::{FileLoader, FsLoader, MemoryLoader};
 pub use mode::Mode;
 pub use size::Size;
@@ -64,8 +62,8 @@ pub struct Options {
     /// (the transpiler's equivalent of the CLI's `--mode` flag). `None` means
     /// "use the header, or [`Mode::Comp`] when there is no header either".
     pub mode: Option<Mode>,
-    /// Run the optional size optimisations: [`simplify`] (algebraic identities)
-    /// and [`propagate`] (constant propagation, constant `if`/`while`, and
+    /// Run the optional size optimisations: `simplify` (algebraic identities)
+    /// and `propagate` (constant propagation, constant `if`/`while`, and
     /// removal of stores nothing reads). **On by default**, because the machine
     /// has only 680 bytes of program storage shared by all four program areas
     /// and a smaller program is always the goal.
@@ -75,7 +73,7 @@ pub struct Options {
     /// `If`/`Else` chain, `A+1`) is what those tests exist to check, and
     /// constant folding would replace it with a value and test nothing.
     ///
-    /// Note that [`fold`] and [`unroll`] are **not** covered by this flag:
+    /// Note that `fold` and `unroll` are **not** covered by this flag:
     /// folding a `const`'s value is required for the emitter, and unrolling is
     /// required for an array element to name a memory at all.
     pub optimize: bool,

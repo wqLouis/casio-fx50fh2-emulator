@@ -7,7 +7,7 @@
 
 /// How a built-in is spelled in the emitted PRGM.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Form {
+pub(crate) enum Form {
     /// `SPELLING(args…)`, e.g. `sin(x)`, `√(x)`, `10^(x)`.
     Call,
     /// `a SPELLING b`, exactly two arguments: `nPr`, `nCr`, `┘`, `∠`.
@@ -28,14 +28,14 @@ pub struct Builtin {
     /// Glyph spelling emitted by default.
     pub glyph: &'static str,
     /// ASCII-alias spelling emitted with [`crate::Options::ascii`].
-    pub ascii: &'static str,
+    pub(crate) ascii: &'static str,
     /// How the arguments and the spelling are arranged.
-    pub form: Form,
+    pub(crate) form: Form,
 }
 
 impl Builtin {
     /// The spelling to emit for the requested output style.
-    pub fn spelling(&self, ascii: bool) -> &'static str {
+    pub(crate) fn spelling(&self, ascii: bool) -> &'static str {
         if ascii { self.ascii } else { self.glyph }
     }
 }

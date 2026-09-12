@@ -11,7 +11,6 @@
 //! `Mode ERROR`.
 
 use crate::ast::{Expr, Setup, Stmt};
-use crate::bases::Base;
 use crate::error::CalcError;
 use crate::mode::Mode;
 use crate::stats::StatVar;
@@ -31,7 +30,7 @@ pub fn declared_mode(program: &[Stmt]) -> Mode {
 }
 
 /// Reject any construct the program's declared mode does not offer.
-pub fn check(program: &[Stmt]) -> Result<(), CalcError> {
+pub(crate) fn check(program: &[Stmt]) -> Result<(), CalcError> {
     Checker::new(declared_mode(program)).check_program(program)
 }
 
@@ -339,19 +338,5 @@ fn stat_var_name(var: StatVar) -> &'static str {
         RegB => "regB",
         RegC => "regC",
         RegR => "regR",
-    }
-}
-
-/// Validate that a `#mode` directive names a mode.  Used by the transpiler and
-/// the CLI for their own headers.
-pub fn parse_mode(name: &str) -> Option<Mode> {
-    Mode::parse(name)
-}
-
-/// Convenience: the base a tagged literal requires, if any.
-pub fn tagged_base(expr: &Expr) -> Option<Base> {
-    match expr {
-        Expr::BaseLiteral { base, .. } => Some(*base),
-        _ => None,
     }
 }

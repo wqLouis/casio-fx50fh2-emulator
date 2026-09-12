@@ -53,16 +53,16 @@
 use std::path::{Path, PathBuf};
 
 use crate::error::TranspileError;
-use crate::loader::{FileLoader, FsLoader, normalize};
+use crate::loader::{FileLoader, normalize};
 
 /// How deep `#include` may nest before we assume something is wrong.
 const MAX_DEPTH: usize = 32;
 
 /// Source after include expansion, plus the map back to the original files.
 #[derive(Debug, Clone)]
-pub struct Expanded {
+pub(crate) struct Expanded {
     /// The concatenated source that gets lexed.
-    pub text: String,
+    pub(crate) text: String,
     /// For each line of [`Expanded::text`], the file it came from and its
     /// 1-based line number within that file.
     line_origins: Vec<(usize, usize)>,
@@ -74,7 +74,7 @@ pub struct Expanded {
 impl Expanded {
     /// The file and 1-based line that line `line` (1-based) of
     /// [`Expanded::text`] came from.
-    pub fn origin(&self, line: usize) -> (Option<&Path>, usize) {
+    pub(crate) fn origin(&self, line: usize) -> (Option<&Path>, usize) {
         match self.line_origins.get(line.saturating_sub(1)) {
             Some((file, file_line)) => {
                 (self.files.get(*file).and_then(Option::as_deref), *file_line)
@@ -82,31 +82,10 @@ impl Expanded {
             None => (None, line),
         }
     }
-
-    /// Whether expansion changed anything (i.e. at least one `#include`).
-    pub fn was_expanded(&self) -> bool {
-        self.files.len() > 1
-    }
-}
-
-/// Expand `#include` directives in `source`.
-///
-/// `root` names the file `source` came from, used both for reporting and for
-/// resolving includes relative to it. Pass `None` for anonymous text (an
-/// inline string), in which case `base_dir` resolves the includes.
-///
-/// Files are read from the real filesystem; use [`expand_with`] to supply them
-/// some other way (an in-memory map, for instance).
-pub fn expand(
-    source: &str,
-    root: Option<&Path>,
-    base_dir: &Path,
-) -> Result<Expanded, TranspileError> {
-    expand_with(source, root, base_dir, &FsLoader)
 }
 
 /// Like [`expand`], but reads included files through `loader`.
-pub fn expand_with(
+pub(crate) fn expand_with(
     source: &str,
     root: Option<&Path>,
     base_dir: &Path,
@@ -434,9 +413,15 @@ mod tests {
 
     #[test]
     fn expansion_without_includes_is_identity() {
-        let expanded = expand("let a = 1;\nprint(a);\n", None, Path::new(".")).unwrap();
+        let expanded = expand_with(
+            "let a = 1;\nprint(a);\n",
+            None,
+            Path::new("."),
+            &crate::loader::FsLoader,
+        )
+        .unwrap();
         assert_eq!(expanded.text, "let a = 1;\nprint(a);\n");
-        assert!(!expanded.was_expanded());
+        assert_eq!(expanded.files.len(), 1, "no included file was added");
     }
 
     #[test]

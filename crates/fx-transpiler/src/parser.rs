@@ -47,6 +47,7 @@ pub fn parse(tokens: &[Token], source: &str) -> Result<Program, TranspileError> 
         tokens,
         source,
         current: 0,
+        depth: 0,
     }
     .program()
 }
@@ -55,7 +56,22 @@ struct Parser<'a> {
     tokens: &'a [Token],
     source: &'a str,
     current: usize,
+    /// How many expression levels are currently open. See [`MAX_DEPTH`].
+    depth: usize,
 }
+
+/// How deeply expressions may nest before the transpiler refuses the program.
+///
+/// Without a bound, a deeply parenthesised `.fxc` program overflows the *host*
+/// stack while being parsed and aborts the process — the same failure the
+/// interpreter used to have, and the same situation the machine reports as
+/// `Stack ERROR` when it happens in PRGM. Since `.fxc` is this project's own
+/// language the limit is reported as an ordinary source error rather than as a
+/// calculator screen, but it is the same bound: a program nesting deeper than
+/// this would not fit the machine's calculation stack either.
+///
+/// Deliberately generous, for the reason given on the interpreter's `MAX_DEPTH`.
+const MAX_DEPTH: usize = 256;
 
 impl<'a> Parser<'a> {
     // -- token helpers ------------------------------------------------------
@@ -695,7 +711,19 @@ impl<'a> Parser<'a> {
     // -- expressions --------------------------------------------------------
 
     fn expression(&mut self) -> Result<Expr, TranspileError> {
-        self.bitwise_or()
+        self.enter()?;
+        let result = self.bitwise_or();
+        self.depth -= 1;
+        result
+    }
+
+    /// Count one open expression level, or refuse the program.
+    fn enter(&mut self) -> Result<(), TranspileError> {
+        if self.depth >= MAX_DEPTH {
+            return Err(self.error(format!("expression nested more than {MAX_DEPTH} deep")));
+        }
+        self.depth += 1;
+        Ok(())
     }
 
     fn bitwise_or(&mut self) -> Result<Expr, TranspileError> {
@@ -783,6 +811,15 @@ impl<'a> Parser<'a> {
     }
 
     fn unary(&mut self) -> Result<Expr, TranspileError> {
+        // `-(-(-…))` recurses through this function without passing through
+        // `expression`, so it needs counting too.
+        self.enter()?;
+        let result = self.unary_inner();
+        self.depth -= 1;
+        result
+    }
+
+    fn unary_inner(&mut self) -> Result<Expr, TranspileError> {
         if self.matches(&Tok::Minus) {
             let operand = self.unary()?;
             return Ok(Expr::Unary(UnOp::Neg, Box::new(operand)));

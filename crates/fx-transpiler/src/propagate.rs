@@ -181,7 +181,7 @@ use crate::fold;
 /// The passes run to a fixpoint, because they feed each other: replacing a read
 /// with its value can leave a store with nothing reading it, and deleting that
 /// store can leave an earlier read with nothing to feed.
-pub fn propagate_program(program: &mut Program) {
+pub(crate) fn propagate_program(program: &mut Program) {
     // Two properties of the program decide how much may be removed. Both are
     // checked on the program *as written*, and neither can be broken by a
     // removal, so they are computed once.

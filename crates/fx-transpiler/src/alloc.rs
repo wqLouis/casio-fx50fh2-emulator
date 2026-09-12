@@ -87,7 +87,7 @@ use crate::data::Data;
 use crate::error::TranspileError;
 
 /// The seven assignable calculator memories.
-pub const VARIABLES: [char; 7] = ['A', 'B', 'C', 'D', 'X', 'Y', 'M'];
+const VARIABLES: [char; 7] = ['A', 'B', 'C', 'D', 'X', 'Y', 'M'];
 
 /// One variable's occupation of one memory.
 ///
@@ -102,9 +102,9 @@ pub struct Binding {
     pub memory: char,
     /// Byte offset of the declaration, or of the first use when a name is used
     /// before it is declared.
-    pub from: usize,
+    pub(crate) from: usize,
     /// Byte offset of the `free` that released it, if it was released.
-    pub to: Option<usize>,
+    pub(crate) to: Option<usize>,
 }
 
 impl Binding {
@@ -126,7 +126,7 @@ pub struct Allocation {
     /// Each memory's occupants over time, in calculator order. A memory with
     /// more than one entry was released with `free` and handed on.
     ///
-    /// The full [`Binding`] is kept rather than just a label so a report can
+    /// The full `Binding` is kept rather than just a label so a report can
     /// show `v[0]` for the occupant while still naming `v` in a
     /// "reused after `free v`" note.
     pub registers: Vec<(char, Vec<Binding>)>,
@@ -162,7 +162,7 @@ impl Allocation {
 
 /// A resolved name-to-memory table.
 #[derive(Debug, Clone)]
-pub struct Allocator {
+pub(crate) struct Allocator {
     bindings: Vec<Binding>,
 }
 
@@ -171,7 +171,11 @@ impl Allocator {
     ///
     /// `data` names the compile-time tables declared with `#data`, which are
     /// never memories.
-    pub fn collect(program: &Program, source: &str, data: &Data) -> Result<Self, TranspileError> {
+    pub(crate) fn collect(
+        program: &Program,
+        source: &str,
+        data: &Data,
+    ) -> Result<Self, TranspileError> {
         let mut scanner = Scanner {
             source,
             data,
@@ -218,7 +222,11 @@ impl Allocator {
     /// twice — `let t = 1; free t; free t;` stopped being a double-free error
     /// once the unread `t` was removed, and `let v = (v - v);` stopped being a
     /// self-reference error once `v - v` folded to `0`.
-    pub fn validate(program: &Program, source: &str, data: &Data) -> Result<(), TranspileError> {
+    pub(crate) fn validate(
+        program: &Program,
+        source: &str,
+        data: &Data,
+    ) -> Result<(), TranspileError> {
         let mut scanner = Scanner {
             source,
             data,
@@ -246,13 +254,13 @@ impl Allocator {
     /// This is how the emitter resolves a reference: a name can have held more
     /// than one memory over the program's life, and the binding in force is the
     /// one whose byte range contains the reference.
-    pub fn register_at(&self, name: &str, offset: usize) -> Option<char> {
+    pub(crate) fn register_at(&self, name: &str, offset: usize) -> Option<char> {
         self.binding_at(name, None, offset)
     }
 
     /// The memory for element `element` of the array `name` at byte offset
     /// `offset`.
-    pub fn element_at(&self, name: &str, element: usize, offset: usize) -> Option<char> {
+    pub(crate) fn element_at(&self, name: &str, element: usize, offset: usize) -> Option<char> {
         self.binding_at(name, Some(element), offset)
     }
 
@@ -269,10 +277,14 @@ impl Allocator {
             .map(|binding| binding.memory)
     }
 
-    /// The memory of `name`'s last binding. Useful for reports and tests; the
-    /// emitter uses [`Allocator::register_at`].
-    #[allow(dead_code)] // exercised by the unit tests
-    pub fn lookup(&self, name: &str) -> Option<char> {
+    // The three lookups below are only ever called by this module's unit
+    // tests. The emitter resolves references through `register_at`/
+    // `element_at`, and reports go through `allocation()`, so they are gated on
+    // `cfg(test)` rather than shipped behind an `#[allow(dead_code)]`.
+
+    /// The memory of `name`'s last binding.
+    #[cfg(test)]
+    fn lookup(&self, name: &str) -> Option<char> {
         self.bindings
             .iter()
             .rev()
@@ -281,8 +293,8 @@ impl Allocator {
     }
 
     /// The memory of the last binding of element `element` of `name`.
-    #[allow(dead_code)] // exercised by the unit tests
-    pub fn lookup_element(&self, name: &str, element: usize) -> Option<char> {
+    #[cfg(test)]
+    fn lookup_element(&self, name: &str, element: usize) -> Option<char> {
         self.bindings
             .iter()
             .rev()
@@ -291,19 +303,13 @@ impl Allocator {
     }
 
     /// Number of bindings.
-    #[allow(dead_code)] // exercised by the unit tests
-    pub fn len(&self) -> usize {
+    #[cfg(test)]
+    fn len(&self) -> usize {
         self.bindings.len()
     }
 
-    /// True when nothing was bound.
-    #[allow(dead_code)] // exercised by the unit tests
-    pub fn is_empty(&self) -> bool {
-        self.bindings.is_empty()
-    }
-
     /// The full allocation, for reporting.
-    pub fn allocation(&self) -> Allocation {
+    pub(crate) fn allocation(&self) -> Allocation {
         let registers = (0..VARIABLES.len())
             .map(|register| {
                 let names = self
@@ -1243,7 +1249,7 @@ fn collect_consts(stmts: &[Stmt], out: &mut BTreeSet<String>) {
 }
 
 /// The `const` names a program declares, sorted, for reports.
-pub fn const_names(program: &Program) -> Vec<String> {
+pub(crate) fn const_names(program: &Program) -> Vec<String> {
     let mut names = BTreeSet::new();
     collect_consts(program, &mut names);
     names.into_iter().collect()
@@ -1871,8 +1877,19 @@ mod tests {
     #[test]
     fn consts_and_data_use_no_memory() {
         let source = "#data tbl = 3;\nconst k = 2;\nlet a = k + tbl; print(a);";
-        let expanded = crate::include::expand(source, None, std::path::Path::new(".")).unwrap();
-        let (text, data) = crate::data::extract(&expanded, std::path::Path::new(".")).unwrap();
+        let expanded = crate::include::expand_with(
+            source,
+            None,
+            std::path::Path::new("."),
+            &crate::loader::FsLoader,
+        )
+        .unwrap();
+        let (text, data) = crate::data::extract_with(
+            &expanded,
+            std::path::Path::new("."),
+            &crate::loader::FsLoader,
+        )
+        .unwrap();
         let tokens = lex(&text).unwrap();
         let program = parse(&tokens, &text).unwrap();
         let a = Allocator::collect(&program, &text, &data).unwrap();

@@ -1,10 +1,10 @@
 //! The fx-50FH II's 40 built-in scientific constants, for the `.fxc` front
 //! end.
 //!
-//! This is a local, zero-dependency copy of the interpreter's table in
-//! `casio-fx50fh2`'s `src/constants.rs`. The transpiler deliberately does not
-//! depend on the core crate (it must keep building with `--no-default-features`),
-//! so the two tables are kept in sync by the anti-drift test in
+//! This is a local copy of the interpreter's table in `casio-fx50fh2`'s
+//! `src/constants.rs`. The interpreter sits behind the optional
+//! `execute`/`testing` features, so the transpiler cannot reach that table on
+//! every build, and the two are kept in sync by the anti-drift test in
 //! `tests/constants.rs`, which asserts that every code, name and symbol agrees.
 //!
 //! A `.fxc` program reaches a constant through the `phys` namespace: `phys.NAME`
@@ -274,11 +274,6 @@ pub const CONSTANTS: [Constant; 40] = [
     },
 ];
 
-/// The constant with the given menu number, `1..=40`.
-pub fn by_code(code: u8) -> Option<&'static Constant> {
-    CONSTANTS.iter().find(|c| c.code == code)
-}
-
 /// The constant for a `phys.NAME` spelling: either its ASCII name or the
 /// symbol the display shows.
 ///
@@ -311,15 +306,6 @@ mod tests {
                 assert_ne!(a.symbol, b.symbol, "duplicate symbol");
             }
         }
-    }
-
-    #[test]
-    fn code_lookup_round_trips() {
-        for c in &CONSTANTS {
-            assert_eq!(by_code(c.code), Some(c));
-        }
-        assert_eq!(by_code(0), None);
-        assert_eq!(by_code(41), None);
     }
 
     #[test]

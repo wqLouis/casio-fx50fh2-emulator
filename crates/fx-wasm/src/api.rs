@@ -6,10 +6,15 @@
 //!
 //! The request shape is the *only* interface a host needs. It is deliberately
 //! JSON rather than a set of typed exports, because the consumers are a web page
-//! and an editor extension — neither of which can call into Rust types — and
-//! because the transpiler already ships a zero-dependency JSON reader and writer
-//! (ADR 0014). That is also why this crate needs no `wasm-bindgen`: strings and
-//! numbers cross the boundary, and nothing else.
+//! and an editor extension — neither of which can call into Rust types. That is
+//! also why this crate needs no `wasm-bindgen` (ADR 0031): strings and numbers
+//! cross the boundary, and nothing else.
+//!
+//! Both directions are `serde`: the request deserializes into `Request`, and
+//! the responses are plain `Serialize` structs. The editor operations return the
+//! *actual* `lsp_types` values that [`fx_lsp::logic`] produces, so the protocol's
+//! own integer enums and field names travel unchanged. There is no hand-rolled
+//! JSON here, and no hand-written LSP translation.
 //!
 //! # Operations
 //!
@@ -58,6 +63,11 @@
 //!   extension, matching the language server.
 //! * `mode` overrides a `#mode` header; `ascii` selects the ASCII output style;
 //!   `optimize` (default true) is the transpiler's `Options::optimize`.
+//! * `inputs` are the values for the calculator's `?` prompts. They are JSON
+//!   **numbers only**: a numeric string is a type error, not a silently skipped
+//!   input. The calculator's `?` reads a real number, so a caller holding text
+//!   parses it on its own side where it can report the failure itself.
+//! * `position` is an LSP `Position`: `{"line": 0, "character": 4}`.
 //!
 //! # The response
 //!
@@ -68,57 +78,133 @@
 //!                           "range": { "start": {"line":2,"character":4}, … } } }
 //! ```
 //!
+//! `file` and `range` are present only when the failure has a position.
 //! Positions are LSP-style — **0-based** line and character — because the
 //! consumers are editors and Monaco, both of which are 0-based. This is the one
 //! place the API deliberately disagrees with the CLI, which prints 1-based
 //! columns for humans.
+//!
+//! A non-finite number (`inf`, `NaN`) is written by `serde_json` as `null`, so
+//! the response is always parseable JSON. The `re`/`im`/`value` fields can
+//! therefore be `null`.
 
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 
 use casio_fx50fh2::token::VarName;
 use casio_fx50fh2::{Environment, Interpreter, MockHost, Mode, Value, compile_with};
 use fx_lsp::logic::{self, Language};
-use fx_transpiler::json::{self, Json};
 use fx_transpiler::{FileLoader, MemoryLoader, Options};
-use lsp_types::{Diagnostic, DocumentSymbol, Position};
+use lsp_types::{CompletionItem, Diagnostic, DocumentSymbol, Hover, Position};
+use serde::{Deserialize, Serialize};
+
+/// The operations, named for the error a misspelled `op` produces.
+const OPERATIONS: &str = "version, transpile, run, tests, diagnostics, completions, hover, \
+                          symbols, constants, eval";
+
+// ---------------------------------------------------------------------------
+// The request
+
+/// One operation, and the fields it may carry.
+///
+/// `serde` reads the `op` tag and the fields in one pass, so a missing `op`, an
+/// unknown `op`, a field of the wrong type, and malformed JSON all surface as
+/// ordinary deserialization errors rather than hand-written lookups. A field
+/// the operation does not use is simply ignored, exactly as the JSON envelope
+/// always allowed.
+#[derive(Deserialize)]
+#[serde(tag = "op", rename_all = "camelCase")]
+enum Request {
+    Version,
+    Transpile(Fields),
+    Run(Fields),
+    Tests(Fields),
+    Diagnostics(Fields),
+    Completions(Fields),
+    Hover(Fields),
+    Symbols(Fields),
+    Constants,
+    Eval(Fields),
+}
+
+/// The fields any operation might read.
+///
+/// Every field is optional because the envelope is shared: `source` may come
+/// from `files`, `position` is only meaningful to `hover`, and so on. An
+/// operation that *requires* one of them says so with its own message rather
+/// than through the deserializer.
+#[derive(Deserialize, Default)]
+#[serde(rename_all = "camelCase", default)]
+struct Fields {
+    source: Option<String>,
+    entry: Option<String>,
+    files: HashMap<String, String>,
+    base: Option<String>,
+    language: Option<String>,
+    mode: Option<String>,
+    ascii: Option<bool>,
+    optimize: Option<bool>,
+    inputs: Option<Vec<f64>>,
+    position: Option<Position>,
+}
 
 /// Handle one request and return one response, both JSON text.
 ///
 /// This never fails: a malformed request produces a JSON error response, because
 /// a host calling across the wasm boundary has no other way to be told.
 pub fn call(request: &str) -> String {
-    let response = match json::parse(request) {
-        Ok(value) => dispatch(&value),
-        Err(e) => failure(format!(
-            "malformed request JSON at line {}, column {}: {}",
-            e.line, e.column, e.message
-        )),
-    };
-    json::to_string(&response)
+    match serde_json::from_str::<Request>(request) {
+        Ok(request) => dispatch(request),
+        Err(error) => request_error(&error),
+    }
 }
 
 /// The operations, by name. Unknown names are reported rather than ignored, so a
 /// typo in a web page is visible instead of silently doing nothing.
-fn dispatch(request: &Json) -> Json {
-    let Some(op) = request.get("op").and_then(Json::as_str) else {
-        return failure("request has no `op` string".to_string());
-    };
-    match op {
-        "version" => version(),
-        "transpile" => transpile(request),
-        "run" => run(request),
-        "tests" => tests(request),
-        "diagnostics" => diagnostics(request),
-        "completions" => completions(request),
-        "hover" => hover(request),
-        "symbols" => symbols(request),
-        "constants" => constants(),
-        "eval" => eval(request),
-        other => failure(format!(
-            "unknown op `{other}`; expected one of version, transpile, run, tests, \
-             diagnostics, completions, hover, symbols, constants, eval"
-        )),
+fn dispatch(request: Request) -> String {
+    match request {
+        Request::Version => version(),
+        Request::Transpile(fields) => transpile(&fields),
+        Request::Run(fields) => run(&fields),
+        Request::Tests(fields) => tests(&fields),
+        Request::Diagnostics(fields) => diagnostics(&fields),
+        Request::Completions(fields) => completions(&fields),
+        Request::Hover(fields) => hover(&fields),
+        Request::Symbols(fields) => symbols(&fields),
+        Request::Constants => constants(),
+        Request::Eval(fields) => eval(&fields),
     }
+}
+
+/// Turn a deserialization failure into the API's own error response.
+///
+/// `serde` already knows the operation list and the field names; this only keeps
+/// the wording a caller wrote by hand (`op`, not "variant") and separates the
+/// three mistakes: a bad `op`, a wrong-typed field, and JSON that does not parse.
+fn request_error(error: &serde_json::Error) -> String {
+    let detail = error.to_string();
+    if let Some(rest) = detail.strip_prefix("unknown variant ") {
+        return failure(format!("unknown op {rest}"));
+    }
+    if detail.contains("missing field `op`") {
+        return failure(format!(
+            "request has no `op` string; expected one of {OPERATIONS}"
+        ));
+    }
+    // A well-formed document with a wrong-typed field is a different mistake
+    // from JSON that does not parse; name it that way.
+    if error.is_data() {
+        return failure(format!(
+            "invalid request at line {}, column {}: {detail}",
+            error.line(),
+            error.column()
+        ));
+    }
+    failure(format!(
+        "malformed request JSON at line {}, column {}: {detail}",
+        error.line(),
+        error.column()
+    ))
 }
 
 // ---------------------------------------------------------------------------
@@ -128,16 +214,11 @@ fn dispatch(request: &Json) -> Json {
 ///
 /// The text comes from `source` when present, and otherwise from `entry` inside
 /// `files` — which lets a page hold a whole project and name the file to build.
-fn entry(request: &Json) -> Result<(String, PathBuf, MemoryLoader), String> {
-    let files = loader(request);
-    let root = PathBuf::from(
-        request
-            .get("entry")
-            .and_then(Json::as_str)
-            .unwrap_or("main.fxc"),
-    );
-    let source = match request.get("source").and_then(Json::as_str) {
-        Some(text) => text.to_string(),
+fn entry(fields: &Fields) -> Result<(String, PathBuf, MemoryLoader), String> {
+    let files = loader(fields);
+    let root = PathBuf::from(fields.entry.as_deref().unwrap_or("main.fxc"));
+    let source = match &fields.source {
+        Some(text) => text.clone(),
         None => files.read(&root).map_err(|e| {
             format!(
                 "no `source` was given, and `{}` is not among the supplied files: {e}",
@@ -149,22 +230,18 @@ fn entry(request: &Json) -> Result<(String, PathBuf, MemoryLoader), String> {
 }
 
 /// The `files` map, as an in-memory replacement for the filesystem.
-fn loader(request: &Json) -> MemoryLoader {
+fn loader(fields: &Fields) -> MemoryLoader {
     let mut files = MemoryLoader::new();
-    if let Some(Json::Object(entries)) = request.get("files") {
-        for (path, value) in entries {
-            if let Some(text) = value.as_str() {
-                files.insert(path.as_str(), text);
-            }
-        }
+    for (path, text) in &fields.files {
+        files.insert(path, text);
     }
     files
 }
 
 /// The directory relative includes resolve against: the entry's own directory,
 /// unless `base` says otherwise. Agrees with `transpile_file` on disk.
-fn base_dir(request: &Json, root: &Path) -> PathBuf {
-    if let Some(base) = request.get("base").and_then(Json::as_str) {
+fn base_dir(fields: &Fields, root: &Path) -> PathBuf {
+    if let Some(base) = &fields.base {
         return PathBuf::from(base);
     }
     match root.parent() {
@@ -174,155 +251,313 @@ fn base_dir(request: &Json, root: &Path) -> PathBuf {
 }
 
 /// Which language the document is in: `language`, else the entry's extension.
-fn language(request: &Json, root: &Path) -> Language {
-    request
-        .get("language")
-        .and_then(Json::as_str)
+fn language(fields: &Fields, root: &Path) -> Language {
+    fields
+        .language
+        .as_deref()
         .and_then(Language::from_id)
         .unwrap_or_else(|| Language::from_path(&root.to_string_lossy()))
 }
 
 /// The transpiler options a request asks for.
-fn options(request: &Json) -> Options {
+fn options(fields: &Fields) -> Options {
     let mut options = Options::default();
-    if let Some(ascii) = request.get("ascii").and_then(Json::as_bool) {
+    if let Some(ascii) = fields.ascii {
         options.ascii = ascii;
     }
-    if let Some(optimize) = request.get("optimize").and_then(Json::as_bool) {
+    if let Some(optimize) = fields.optimize {
         options.optimize = optimize;
     }
-    if let Some(mode) = request.get("mode").and_then(Json::as_str) {
+    if let Some(mode) = &fields.mode {
         options.mode = fx_transpiler::Mode::parse(mode);
     }
     options
 }
 
 /// The calculator mode a request forces, if any.
-fn forced_mode(request: &Json) -> Option<Mode> {
-    request
-        .get("mode")
-        .and_then(Json::as_str)
-        .and_then(Mode::parse)
+fn forced_mode(fields: &Fields) -> Option<Mode> {
+    fields.mode.as_deref().and_then(Mode::parse)
 }
 
-/// The `?` inputs a request supplies.
-///
-/// The calculator's `?` reads one real number, so only numbers and strings that
-/// parse as numbers are accepted; anything else is skipped rather than turned
-/// into a surprising `NaN`.
-fn inputs(request: &Json) -> Vec<f64> {
-    let Some(items) = request.get("inputs").and_then(Json::as_array) else {
-        return Vec::new();
-    };
-    items
-        .iter()
-        .filter_map(|item| match item {
-            Json::Number(number) => Some(*number),
-            Json::String(text) => text.trim().parse().ok(),
-            _ => None,
-        })
-        .collect()
-}
-
-fn position(request: &Json) -> Option<Position> {
-    let at = request.get("position")?;
-    Some(Position {
-        line: at.get("line")?.as_f64()? as u32,
-        character: at.get("character")?.as_f64()? as u32,
-    })
+/// The `?` inputs a request supplies. Numbers only; see the module docs.
+fn inputs(fields: &Fields) -> Vec<f64> {
+    fields.inputs.clone().unwrap_or_default()
 }
 
 // ---------------------------------------------------------------------------
-// Response helpers
+// Response envelope
 
-fn success(entries: impl IntoIterator<Item = (&'static str, Json)>) -> Json {
-    Json::object(std::iter::once(("ok", Json::Bool(true))).chain(entries))
+/// The `{"ok":true, …}` half of the envelope, with the operation's own fields
+/// flattened in beside `ok`.
+#[derive(Serialize)]
+struct Success<T> {
+    ok: bool,
+    #[serde(flatten)]
+    data: T,
+}
+
+/// The `{"ok":false,"error":{…}}` half.
+#[derive(Serialize)]
+struct FailureEnvelope {
+    ok: bool,
+    error: FailureBody,
+}
+
+/// Why a request failed. `file`/`range` are omitted when there is no position.
+#[derive(Serialize)]
+struct FailureBody {
+    message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    file: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    range: Option<lsp_types::Range>,
+}
+
+fn success<T: Serialize>(data: T) -> String {
+    encode(Success { ok: true, data })
 }
 
 /// A failure with no position — a bad request, or an operation that could not
 /// start.
-fn failure(message: impl Into<String>) -> Json {
-    Json::object([
-        ("ok", Json::Bool(false)),
-        (
-            "error",
-            Json::object([("message", Json::string(message.into()))]),
-        ),
-    ])
+fn failure(message: impl Into<String>) -> String {
+    encode(FailureEnvelope {
+        ok: false,
+        error: FailureBody {
+            message: message.into(),
+            file: None,
+            range: None,
+        },
+    })
 }
 
 /// A failure at a position, as an editor would report it.
-fn failure_at(message: impl Into<String>, file: Option<&str>, range: Json) -> Json {
-    Json::object([
-        ("ok", Json::Bool(false)),
-        (
-            "error",
-            Json::object([
-                ("message", Json::string(message.into())),
-                ("file", file.map_or(Json::Null, Json::string)),
-                ("range", range),
-            ]),
-        ),
-    ])
+fn failure_at(message: impl Into<String>, file: Option<&str>, range: lsp_types::Range) -> String {
+    encode(FailureEnvelope {
+        ok: false,
+        error: FailureBody {
+            message: message.into(),
+            file: file.map(str::to_string),
+            range: Some(range),
+        },
+    })
 }
 
-fn position_json(at: Position) -> Json {
-    Json::object([
-        ("line", Json::Number(at.line as f64)),
-        ("character", Json::Number(at.character as f64)),
-    ])
-}
-
-fn range_json(range: lsp_types::Range) -> Json {
-    Json::object([
-        ("start", position_json(range.start)),
-        ("end", position_json(range.end)),
-    ])
-}
-
-fn severity_json(severity: Option<lsp_types::DiagnosticSeverity>) -> Json {
-    // `lsp-types` makes these newtypes over the wire number but renders them in
-    // `Debug` as their PascalCase names, which is both what a page wants to read
-    // and more portable than the LSP integers — Monaco's own marker severities
-    // are numbered differently (Hint=1, Error=8), so a string cannot be
-    // misread the way a bare number can.
-    Json::string(
-        severity
-            .map(|severity| format!("{severity:?}").to_ascii_lowercase())
-            .unwrap_or_else(|| "error".to_string()),
-    )
-}
-
-fn diagnostic_json(diagnostic: &Diagnostic) -> Json {
-    Json::object([
-        ("message", Json::string(diagnostic.message.as_str())),
-        ("severity", severity_json(diagnostic.severity)),
-        ("range", range_json(diagnostic.range)),
-        (
-            "code",
-            match &diagnostic.code {
-                Some(lsp_types::NumberOrString::String(code)) => Json::string(code.as_str()),
-                Some(lsp_types::NumberOrString::Number(code)) => Json::Number(*code as f64),
-                None => Json::Null,
-            },
-        ),
-    ])
+/// Serialize a response.
+///
+/// These shapes cannot fail — `serde_json` writes a non-finite `f64` as `null`
+/// rather than rejecting it — but the ABI must never see a trap, so a
+/// hypothetical failure is reported through the same envelope.
+fn encode<T: Serialize>(value: T) -> String {
+    match serde_json::to_string(&value) {
+        Ok(text) => text,
+        Err(error) => {
+            let fallback = FailureEnvelope {
+                ok: false,
+                error: FailureBody {
+                    message: format!("could not encode response: {error}"),
+                    file: None,
+                    range: None,
+                },
+            };
+            // `to_string` on this shape is infallible; the last resort is still
+            // JSON so the host can parse it.
+            serde_json::to_string(&fallback).unwrap_or_else(|_| r#"{"ok":false}"#.to_string())
+        }
+    }
 }
 
 /// A failed transpile, positioned for an editor.
-fn transpile_failure(source: &str, error: &fx_transpiler::error::TranspileError) -> Json {
+fn transpile_failure(source: &str, error: &fx_transpiler::error::TranspileError) -> String {
     let diagnostic = logic::transpile_diagnostic(source, error);
     failure_at(
         error.message.clone(),
         error.file.as_deref(),
-        range_json(diagnostic.range),
+        diagnostic.range,
     )
 }
 
 /// A failed run, positioned for an editor.
-fn calc_failure(source: &str, error: &casio_fx50fh2::CalcError) -> Json {
+fn calc_failure(source: &str, error: &casio_fx50fh2::CalcError) -> String {
     let diagnostic = logic::diagnostic(source, error);
-    failure_at(error.to_string(), None, range_json(diagnostic.range))
+    failure_at(error.to_string(), None, diagnostic.range)
+}
+
+// ---------------------------------------------------------------------------
+// Response shapes
+//
+// The four editor operations return real `lsp_types` values directly. The rest
+// carry data from crates that deliberately do not derive `Serialize`, so these
+// structs are a thin mapping from those types — not a second model of them.
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct VersionInfo {
+    version: &'static str,
+    modes: Vec<ModeInfo>,
+    limits: Limits,
+}
+
+#[derive(Serialize)]
+struct ModeInfo {
+    name: &'static str,
+    description: &'static str,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Limits {
+    program_keys: usize,
+    memories: usize,
+    constants: usize,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TranspileInfo {
+    prgm: String,
+    size: SizeInfo,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    regs: Option<MemoryPlan>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SizeInfo {
+    keys: usize,
+    statements: usize,
+    largest: usize,
+    capacity: usize,
+    fits: bool,
+    remaining: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    unoptimized_keys: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    saved_keys: Option<usize>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MemoryPlan {
+    memories: Vec<MemorySlot>,
+    used: usize,
+    free: Vec<String>,
+    bindings: Vec<BindingInfo>,
+    freed: Vec<String>,
+    consts: Vec<String>,
+    data: Vec<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MemorySlot {
+    memory: String,
+    holders: Vec<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BindingInfo {
+    name: String,
+    memory: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RunInfo {
+    prgm: String,
+    transpiled: bool,
+    outputs: Vec<String>,
+    state: StateInfo,
+    size: SizeInfo,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct StateInfo {
+    ans: ValueInfo,
+    memories: BTreeMap<String, ValueInfo>,
+    mode: String,
+    angle: String,
+    display: String,
+    base: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ValueInfo {
+    display: String,
+    re: f64,
+    im: f64,
+    complex: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TestsInfo {
+    name: String,
+    passed: usize,
+    failed: usize,
+    success: bool,
+    cases: Vec<CaseInfo>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CaseInfo {
+    name: String,
+    passed: bool,
+    expected: String,
+    actual: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DiagnosticsInfo {
+    language: &'static str,
+    diagnostics: Vec<Diagnostic>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CompletionsInfo {
+    language: &'static str,
+    items: Vec<CompletionItem>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct HoverInfo {
+    hover: Option<Hover>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SymbolsInfo {
+    symbols: Vec<DocumentSymbol>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ConstantsInfo {
+    constants: Vec<ConstantInfo>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ConstantInfo {
+    code: u8,
+    name: &'static str,
+    symbol: &'static str,
+    value: f64,
+    unit: &'static str,
+    description: &'static str,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct EvalInfo {
+    outputs: Vec<String>,
+    state: StateInfo,
 }
 
 // ---------------------------------------------------------------------------
@@ -333,37 +568,22 @@ fn calc_failure(source: &str, error: &casio_fx50fh2::CalcError) -> Json {
 /// A page needs the limits to render "412 of 680 bytes" without hard-coding
 /// numbers that belong to the emulator, and the version to tell a stale cached
 /// wasm module from a fresh one.
-fn version() -> Json {
-    success([
-        ("version", Json::string(env!("CARGO_PKG_VERSION"))),
-        (
-            "modes",
-            Json::array(
-                [Mode::Comp, Mode::Cmplx, Mode::Base, Mode::Sd, Mode::Reg]
-                    .into_iter()
-                    .map(|mode| {
-                        Json::object([
-                            ("name", Json::string(mode.name())),
-                            ("description", Json::string(describe_mode(mode))),
-                        ])
-                    }),
-            ),
-        ),
-        (
-            "limits",
-            Json::object([
-                (
-                    "programKeys",
-                    Json::Number(fx_transpiler::Size::CAPACITY as f64),
-                ),
-                ("memories", Json::Number(7.0)),
-                (
-                    "constants",
-                    Json::Number(casio_fx50fh2::CONSTANTS.len() as f64),
-                ),
-            ]),
-        ),
-    ])
+fn version() -> String {
+    success(VersionInfo {
+        version: env!("CARGO_PKG_VERSION"),
+        modes: [Mode::Comp, Mode::Cmplx, Mode::Base, Mode::Sd, Mode::Reg]
+            .into_iter()
+            .map(|mode| ModeInfo {
+                name: mode.name(),
+                description: describe_mode(mode),
+            })
+            .collect(),
+        limits: Limits {
+            program_keys: fx_transpiler::Size::CAPACITY,
+            memories: 7,
+            constants: casio_fx50fh2::CONSTANTS.len(),
+        },
+    })
 }
 
 fn describe_mode(mode: Mode) -> &'static str {
@@ -381,13 +601,13 @@ fn describe_mode(mode: Mode) -> &'static str {
 /// Size is reported alongside the *unoptimised* size, as `fx50 size` does: a
 /// program's size only means something next to what it would have been on this
 /// machine, where 680 bytes are shared by all four program areas.
-fn transpile(request: &Json) -> Json {
-    let (source, root, files) = match entry(request) {
+fn transpile(fields: &Fields) -> String {
+    let (source, root, files) = match entry(fields) {
         Ok(parts) => parts,
         Err(message) => return failure(message),
     };
-    let base = base_dir(request, &root);
-    let options = options(request);
+    let base = base_dir(fields, &root);
+    let options = options(fields);
 
     let prgm =
         match fx_transpiler::transpile_with_loader(&source, options, Some(&root), &base, &files) {
@@ -395,46 +615,33 @@ fn transpile(request: &Json) -> Json {
             Err(error) => return transpile_failure(&source, &error),
         };
 
-    let mut fields = vec![
-        ("prgm", Json::string(prgm.as_str())),
-        (
-            "size",
-            size_json(&prgm, &source, options, &root, &base, &files),
-        ),
-    ];
-    if let Some(plan) = regs_json(&source, &base, &files) {
-        fields.push(("regs", plan));
-    }
-    success(fields)
+    success(TranspileInfo {
+        size: size_info(&prgm, &source, options, &root, &base, &files),
+        regs: memory_plan(&source, &base, &files),
+        prgm,
+    })
 }
 
 /// The key cost of `prgm`, with the saving the optimiser made.
-fn size_json(
+fn size_info(
     prgm: &str,
     source: &str,
     options: Options,
     root: &Path,
     base: &Path,
     files: &MemoryLoader,
-) -> Json {
+) -> SizeInfo {
     let size = fx_transpiler::size::measure(prgm);
-    let mut fields = vec![
-        ("keys", Json::Number(size.keys as f64)),
-        ("statements", Json::Number(size.statements as f64)),
-        ("largest", Json::Number(size.largest as f64)),
-        (
-            "capacity",
-            Json::Number(fx_transpiler::Size::CAPACITY as f64),
-        ),
-        ("fits", Json::Bool(size.fits())),
-        (
-            "remaining",
-            match size.remaining() {
-                Some(left) => Json::Number(left as f64),
-                None => Json::Null,
-            },
-        ),
-    ];
+    let mut info = SizeInfo {
+        keys: size.keys,
+        statements: size.statements,
+        largest: size.largest,
+        capacity: fx_transpiler::Size::CAPACITY,
+        fits: size.fits(),
+        remaining: size.remaining(),
+        unoptimized_keys: None,
+        saved_keys: None,
+    };
 
     // Only interesting when optimisation ran, and only when it is a fair
     // comparison — i.e. when the same source can be rebuilt without it.
@@ -447,14 +654,11 @@ fn size_json(
             fx_transpiler::transpile_with_loader(source, raw, Some(root), base, files)
         {
             let raw_size = fx_transpiler::size::measure(&unoptimized);
-            fields.push(("unoptimizedKeys", Json::Number(raw_size.keys as f64)));
-            fields.push((
-                "savedKeys",
-                Json::Number(raw_size.keys.saturating_sub(size.keys) as f64),
-            ));
+            info.unoptimized_keys = Some(raw_size.keys);
+            info.saved_keys = Some(raw_size.keys.saturating_sub(size.keys));
         }
     }
-    Json::object(fields)
+    info
 }
 
 /// The memory plan, or `None` when the program cannot be analysed.
@@ -462,79 +666,47 @@ fn size_json(
 /// `transpile` has already succeeded by the time this runs, and analysis mirrors
 /// the transpiler's front end exactly, so a failure here would be a bug —
 /// reporting `null` keeps a page working rather than turning one into an error.
-fn regs_json(source: &str, base: &Path, files: &MemoryLoader) -> Option<Json> {
+fn memory_plan(source: &str, base: &Path, files: &MemoryLoader) -> Option<MemoryPlan> {
     let analysis = fx_transpiler::analyze_with_loader(source, base, files).ok()?;
-    let memories = analysis
-        .allocation
-        .registers
-        .iter()
-        .map(|(memory, occupants)| {
-            Json::object([
-                ("memory", Json::string(memory.to_string())),
-                (
-                    "holders",
-                    Json::array(occupants.iter().map(|b| Json::string(b.label()))),
-                ),
-            ])
-        })
-        .collect::<Vec<_>>();
-    Some(Json::object([
-        ("memories", Json::array(memories)),
-        ("used", Json::Number(analysis.allocation.used() as f64)),
-        (
-            "free",
-            Json::array(
-                analysis
-                    .allocation
-                    .free()
-                    .into_iter()
-                    .map(|memory| Json::string(memory.to_string())),
-            ),
-        ),
-        (
-            "bindings",
-            Json::array(analysis.allocation.bindings.iter().map(|binding| {
-                Json::object([
-                    ("name", Json::string(binding.label())),
-                    ("memory", Json::string(binding.memory.to_string())),
-                ])
-            })),
-        ),
-        (
-            "freed",
-            Json::array(
-                analysis
-                    .allocation
-                    .freed
-                    .iter()
-                    .map(|name| Json::string(name.as_str())),
-            ),
-        ),
-        (
-            "consts",
-            Json::array(
-                analysis
-                    .consts
-                    .iter()
-                    .map(|name| Json::string(name.as_str())),
-            ),
-        ),
-        (
-            "data",
-            Json::array(analysis.data.iter().map(|name| Json::string(name.as_str()))),
-        ),
-    ]))
+    let allocation = &analysis.allocation;
+    Some(MemoryPlan {
+        memories: allocation
+            .registers
+            .iter()
+            .map(|(memory, occupants)| MemorySlot {
+                memory: memory.to_string(),
+                holders: occupants.iter().map(|b| b.label()).collect(),
+            })
+            .collect(),
+        used: allocation.used(),
+        free: allocation
+            .free()
+            .into_iter()
+            .map(|m| m.to_string())
+            .collect(),
+        bindings: allocation
+            .bindings
+            .iter()
+            .map(|binding| BindingInfo {
+                name: binding.label(),
+                memory: binding.memory.to_string(),
+            })
+            .collect(),
+        freed: allocation.freed.clone(),
+        consts: analysis.consts.clone(),
+        data: analysis.data.clone(),
+    })
 }
 
 /// Transpile if needed, run, and report what the calculator would show.
-fn run(request: &Json) -> Json {
-    let (source, root, files) = match entry(request) {
+fn run(fields: &Fields) -> String {
+    let (source, root, files) = match entry(fields) {
         Ok(parts) => parts,
         Err(message) => return failure(message),
     };
-    let base = base_dir(request, &root);
-    let options = options(request);
-    let language = language(request, &root);
+    let base = base_dir(fields, &root);
+    let options = options(fields);
+    let language = language(fields, &root);
 
     // A `.fxc` program is lowered first; a PRGM program is already what the
     // machine runs. `language` decides, exactly as `fx50 run` decides by
@@ -560,34 +732,22 @@ fn run(request: &Json) -> Json {
         ));
     }
 
-    let program = match compile_with(&prgm, forced_mode(request)) {
+    let program = match compile_with(&prgm, forced_mode(fields)) {
         Ok(program) => program,
         Err(error) => return calc_failure(&prgm, &error),
     };
-    let mut interpreter = Interpreter::new(program, MockHost::with_inputs(inputs(request)));
+    let mut interpreter = Interpreter::new(program, MockHost::with_inputs(inputs(fields)));
     if let Err(error) = interpreter.run() {
         return calc_failure(&prgm, &error);
     }
 
-    success([
-        ("prgm", Json::string(prgm.as_str())),
-        ("transpiled", Json::Bool(transpiled)),
-        (
-            "outputs",
-            Json::array(
-                interpreter
-                    .host()
-                    .output
-                    .iter()
-                    .map(|line| Json::string(line.as_str())),
-            ),
-        ),
-        ("state", state_json(interpreter.environment())),
-        (
-            "size",
-            size_json(&prgm, &source, options, &root, &base, &files),
-        ),
-    ])
+    success(RunInfo {
+        size: size_info(&prgm, &source, options, &root, &base, &files),
+        prgm,
+        transpiled,
+        outputs: interpreter.host().output.clone(),
+        state: state_info(interpreter.environment()),
+    })
 }
 
 /// The calculator's display and memories after a run.
@@ -595,7 +755,7 @@ fn run(request: &Json) -> Json {
 /// This is the "screen" a page draws beside the program: the memories the
 /// program used, the value in `Ans`, and the display settings that decide how
 /// numbers are rendered.
-fn state_json(environment: &Environment) -> Json {
+fn state_info(environment: &Environment) -> StateInfo {
     let memories = [
         VarName::A,
         VarName::B,
@@ -605,29 +765,20 @@ fn state_json(environment: &Environment) -> Json {
         VarName::Y,
         VarName::M,
     ];
-    Json::object([
-        ("ans", value_json(environment.ans_value(), environment)),
-        (
-            "memories",
-            Json::object(memories.into_iter().map(|var| {
+    StateInfo {
+        ans: value_info(environment.ans_value(), environment),
+        memories: memories
+            .into_iter()
+            .map(|var| {
                 let value = environment.get_value(var);
-                (format!("{var:?}"), value_json(value, environment))
-            })),
-        ),
-        ("mode", Json::string(environment.mode.name())),
-        ("angle", Json::string(format!("{:?}", environment.angle))),
-        (
-            "display",
-            Json::string(format!("{:?}", environment.display)),
-        ),
-        (
-            "base",
-            match environment.base {
-                Some(base) => Json::string(format!("{base:?}")),
-                None => Json::Null,
-            },
-        ),
-    ])
+                (format!("{var:?}"), value_info(value, environment))
+            })
+            .collect(),
+        mode: environment.mode.name().to_string(),
+        angle: format!("{:?}", environment.angle),
+        display: format!("{:?}", environment.display),
+        base: environment.base.map(|base| format!("{base:?}")),
+    }
 }
 
 /// One value, both as the calculator would display it and as numbers.
@@ -635,23 +786,14 @@ fn state_json(environment: &Environment) -> Json {
 /// The display string is what the hardware shows — including its 10-digit
 /// rounding and its sexagesimal and `Re⇔Im` forms — so a page can show the real
 /// thing rather than a reinterpretation of it. The numeric parts are there for
-/// plotting and for tests that want to compare numbers.
-fn value_json(value: Value, environment: &Environment) -> Json {
-    Json::object([
-        ("display", Json::string(environment.format_value(value))),
-        ("re", number_json(value.re())),
-        ("im", number_json(value.im())),
-        ("complex", Json::Bool(value.is_complex())),
-    ])
-}
-
-/// A number JSON can carry; a non-finite one becomes `null` rather than `inf`,
-/// which is not JSON.
-fn number_json(value: f64) -> Json {
-    if value.is_finite() {
-        Json::Number(value)
-    } else {
-        Json::Null
+/// plotting and for tests that want to compare numbers; a non-finite one is
+/// `null`, because JSON cannot carry `inf`.
+fn value_info(value: Value, environment: &Environment) -> ValueInfo {
+    ValueInfo {
+        display: environment.format_value(value),
+        re: value.re(),
+        im: value.im(),
+        complex: value.is_complex(),
     }
 }
 
@@ -659,12 +801,12 @@ fn number_json(value: f64) -> Json {
 ///
 /// The suite is parsed through the same loader as everything else, so a program
 /// that `#include`s a library or reads a `#data` file can be tested in a browser.
-fn tests(request: &Json) -> Json {
-    let (source, root, files) = match entry(request) {
+fn tests(fields: &Fields) -> String {
+    let (source, root, files) = match entry(fields) {
         Ok(parts) => parts,
         Err(message) => return failure(message),
     };
-    let base = base_dir(request, &root);
+    let base = base_dir(fields, &root);
     let name = root.display().to_string();
 
     let suite = match fx_transpiler::testing::parse_embedded_suite_with_loader(
@@ -680,186 +822,106 @@ fn tests(request: &Json) -> Json {
     };
 
     let report = fx_transpiler::testing::run_suite_with_loader(&suite, &files);
-    let cases = report.cases.iter().map(|case| {
-        Json::object([
-            ("name", Json::string(case.name.as_str())),
-            ("passed", Json::Bool(case.passed)),
-            ("expected", Json::string(case.expected.as_str())),
-            ("actual", Json::string(case.actual.as_str())),
-        ])
-    });
-    success([
-        ("name", Json::string(report.name.as_str())),
-        ("passed", Json::Number(report.passed() as f64)),
-        ("failed", Json::Number(report.failed() as f64)),
-        ("success", Json::Bool(report.is_success())),
-        ("cases", Json::array(cases)),
-    ])
+    let passed = report.passed();
+    let failed = report.failed();
+    success(TestsInfo {
+        success: report.is_success(),
+        cases: report
+            .cases
+            .iter()
+            .map(|case| CaseInfo {
+                name: case.name.clone(),
+                passed: case.passed,
+                expected: case.expected.clone(),
+                actual: case.actual.clone(),
+            })
+            .collect(),
+        name: report.name,
+        passed,
+        failed,
+    })
 }
 
 /// Errors for the editor, through the same code the language server uses.
-fn diagnostics(request: &Json) -> Json {
-    let (source, root, files) = match entry(request) {
+fn diagnostics(fields: &Fields) -> String {
+    let (source, root, files) = match entry(fields) {
         Ok(parts) => parts,
         Err(message) => return failure(message),
     };
-    let base = base_dir(request, &root);
-    let language = language(request, &root);
-    let diagnostics = logic::diagnostics_with_loader(&source, language, &base, &files);
-    success([
-        ("language", Json::string(language_id(language))),
-        (
-            "diagnostics",
-            Json::array(diagnostics.iter().map(diagnostic_json)),
-        ),
-    ])
+    let base = base_dir(fields, &root);
+    let language = language(fields, &root);
+    success(DiagnosticsInfo {
+        language: language.id(),
+        diagnostics: logic::diagnostics_with_loader(&source, language, &base, &files),
+    })
 }
 
 /// The completion list for a language.
 ///
 /// Completions do not depend on the document, so a page can fetch them once and
 /// cache them for the session.
-fn completions(request: &Json) -> Json {
-    let root = PathBuf::from(
-        request
-            .get("entry")
-            .and_then(Json::as_str)
-            .unwrap_or("main.fxc"),
-    );
-    let language = language(request, &root);
-    let items = logic::completion_items(language);
-    success([
-        ("language", Json::string(language_id(language))),
-        (
-            "items",
-            Json::array(items.iter().map(|item| {
-                Json::object([
-                    ("label", Json::string(item.label.as_str())),
-                    (
-                        "insertText",
-                        match &item.insert_text {
-                            Some(text) => Json::string(text.as_str()),
-                            None => Json::string(item.label.as_str()),
-                        },
-                    ),
-                    (
-                        "detail",
-                        match &item.detail {
-                            Some(detail) => Json::string(detail.as_str()),
-                            None => Json::Null,
-                        },
-                    ),
-                    ("kind", Json::string(format!("{:?}", item.kind))),
-                ])
-            })),
-        ),
-    ])
+fn completions(fields: &Fields) -> String {
+    let root = PathBuf::from(fields.entry.as_deref().unwrap_or("main.fxc"));
+    let language = language(fields, &root);
+    success(CompletionsInfo {
+        language: language.id(),
+        items: logic::completion_items(language),
+    })
 }
 
 /// Documentation at a position, through the language server's own hover.
-fn hover(request: &Json) -> Json {
-    let (source, root, _files) = match entry(request) {
+fn hover(fields: &Fields) -> String {
+    let (source, root, _files) = match entry(fields) {
         Ok(parts) => parts,
         Err(message) => return failure(message),
     };
-    let Some(at) = position(request) else {
+    let Some(at) = fields.position else {
         return failure("`hover` needs a `position` object with `line` and `character`");
     };
-    let language = language(request, &root);
-    let found = logic::hover(&source, at, language);
-    success([(
-        "hover",
-        match found {
-            Some(hover) => {
-                let text = match hover.contents {
-                    lsp_types::HoverContents::Markup(markup) => markup.value,
-                    lsp_types::HoverContents::Scalar(lsp_types::MarkedString::String(text)) => text,
-                    lsp_types::HoverContents::Scalar(lsp_types::MarkedString::LanguageString(
-                        marked,
-                    )) => marked.value,
-                    lsp_types::HoverContents::Array(items) => items
-                        .into_iter()
-                        .map(|item| match item {
-                            lsp_types::MarkedString::String(text) => text,
-                            lsp_types::MarkedString::LanguageString(marked) => marked.value,
-                        })
-                        .collect::<Vec<_>>()
-                        .join("\n\n"),
-                };
-                Json::object([
-                    ("contents", Json::string(text)),
-                    (
-                        "range",
-                        match hover.range {
-                            Some(range) => range_json(range),
-                            None => Json::Null,
-                        },
-                    ),
-                ])
-            }
-            None => Json::Null,
-        },
-    )])
+    let language = language(fields, &root);
+    success(HoverInfo {
+        hover: logic::hover(&source, at, language),
+    })
 }
 
 /// The document outline.
-fn symbols(request: &Json) -> Json {
-    let (source, root, _files) = match entry(request) {
+fn symbols(fields: &Fields) -> String {
+    let (source, root, _files) = match entry(fields) {
         Ok(parts) => parts,
         Err(message) => return failure(message),
     };
-    let language = language(request, &root);
-    let symbols = logic::document_symbols(&source, language);
-    success([("symbols", Json::array(symbols.iter().map(symbol_json)))])
-}
-
-fn symbol_json(symbol: &DocumentSymbol) -> Json {
-    let children = match &symbol.children {
-        Some(children) => Json::array(children.iter().map(symbol_json)),
-        None => Json::Null,
-    };
-    Json::object([
-        ("name", Json::string(symbol.name.as_str())),
-        (
-            "detail",
-            match &symbol.detail {
-                Some(detail) => Json::string(detail.as_str()),
-                None => Json::Null,
-            },
-        ),
-        ("kind", Json::string(format!("{:?}", symbol.kind))),
-        ("range", range_json(symbol.range)),
-        ("selectionRange", range_json(symbol.selection_range)),
-        ("children", children),
-    ])
+    let language = language(fields, &root);
+    success(SymbolsInfo {
+        symbols: logic::document_symbols(&source, language),
+    })
 }
 
 /// The 40 scientific constants, for a reference panel.
-fn constants() -> Json {
-    success([(
-        "constants",
-        Json::array(casio_fx50fh2::CONSTANTS.iter().map(|constant| {
-            Json::object([
-                ("code", Json::Number(constant.code as f64)),
-                ("name", Json::string(constant.name)),
-                ("symbol", Json::string(constant.symbol)),
-                ("value", number_json(constant.value)),
-                ("unit", Json::string(constant.unit)),
-                ("description", Json::string(constant.description)),
-            ])
-        })),
-    )])
+fn constants() -> String {
+    success(ConstantsInfo {
+        constants: casio_fx50fh2::CONSTANTS
+            .iter()
+            .map(|constant| ConstantInfo {
+                code: constant.code,
+                name: constant.name,
+                symbol: constant.symbol,
+                value: constant.value,
+                unit: constant.unit,
+                description: constant.description,
+            })
+            .collect(),
+    })
 }
 
 /// One expression, evaluated and displayed.
 ///
 /// This is `fx50 eval`: the operator-precedence calculator, without a program
 /// around it. It is what makes a page usable as a scratchpad.
-fn eval(request: &Json) -> Json {
-    let Some(expression) = request.get("source").and_then(Json::as_str) else {
+fn eval(fields: &Fields) -> String {
+    let Some(expression) = fields.source.as_deref() else {
         return failure("`eval` needs `source`, holding the expression");
     };
-    let program = match compile_with(expression, forced_mode(request)) {
+    let program = match compile_with(expression, forced_mode(fields)) {
         Ok(program) => program,
         Err(error) => return calc_failure(expression, &error),
     };
@@ -867,25 +929,8 @@ fn eval(request: &Json) -> Json {
     if let Err(error) = interpreter.run() {
         return calc_failure(expression, &error);
     }
-    success([
-        (
-            "outputs",
-            Json::array(
-                interpreter
-                    .host()
-                    .output
-                    .iter()
-                    .map(|line| Json::string(line.as_str())),
-            ),
-        ),
-        ("state", state_json(interpreter.environment())),
-    ])
-}
-
-/// The language id a client asked for, spelled canonically.
-fn language_id(language: Language) -> &'static str {
-    match language {
-        Language::Prgm => "fx",
-        Language::Fxc => "fxc",
-    }
+    success(EvalInfo {
+        outputs: interpreter.host().output.clone(),
+        state: state_info(interpreter.environment()),
+    })
 }

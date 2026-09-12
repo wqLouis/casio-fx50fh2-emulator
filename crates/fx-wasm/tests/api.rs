@@ -8,14 +8,40 @@
 //! `abi.rs` has its own tests for the pointer marshalling; this file is about
 //! behaviour.
 
-use fx_transpiler::json::{self, Json};
 use fx_wasm::api;
+use serde_json::Value;
+
+/// The tests speak in `serde_json` values now that the API does. `Value` has the
+/// same `as_str`/`as_bool`/`as_f64`/`as_array` accessors the old reader had, so
+/// the assertions read almost the same.
+type Json = Value;
+
+/// Build a JSON object from string keys, mirroring the old `Json::object`.
+fn object<const N: usize>(entries: [(&str, Json); N]) -> Json {
+    Value::Object(
+        entries
+            .into_iter()
+            .map(|(k, v)| (k.to_string(), v))
+            .collect(),
+    )
+}
+
+/// Build a JSON string.
+fn string(text: impl Into<String>) -> Json {
+    Value::String(text.into())
+}
+
+/// Build a JSON array.
+fn array<const N: usize>(items: [Json; N]) -> Json {
+    Value::Array(items.into_iter().collect())
+}
 
 /// Send one request and return the parsed response.
 #[track_caller]
 fn call(request: Json) -> Json {
-    let response = api::call(&json::to_string(&request));
-    json::parse(&response).unwrap_or_else(|e| panic!("response was not JSON: {e}\n{response}"))
+    let response = api::call(&serde_json::to_string(&request).expect("request serializes"));
+    serde_json::from_str(&response)
+        .unwrap_or_else(|e| panic!("response was not JSON: {e}\n{response}"))
 }
 
 /// Send one request, expecting success, and return the response.
@@ -26,7 +52,7 @@ fn ok(request: Json) -> Json {
         response.get("ok").and_then(Json::as_bool),
         Some(true),
         "expected success, got {}",
-        json::to_string_pretty(&response)
+        serde_json::to_string_pretty(&response).unwrap_or_default()
     );
     response
 }
@@ -39,7 +65,7 @@ fn err(request: Json) -> String {
         response.get("ok").and_then(Json::as_bool),
         Some(false),
         "expected failure, got {}",
-        json::to_string_pretty(&response)
+        serde_json::to_string_pretty(&response).unwrap_or_default()
     );
     response
         .get("error")
@@ -51,10 +77,10 @@ fn err(request: Json) -> String {
 
 /// A request with an op and a source, which is the common shape.
 fn request(op: &str, source: &str) -> Json {
-    Json::object([
-        ("op", Json::string(op)),
-        ("source", Json::string(source)),
-        ("entry", Json::string("main.fxc")),
+    object([
+        ("op", string(op)),
+        ("source", string(source)),
+        ("entry", string("main.fxc")),
     ])
 }
 
@@ -89,14 +115,14 @@ fn strings(response: &Json, key: &str) -> Vec<String> {
 
 #[test]
 fn an_unknown_op_is_reported_with_the_list_of_known_ones() {
-    let message = err(Json::object([("op", Json::string("nope"))]));
+    let message = err(object([("op", string("nope"))]));
     assert!(message.contains("unknown op `nope`"), "{message}");
     assert!(message.contains("transpile"), "{message}");
 }
 
 #[test]
 fn a_request_without_an_op_is_reported() {
-    let message = err(Json::object([("source", Json::string("1"))]));
+    let message = err(object([("source", string("1"))]));
     assert!(message.contains("no `op`"), "{message}");
 }
 
@@ -111,7 +137,7 @@ fn a_malformed_request_names_the_position_of_the_problem() {
 
 #[test]
 fn version_reports_the_machines_limits() {
-    let response = ok(Json::object([("op", Json::string("version"))]));
+    let response = ok(object([("op", string("version"))]));
     let limits = response.get("limits").expect("limits");
     assert_eq!(number(limits, "programKeys"), 680.0);
     assert_eq!(number(limits, "memories"), 7.0);
@@ -186,8 +212,8 @@ fn transpile_reports_the_memory_plan() {
             memory
                 .get("holders")
                 .and_then(Json::as_array)
-                .unwrap_or(&[])
-                .iter()
+                .into_iter()
+                .flatten()
                 .map(|name| name.as_str().unwrap_or_default().to_string())
                 .collect::<Vec<_>>()
         })
@@ -198,18 +224,16 @@ fn transpile_reports_the_memory_plan() {
 #[test]
 fn transpile_reads_included_libraries_from_the_request() {
     // The whole point: `#include` works with no filesystem.
-    let response = ok(Json::object([
-        ("op", Json::string("transpile")),
-        ("entry", Json::string("main.fxc")),
+    let response = ok(object([
+        ("op", string("transpile")),
+        ("entry", string("main.fxc")),
         (
             "source",
-            Json::string(
-                "#include \"lib/double.fxc\"\nfn main() { let a = input(); print(double(a)); }",
-            ),
+            string("#include \"lib/double.fxc\"\nfn main() { let a = input(); print(double(a)); }"),
         ),
         (
             "files",
-            Json::object([("lib/double.fxc", Json::string("fn double(x) = x * 2;"))]),
+            object([("lib/double.fxc", string("fn double(x) = x * 2;"))]),
         ),
     ]));
     let prgm = text(&response, "prgm");
@@ -226,17 +250,17 @@ fn transpile_reads_included_libraries_from_the_request() {
 fn the_entry_document_can_come_from_the_files_map_instead_of_source() {
     // A page holding a whole project names the file to build rather than
     // passing its text separately.
-    let response = ok(Json::object([
-        ("op", Json::string("transpile")),
-        ("entry", Json::string("main.fxc")),
+    let response = ok(object([
+        ("op", string("transpile")),
+        ("entry", string("main.fxc")),
         (
             "files",
-            Json::object([
+            object([
                 (
                     "main.fxc",
-                    Json::string("#include \"lib/one.fxc\"\nfn main() { print(one()); }"),
+                    string("#include \"lib/one.fxc\"\nfn main() { print(one()); }"),
                 ),
-                ("lib/one.fxc", Json::string("fn one() = 1;")),
+                ("lib/one.fxc", string("fn one() = 1;")),
             ]),
         ),
     ]));
@@ -276,13 +300,13 @@ fn ascii_selects_the_other_output_style() {
         "fn main() { let a = input(); print(a * 2); }",
     ));
     assert!(text(&glyph, "prgm").contains('×'));
-    let ascii = ok(Json::object([
-        ("op", Json::string("transpile")),
+    let ascii = ok(object([
+        ("op", string("transpile")),
         (
             "source",
-            Json::string("fn main() { let a = input(); print(a * 2); }"),
+            string("fn main() { let a = input(); print(a * 2); }"),
         ),
-        ("ascii", Json::Bool(true)),
+        ("ascii", Value::Bool(true)),
     ]));
     assert!(text(&ascii, "prgm").contains('*'));
     assert!(!text(&ascii, "prgm").contains('×'));
@@ -292,23 +316,20 @@ fn ascii_selects_the_other_output_style() {
 fn a_mode_override_is_honoured_and_enforced() {
     // `rep` needs CMPLX; asking for COMP must be refused rather than silently
     // emitting a key the mode does not have.
-    let message = err(Json::object([
-        ("op", Json::string("transpile")),
-        (
-            "source",
-            Json::string("fn main() { let z = 1; print(rep(z)); }"),
-        ),
-        ("mode", Json::string("COMP")),
+    let message = err(object([
+        ("op", string("transpile")),
+        ("source", string("fn main() { let z = 1; print(rep(z)); }")),
+        ("mode", string("COMP")),
     ]));
     assert!(message.contains("CMPLX"), "{message}");
 
-    let response = ok(Json::object([
-        ("op", Json::string("transpile")),
+    let response = ok(object([
+        ("op", string("transpile")),
         (
             "source",
-            Json::string("fn main() { let z = 1 + 2 * i(); print(rep(z)); }"),
+            string("fn main() { let z = 1 + 2 * i(); print(rep(z)); }"),
         ),
-        ("mode", Json::string("CMPLX")),
+        ("mode", string("CMPLX")),
     ]));
     assert!(text(&response, "prgm").contains("Conjg"), "{response:?}");
 }
@@ -322,10 +343,10 @@ fn optimize_false_gives_the_unpropagated_translation() {
     print(b * 2);
 }";
     let optimized = ok(request("transpile", source));
-    let raw = ok(Json::object([
-        ("op", Json::string("transpile")),
-        ("source", Json::string(source)),
-        ("optimize", Json::Bool(false)),
+    let raw = ok(object([
+        ("op", string("transpile")),
+        ("source", string(source)),
+        ("optimize", Value::Bool(false)),
     ]));
     assert_eq!(number(optimized.get("size").unwrap(), "keys"), 10.0);
     assert_eq!(number(raw.get("size").unwrap(), "keys"), 14.0);
@@ -352,29 +373,27 @@ fn run_returns_the_displays_the_calculator_would_show() {
 
 #[test]
 fn run_feeds_the_prompts_from_the_inputs_array() {
-    let response = ok(Json::object([
-        ("op", Json::string("run")),
+    let response = ok(object([
+        ("op", string("run")),
         (
             "source",
-            Json::string("fn main() { let a = input(); let b = input(); print(a * b); }"),
+            string("fn main() { let a = input(); let b = input(); print(a * b); }"),
         ),
-        (
-            "inputs",
-            Json::array([Json::Number(6.0), Json::Number(7.0)]),
-        ),
+        // Numbers only: a numeric string is a type error, not a skipped input.
+        ("inputs", array([Value::from(6.0), Value::from(7.0)])),
     ]));
     assert_eq!(strings(&response, "outputs"), vec!["42"]);
 }
 
 #[test]
 fn run_reports_the_memories_and_ans_as_the_display_would_show_them() {
-    let response = ok(Json::object([
-        ("op", Json::string("run")),
+    let response = ok(object([
+        ("op", string("run")),
         (
             "source",
-            Json::string("fn main() { let a = input(); print(a + 1); }"),
+            string("fn main() { let a = input(); print(a + 1); }"),
         ),
-        ("inputs", Json::array([Json::Number(41.0)])),
+        ("inputs", array([Value::from(41.0)])),
     ]));
     let state = response.get("state").expect("state");
     let memories = state.get("memories").expect("memories");
@@ -390,12 +409,12 @@ fn run_reports_the_memories_and_ans_as_the_display_would_show_them() {
 fn run_accepts_a_prgm_program_directly() {
     // `language: "fx"` means the text is already PRGM, so no transpiling and no
     // `fn main()` requirement.
-    let response = ok(Json::object([
-        ("op", Json::string("run")),
-        ("source", Json::string("?→A:A×2◢")),
-        ("language", Json::string("fx")),
-        ("entry", Json::string("prog.fx")),
-        ("inputs", Json::array([Json::Number(21.0)])),
+    let response = ok(object([
+        ("op", string("run")),
+        ("source", string("?→A:A×2◢")),
+        ("language", string("fx")),
+        ("entry", string("prog.fx")),
+        ("inputs", array([Value::from(21.0)])),
     ]));
     assert_eq!(strings(&response, "outputs"), vec!["42"]);
     assert_eq!(
@@ -406,10 +425,10 @@ fn run_accepts_a_prgm_program_directly() {
 
 #[test]
 fn a_library_without_main_says_so_instead_of_running_nothing() {
-    let response = call(Json::object([
-        ("op", Json::string("run")),
-        ("source", Json::string("fn double(x) = x * 2;")),
-        ("entry", Json::string("lib/double.fxc")),
+    let response = call(object([
+        ("op", string("run")),
+        ("source", string("fn double(x) = x * 2;")),
+        ("entry", string("lib/double.fxc")),
     ]));
     assert_eq!(response.get("ok").and_then(Json::as_bool), Some(false));
     let error = response.get("error").expect("error");
@@ -431,13 +450,13 @@ fn a_runtime_error_is_reported_with_a_position() {
 
 #[test]
 fn a_complex_result_is_reported_both_ways() {
-    let response = ok(Json::object([
-        ("op", Json::string("run")),
+    let response = ok(object([
+        ("op", string("run")),
         (
             "source",
-            Json::string("fn main() { let z = 3 + 4 * i(); print(rep(z)); print(imp(z)); }"),
+            string("fn main() { let z = 3 + 4 * i(); print(rep(z)); print(imp(z)); }"),
         ),
-        ("mode", Json::string("CMPLX")),
+        ("mode", string("CMPLX")),
     ]));
     assert_eq!(strings(&response, "outputs"), vec!["3", "4"]);
     let state = response.get("state").expect("state");
@@ -504,7 +523,9 @@ fn diagnostics_come_back_as_editor_markers() {
         .expect("diagnostics");
     assert_eq!(diagnostics.len(), 1);
     let first = &diagnostics[0];
-    assert_eq!(text(first, "severity"), "error");
+    // The protocol's own integer: `DiagnosticSeverity::ERROR` is 1. The old
+    // shape invented the string `"error"`, which the page had to map back.
+    assert_eq!(number(first, "severity"), 1.0);
     assert!(first.get("range").is_some(), "{first:?}");
 }
 
@@ -517,27 +538,24 @@ fn a_valid_program_has_no_diagnostics() {
 #[test]
 fn diagnostics_resolve_includes_through_the_files_map() {
     // With no loader this would report a missing include that is not missing.
-    let response = ok(Json::object([
-        ("op", Json::string("diagnostics")),
+    let response = ok(object([
+        ("op", string("diagnostics")),
         (
             "source",
-            Json::string("#include \"lib/one.fxc\"\nfn main() { print(one()); }"),
+            string("#include \"lib/one.fxc\"\nfn main() { print(one()); }"),
         ),
-        (
-            "files",
-            Json::object([("lib/one.fxc", Json::string("fn one() = 1;"))]),
-        ),
+        ("files", object([("lib/one.fxc", string("fn one() = 1;"))])),
     ]));
     assert!(strings(&response, "diagnostics").is_empty(), "{response:?}");
 }
 
 #[test]
 fn diagnostics_work_for_prgm_too() {
-    let response = ok(Json::object([
-        ("op", Json::string("diagnostics")),
-        ("source", Json::string("?→A:A×2◢")),
-        ("language", Json::string("fx")),
-        ("entry", Json::string("prog.fx")),
+    let response = ok(object([
+        ("op", string("diagnostics")),
+        ("source", string("?→A:A×2◢")),
+        ("language", string("fx")),
+        ("entry", string("prog.fx")),
     ]));
     assert_eq!(text(&response, "language"), "fx");
     assert!(strings(&response, "diagnostics").is_empty());
@@ -548,9 +566,9 @@ fn diagnostics_work_for_prgm_too() {
 
 #[test]
 fn completions_cover_both_languages() {
-    let fxc = ok(Json::object([
-        ("op", Json::string("completions")),
-        ("language", Json::string("fxc")),
+    let fxc = ok(object([
+        ("op", string("completions")),
+        ("language", string("fxc")),
     ]));
     let labels = strings_of_items(&fxc);
     for expected in ["sqrt(", "rep(", "phys.C0", "stat.sumx", "fn"] {
@@ -560,9 +578,9 @@ fn completions_cover_both_languages() {
         );
     }
 
-    let fx = ok(Json::object([
-        ("op", Json::string("completions")),
-        ("language", Json::string("fx")),
+    let fx = ok(object([
+        ("op", string("completions")),
+        ("language", string("fx")),
     ]));
     let labels = strings_of_items(&fx);
     // PRGM-only keys are offered here and not for `.fxc`.
@@ -583,38 +601,35 @@ fn strings_of_items(response: &Json) -> Vec<String> {
 #[test]
 fn hover_describes_what_is_under_the_cursor() {
     // `wrap` is not used here, so line 0 is the body.
-    let response = ok(Json::object([
-        ("op", Json::string("hover")),
-        ("source", Json::string("fn main() { print(sqrt(4)); }")),
-        ("language", Json::string("fxc")),
+    let response = ok(object([
+        ("op", string("hover")),
+        ("source", string("fn main() { print(sqrt(4)); }")),
+        ("language", string("fxc")),
+        // `line`/`character` are the LSP `Position` integers (`u32`).
         (
             "position",
-            Json::object([
-                ("line", Json::Number(0.0)),
-                ("character", Json::Number(18.0)),
-            ]),
+            object([("line", Value::from(0)), ("character", Value::from(18))]),
         ),
     ]));
     let hover = response.get("hover").expect("hover");
-    assert!(hover.as_object().is_some(), "{hover:?}");
-    assert!(text(hover, "contents").contains("sqrt"), "{hover:?}");
+    // The real LSP `Hover`: `contents` is a `MarkupContent`, not a bare string.
+    let contents = hover.get("contents").expect("contents");
+    assert!(text(contents, "value").contains("sqrt"), "{hover:?}");
+    assert_eq!(text(contents, "kind"), "markdown", "{hover:?}");
 }
 
 #[test]
 fn hover_over_nothing_is_null_rather_than_an_error() {
-    let response = ok(Json::object([
-        ("op", Json::string("hover")),
-        ("source", Json::string("fn main() { }")),
-        ("language", Json::string("fxc")),
+    let response = ok(object([
+        ("op", string("hover")),
+        ("source", string("fn main() { }")),
+        ("language", string("fxc")),
         (
             "position",
-            Json::object([
-                ("line", Json::Number(0.0)),
-                ("character", Json::Number(14.0)),
-            ]),
+            object([("line", Value::from(0)), ("character", Value::from(14))]),
         ),
     ]));
-    assert_eq!(response.get("hover"), Some(&Json::Null));
+    assert_eq!(response.get("hover"), Some(&Value::Null));
 }
 
 #[test]
@@ -643,7 +658,7 @@ fn symbols_give_the_document_outline() {
 
 #[test]
 fn constants_lists_all_forty_with_their_values() {
-    let response = ok(Json::object([("op", Json::string("constants"))]));
+    let response = ok(object([("op", string("constants"))]));
     let constants = response
         .get("constants")
         .and_then(Json::as_array)
@@ -669,10 +684,10 @@ fn eval_works_on_an_expression_with_no_program_around_it() {
 
 #[test]
 fn eval_honours_a_forced_mode() {
-    let response = ok(Json::object([
-        ("op", Json::string("eval")),
-        ("source", Json::string("(3 + 4i) × (1 - 2i)")),
-        ("mode", Json::string("CMPLX")),
+    let response = ok(object([
+        ("op", string("eval")),
+        ("source", string("(3 + 4i) × (1 - 2i)")),
+        ("mode", string("CMPLX")),
     ]));
     // (3+4i)(1-2i) = 3 - 6i + 4i - 8i² = 11 - 2i
     assert_eq!(strings(&response, "outputs"), vec!["11-2\u{1d456}"]);
@@ -680,7 +695,7 @@ fn eval_honours_a_forced_mode() {
 
 #[test]
 fn eval_without_a_source_is_reported() {
-    let message = err(Json::object([("op", Json::string("eval"))]));
+    let message = err(object([("op", string("eval"))]));
     assert!(message.contains("needs `source`"), "{message}");
 }
 
@@ -702,16 +717,16 @@ fn the_response_is_always_parseable_json() {
     // request error, program error — has to be valid JSON. A non-finite number
     // would break that, which is why the writer emits `null` for one.
     let cases: Vec<Json> = vec![
-        Json::object([("op", Json::string("version"))]),
-        Json::object([("op", Json::string("nope"))]),
+        object([("op", string("version"))]),
+        object([("op", string("nope"))]),
         request("transpile", "fn main() { print(1); }"),
         request("transpile", "fn main() { print(1 +); }"),
         request("run", "fn main() { let a = 0; print(1 / a); }"),
         request("eval", "0 / 0"),
     ];
     for case in cases {
-        let raw = api::call(&json::to_string(&case));
-        json::parse(&raw).unwrap_or_else(|e| panic!("not JSON ({e}): {raw}"));
+        let raw = api::call(&serde_json::to_string(&case).expect("request serializes"));
+        serde_json::from_str::<Json>(&raw).unwrap_or_else(|e| panic!("not JSON ({e}): {raw}"));
         assert!(!raw.contains("NaN"), "{raw}");
         assert!(!raw.contains("inf"), "{raw}");
     }
@@ -723,12 +738,12 @@ fn the_response_is_always_parseable_json() {
 /// locally and failed in wasm, so this pins the whole path.
 #[test]
 fn embedded_tests_may_include_a_library_from_the_files_map() {
-    let response = ok(Json::object([
-        ("op", Json::string("tests")),
-        ("entry", Json::string("main.fxc")),
+    let response = ok(object([
+        ("op", string("tests")),
+        ("entry", string("main.fxc")),
         (
             "source",
-            Json::string(
+            string(
                 "#include \"lib/double.fxc\"\n\
                  fn main() { let a = input(); print(double(a)); }\n\
                  #tests = [ { \"name\": \"three\", \"input\": [3], \"output\": [\"6\"] } ];",
@@ -736,7 +751,7 @@ fn embedded_tests_may_include_a_library_from_the_files_map() {
         ),
         (
             "files",
-            Json::object([("lib/double.fxc", Json::string("fn double(x) = x * 2;"))]),
+            object([("lib/double.fxc", string("fn double(x) = x * 2;"))]),
         ),
     ]));
     assert_eq!(number(&response, "passed"), 1.0);
