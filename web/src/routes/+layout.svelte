@@ -21,6 +21,7 @@
 
 	import './layout.css';
 	import favicon from '$lib/assets/favicon.svg';
+	import ThemePicker from '$lib/components/ThemePicker.svelte';
 	import { theme } from '$lib/theme.svelte';
 
 	let { children } = $props();
@@ -64,23 +65,26 @@
 			</a>
 		{/each}
 
-		<button
-			type="button"
-			onclick={() => theme.toggle()}
-			aria-label={theme.resolved === 'dark'
-				? 'Switch to the light theme'
-				: 'Switch to the dark theme'}
-			title={theme.resolved === 'dark' ? 'Light theme' : 'Dark theme'}
-			class="ml-auto flex items-center gap-1.5 rounded border border-neutral-800 px-2 py-1 text-xs font-medium text-neutral-300 transition-colors hover:bg-neutral-800 hover:text-neutral-100"
-		>
-			{#if theme.resolved === 'dark'}
-				<Sun class="size-3.5" />
-				Light
-			{:else}
-				<Moon class="size-3.5" />
-				Dark
-			{/if}
-		</button>
+		<!-- A quick flip between light and dark, and the full list beside it. The
+		     shortcut keeps the theme family where it can, so Catppuccin Mocha flips
+		     to Latte rather than discarding what was picked. -->
+		<div class="ml-auto flex items-center gap-1.5">
+			<button
+				type="button"
+				onclick={() => theme.toggle()}
+				aria-label="Switch between light and dark"
+				title="Switch between light and dark"
+				class="flex items-center rounded border border-neutral-800 p-1.5 text-neutral-400 transition-colors hover:bg-neutral-800 hover:text-neutral-100"
+			>
+				{#if theme.appearance === 'dark'}
+					<Sun class="size-3.5" />
+				{:else}
+					<Moon class="size-3.5" />
+				{/if}
+			</button>
+
+			<ThemePicker />
+		</div>
 	</nav>
 
 	<main class="min-h-0 flex-1">

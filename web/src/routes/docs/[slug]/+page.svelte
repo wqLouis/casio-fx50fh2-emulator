@@ -14,6 +14,7 @@
 	import FileCode from '@lucide/svelte/icons/file-code';
 	import FlaskConical from '@lucide/svelte/icons/flask-conical';
 
+	import SkillActions from '../SkillActions.svelte';
 	import '../docs.css';
 
 	let { data } = $props();
@@ -49,6 +50,17 @@
 				</a>
 			</div>
 		</nav>
+
+		{#if data.doc.slug === 'skills'}
+			<div
+				class="mt-6 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-sky-500/30 bg-sky-500/5 px-4 py-3"
+			>
+				<p class="text-xs leading-relaxed text-neutral-400">
+					This page is one self-contained skill. Hand the raw markdown file to your agent unchanged.
+				</p>
+				<SkillActions compact />
+			</div>
+		{/if}
 
 		<article class="doc-prose mt-8">{@html data.doc.html}</article>
 

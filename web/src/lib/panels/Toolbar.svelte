@@ -93,12 +93,12 @@
 			<ChevronDown class="size-3.5" />
 			<span class="hidden sm:inline">Panels</span>
 		</DropdownMenu.Trigger>
-		<DropdownMenu.Portal>
-			<DropdownMenu.Content
-				sideOffset={6}
-				align="start"
-				class="z-50 min-w-44 rounded-md border border-neutral-800 bg-neutral-900 p-1 shadow-lg"
-			>
+		<DropdownMenu.Content
+			sideOffset={6}
+			align="start"
+			class="z-50 min-w-44 rounded-md border border-neutral-800 bg-neutral-900 p-1 shadow-lg"
+		>
+			<DropdownMenu.Group>
 				<DropdownMenu.GroupHeading
 					class="px-2 py-1 text-[10px] font-semibold tracking-wide text-neutral-500 uppercase"
 				>
@@ -120,7 +120,7 @@
 						/>
 					</DropdownMenu.CheckboxItem>
 				{/each}
-			</DropdownMenu.Content>
-		</DropdownMenu.Portal>
+			</DropdownMenu.Group>
+		</DropdownMenu.Content>
 	</DropdownMenu.Root>
 </div>

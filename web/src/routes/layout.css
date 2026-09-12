@@ -1,66 +1,422 @@
 @import 'tailwindcss';
 
 /*
- * Light and dark.
+ * Themes.
  *
- * The UI is authored against the dark ramp: `bg-neutral-950` is the page,
+ * The UI is written against the neutral ramp: `bg-neutral-950` is the page,
  * `neutral-900` a raised surface, `neutral-800` a hairline, `neutral-100` body
- * text. Rather than write a `light:` variant on ~260 utility classes, the light
- * theme re-points Tailwind's own colour variables — every generated utility
- * already references them (`background-color: var(--color-neutral-950)`), so
- * one block restyles the whole application, including pages written later.
+ * text. Rather than write a variant per theme on ~260 utility classes, each
+ * theme sets a compact palette of `--t-*` values, and one mapping block below
+ * re-points Tailwind's own colour variables at them — every generated utility
+ * already references those (`background-color: var(--color-neutral-950)`), so a
+ * single block restyles the whole application, and any page written later is
+ * themed for free.
  *
- * The neutral ramp is mirrored about 500: 950 becomes 50, 800 becomes 200, and
- * so on. A colour that read as "a step up off the page" in the dark theme reads
- * as "a step down into the page" in the light one, which is the same
- * relationship. The accents move two or three steps darker so that text built
- * for a near-black background stays legible on a near-white one.
+ * A theme is therefore data, not code: nineteen values, ten shades from the page
+ * colour up to the brightest text, and eight accents. `theme.test.ts` asserts
+ * that every theme defines every one of them, because a missing value here fails
+ * silently — it renders as an unstyled default rather than as an error, and this
+ * cannot be seen in a screenshot review.
  *
- * `.dark` needs no block: those are Tailwind's defaults. `theme.svelte.ts`
- * always puts exactly one of the two classes on `<html>`, and the inline script
- * in `app.html` does it before the first paint so the page never flashes.
+ * The ramp is ordered by contrast against the page, so `--t-page` is the surface
+ * panels sit on and `--t-brightest` is the most emphatic text. Dark themes and
+ * light themes both read correctly because the ramp is relative, not absolute.
+ *
+ * `--t-*` are internal: nothing outside this file should use them. Components
+ * use the Tailwind names.
  */
 
-@custom-variant dark (&:where(.dark, .dark *));
-
-.light {
-	color-scheme: light;
-
-	--color-neutral-50: oklch(14.5% 0 none);
-	--color-neutral-100: oklch(20.5% 0 none);
-	--color-neutral-200: oklch(26.9% 0 none);
-	--color-neutral-300: oklch(37.1% 0 none);
-	--color-neutral-400: oklch(43.9% 0 none);
-	--color-neutral-500: oklch(55.6% 0 none);
-	--color-neutral-600: oklch(70.8% 0 none);
-	--color-neutral-700: oklch(87% 0 none);
-	--color-neutral-800: oklch(92.2% 0 none);
-	--color-neutral-900: oklch(97% 0 none);
-	--color-neutral-950: oklch(98.5% 0 none);
-
-	/* Danger: the tint shades become pale, the text shades become saturated. */
-	--color-red-950: oklch(97.1% 0.013 17.38);
-	--color-red-900: oklch(88.5% 0.062 18.334);
-	--color-red-600: oklch(50.5% 0.213 27.518);
-	--color-red-500: oklch(57.7% 0.245 27.325);
-	--color-red-400: oklch(57.7% 0.245 27.325);
-	--color-red-300: oklch(50.5% 0.213 27.518);
-
-	/* Caution. */
-	--color-amber-500: oklch(66.6% 0.179 58.318);
-	--color-amber-400: oklch(55.5% 0.163 48.998);
-
-	/* Success. */
-	--color-emerald-600: oklch(50.8% 0.118 165.612);
-	--color-emerald-500: oklch(59.6% 0.145 163.225);
-	--color-emerald-400: oklch(59.6% 0.145 163.225);
-	--color-emerald-300: oklch(50.8% 0.118 165.612);
-
-	/* Accent. */
-	--color-sky-500: oklch(58.8% 0.158 241.966);
-	--color-sky-400: oklch(58.8% 0.158 241.966);
+/* The default: the neutral ramp the interface was designed against. */
+:root,
+.theme-fx50-dark {
+	color-scheme: dark;
+	--t-page: #0a0a0a;
+	--t-surface: #171717;
+	--t-line: #262626;
+	--t-hover: #404040;
+	--t-off: #525252;
+	--t-dim: #737373;
+	--t-muted: #a3a3a3;
+	--t-body: #d4d4d4;
+	--t-strong: #e5e5e5;
+	--t-bright: #f5f5f5;
+	--t-brightest: #fafafa;
+	--t-danger: #f87171;
+	--t-warn: #fbbf24;
+	--t-ok: #34d399;
+	--t-info: #60a5fa;
+	--t-mauve: #c084fc;
+	--t-teal: #22d3ee;
+	--t-orange: #fb923c;
+	--t-pink: #f472b6;
 }
 
-.dark {
+.theme-fx50-light {
+	color-scheme: light;
+	--t-page: #fafafa;
+	--t-surface: #f4f4f4;
+	--t-line: #e5e5e5;
+	--t-hover: #dcdcdc;
+	--t-off: #b5b5b5;
+	--t-dim: #8e8e8e;
+	--t-muted: #707070;
+	--t-body: #4a4a4a;
+	--t-strong: #383838;
+	--t-bright: #262626;
+	--t-brightest: #171717;
+	--t-danger: #dc2626;
+	--t-warn: #b45309;
+	--t-ok: #15803d;
+	--t-info: #1d4ed8;
+	--t-mauve: #7c3aed;
+	--t-teal: #0e7490;
+	--t-orange: #c2410c;
+	--t-pink: #be185d;
+}
+
+/*
+ * Catppuccin. The `surface0/1/2` shades are used for surface, line and hover so
+ * that a "raised" panel is lighter than the page, as in every other dark theme
+ * here; Catppuccin's own `mantle` and `crust` are darker than `base`.
+ */
+.theme-catppuccin-latte {
+	color-scheme: light;
+	--t-page: #eff1f5;
+	--t-surface: #e6e9ef;
+	--t-line: #ccd0da;
+	--t-hover: #bcc0cc;
+	--t-off: #9ca0b0;
+	--t-dim: #8c8fa1;
+	--t-muted: #7c7f93;
+	--t-body: #6c6f85;
+	--t-strong: #5c5f77;
+	--t-bright: #4c4f69;
+	--t-brightest: #3f4257;
+	--t-danger: #d20f39;
+	--t-warn: #df8e1d;
+	--t-ok: #40a02b;
+	--t-info: #1e66f5;
+	--t-mauve: #8839ef;
+	--t-teal: #179299;
+	--t-orange: #fe640b;
+	--t-pink: #ea76cb;
+}
+
+.theme-catppuccin-frappe {
 	color-scheme: dark;
+	--t-page: #303446;
+	--t-surface: #414559;
+	--t-line: #51576d;
+	--t-hover: #626880;
+	--t-off: #737994;
+	--t-dim: #838ba7;
+	--t-muted: #a5adce;
+	--t-body: #b5bfe2;
+	--t-strong: #c6d0f5;
+	--t-bright: #dce3fa;
+	--t-brightest: #eef1fc;
+	--t-danger: #e78284;
+	--t-warn: #e5c890;
+	--t-ok: #a6d189;
+	--t-info: #8caaee;
+	--t-mauve: #ca9ee6;
+	--t-teal: #81c8be;
+	--t-orange: #ef9f76;
+	--t-pink: #f4b8e4;
+}
+
+.theme-catppuccin-macchiato {
+	color-scheme: dark;
+	--t-page: #24273a;
+	--t-surface: #363a4f;
+	--t-line: #494d64;
+	--t-hover: #5b6078;
+	--t-off: #6e738d;
+	--t-dim: #8087a2;
+	--t-muted: #a5adcb;
+	--t-body: #b8c0e0;
+	--t-strong: #cad3f5;
+	--t-bright: #dfe5fa;
+	--t-brightest: #f0f3fd;
+	--t-danger: #ed8796;
+	--t-warn: #eed49f;
+	--t-ok: #a6da95;
+	--t-info: #8aadf4;
+	--t-mauve: #c6a0f6;
+	--t-teal: #8bd5ca;
+	--t-orange: #f5a97f;
+	--t-pink: #f5bde6;
+}
+
+.theme-catppuccin-mocha {
+	color-scheme: dark;
+	--t-page: #1e1e2e;
+	--t-surface: #313244;
+	--t-line: #45475a;
+	--t-hover: #585b70;
+	--t-off: #6c7086;
+	--t-dim: #7f849c;
+	--t-muted: #a6adc8;
+	--t-body: #bac2de;
+	--t-strong: #cdd6f4;
+	--t-bright: #e2e8fb;
+	--t-brightest: #f2f5fe;
+	--t-danger: #f38ba8;
+	--t-warn: #f9e2af;
+	--t-ok: #a6e3a1;
+	--t-info: #89b4fa;
+	--t-mauve: #cba6f7;
+	--t-teal: #94e2d5;
+	--t-orange: #fab387;
+	--t-pink: #f5c2e7;
+}
+
+.theme-gruvbox-dark {
+	color-scheme: dark;
+	--t-page: #1d2021;
+	--t-surface: #282828;
+	--t-line: #3c3836;
+	--t-hover: #504945;
+	--t-off: #665c54;
+	--t-dim: #928374;
+	--t-muted: #a89984;
+	--t-body: #d5c4a1;
+	--t-strong: #ebdbb2;
+	--t-bright: #fbf1c7;
+	--t-brightest: #fdf6d8;
+	--t-danger: #fb4934;
+	--t-warn: #fabd2f;
+	--t-ok: #b8bb26;
+	--t-info: #83a598;
+	--t-mauve: #d3869b;
+	--t-teal: #8ec07c;
+	--t-orange: #fe8019;
+	--t-pink: #d3869b;
+}
+
+.theme-gruvbox-light {
+	color-scheme: light;
+	--t-page: #fbf1c7;
+	--t-surface: #f2e5bc;
+	--t-line: #ebdbb2;
+	--t-hover: #d5c4a1;
+	--t-off: #bdae93;
+	--t-dim: #a89984;
+	--t-muted: #7c6f64;
+	--t-body: #504945;
+	--t-strong: #3c3836;
+	--t-bright: #282828;
+	--t-brightest: #1d2021;
+	--t-danger: #9d0006;
+	--t-warn: #b57614;
+	--t-ok: #79740e;
+	--t-info: #076678;
+	--t-mauve: #8f3f71;
+	--t-teal: #427b58;
+	--t-orange: #af3a03;
+	--t-pink: #8f3f71;
+}
+
+.theme-nord {
+	color-scheme: dark;
+	--t-page: #2e3440;
+	--t-surface: #3b4252;
+	--t-line: #434c5e;
+	--t-hover: #4c566a;
+	--t-off: #5c6a82;
+	--t-dim: #6d7a96;
+	--t-muted: #8b95a7;
+	--t-body: #c0c8d6;
+	--t-strong: #d8dee9;
+	--t-bright: #e5e9f0;
+	--t-brightest: #eceff4;
+	--t-danger: #bf616a;
+	--t-warn: #ebcb8b;
+	--t-ok: #a3be8c;
+	--t-info: #81a1c1;
+	--t-mauve: #b48ead;
+	--t-teal: #88c0d0;
+	--t-orange: #d08770;
+	--t-pink: #b48ead;
+}
+
+.theme-solarized-dark {
+	color-scheme: dark;
+	--t-page: #002b36;
+	--t-surface: #073642;
+	--t-line: #10414f;
+	--t-hover: #17505f;
+	--t-off: #4a5f66;
+	--t-dim: #657b83;
+	--t-muted: #839496;
+	--t-body: #a5b2b2;
+	--t-strong: #eee8d5;
+	--t-bright: #f5efdc;
+	--t-brightest: #fdf6e3;
+	--t-danger: #dc322f;
+	--t-warn: #b58900;
+	--t-ok: #859900;
+	--t-info: #268bd2;
+	--t-mauve: #6c71c4;
+	--t-teal: #2aa198;
+	--t-orange: #cb4b16;
+	--t-pink: #d33682;
+}
+
+.theme-solarized-light {
+	color-scheme: light;
+	--t-page: #fdf6e3;
+	--t-surface: #f4eeda;
+	--t-line: #e3ddc9;
+	--t-hover: #d5cfbb;
+	--t-off: #b8b3a1;
+	--t-dim: #93a1a1;
+	--t-muted: #657b83;
+	--t-body: #586e75;
+	--t-strong: #073642;
+	--t-bright: #002b36;
+	--t-brightest: #001f27;
+	--t-danger: #dc322f;
+	--t-warn: #b58900;
+	--t-ok: #859900;
+	--t-info: #268bd2;
+	--t-mauve: #6c71c4;
+	--t-teal: #2aa198;
+	--t-orange: #cb4b16;
+	--t-pink: #d33682;
+}
+
+.theme-tokyo-night {
+	color-scheme: dark;
+	--t-page: #1f2335;
+	--t-surface: #24283b;
+	--t-line: #292e42;
+	--t-hover: #3b4261;
+	--t-off: #414868;
+	--t-dim: #565f89;
+	--t-muted: #737aa2;
+	--t-body: #a9b1d6;
+	--t-strong: #c0caf5;
+	--t-bright: #d5dbfa;
+	--t-brightest: #e6eafd;
+	--t-danger: #f7768e;
+	--t-warn: #e0af68;
+	--t-ok: #9ece6a;
+	--t-info: #7aa2f7;
+	--t-mauve: #bb9af7;
+	--t-teal: #7dcfff;
+	--t-orange: #ff9e64;
+	--t-pink: #bb9af7;
+}
+
+.theme-dracula {
+	color-scheme: dark;
+	--t-page: #282a36;
+	--t-surface: #343746;
+	--t-line: #44475a;
+	--t-hover: #4d5066;
+	--t-off: #6272a4;
+	--t-dim: #7b86b8;
+	--t-muted: #9098c0;
+	--t-body: #c8c8d4;
+	--t-strong: #e4e4ee;
+	--t-bright: #f8f8f2;
+	--t-brightest: #ffffff;
+	--t-danger: #ff5555;
+	--t-warn: #f1fa8c;
+	--t-ok: #50fa7b;
+	--t-info: #8be9fd;
+	--t-mauve: #bd93f9;
+	--t-teal: #8be9fd;
+	--t-orange: #ffb86c;
+	--t-pink: #ff79c6;
+}
+
+.theme-rose-pine {
+	color-scheme: dark;
+	--t-page: #191724;
+	--t-surface: #1f1d2e;
+	--t-line: #26233a;
+	--t-hover: #2f2b45;
+	--t-off: #6e6a86;
+	--t-dim: #7f7b96;
+	--t-muted: #908caa;
+	--t-body: #c4c1da;
+	--t-strong: #e0def4;
+	--t-bright: #ebe9f8;
+	--t-brightest: #f4f2fc;
+	--t-danger: #eb6f92;
+	--t-warn: #f6c177;
+	--t-ok: #9ccfd8;
+	--t-info: #c4a7e7;
+	--t-mauve: #c4a7e7;
+	--t-teal: #9ccfd8;
+	--t-orange: #ebbcba;
+	--t-pink: #eb6f92;
+}
+
+/*
+ * The mapping. Declared once, on the root element, and resolved against
+ * whichever theme class is on that same element — custom properties are looked
+ * up when they are used, so this does not need repeating per theme.
+ */
+:root {
+	--color-neutral-950: var(--t-page);
+	--color-neutral-900: var(--t-surface);
+	--color-neutral-800: var(--t-line);
+	--color-neutral-700: var(--t-hover);
+	--color-neutral-600: var(--t-off);
+	--color-neutral-500: var(--t-dim);
+	--color-neutral-400: var(--t-muted);
+	--color-neutral-300: var(--t-body);
+	--color-neutral-200: var(--t-strong);
+	--color-neutral-100: var(--t-bright);
+	--color-neutral-50: var(--t-brightest);
+
+	/*
+	 * Tints mix the accent into the page, so one expression is a dark wash on a
+	 * dark theme and a pale one on a light theme, which is what `/40` backgrounds
+	 * and `/50` borders are reaching for.
+	 */
+	--color-red-950: color-mix(in oklab, var(--t-danger) 16%, var(--t-page));
+	--color-red-900: color-mix(in oklab, var(--t-danger) 34%, var(--t-page));
+	/* Text accents are the accent itself: each theme picks one that carries. */
+	--color-red-600: var(--t-danger);
+	--color-red-500: var(--t-danger);
+	--color-red-400: var(--t-danger);
+	--color-red-300: var(--t-danger);
+	--color-amber-500: var(--t-warn);
+	--color-amber-400: var(--t-warn);
+	--color-emerald-600: var(--t-ok);
+	--color-emerald-500: var(--t-ok);
+	--color-emerald-400: var(--t-ok);
+	--color-emerald-300: var(--t-ok);
+	--color-sky-500: var(--t-info);
+	--color-sky-400: var(--t-info);
+
+	/* The editor's syntax palette, read by `editor/theme.ts`. */
+	--syn-keyword: var(--t-mauve);
+	--syn-number: var(--t-orange);
+	--syn-directive: var(--t-pink);
+	--syn-namespace: var(--t-teal);
+	--syn-builtin: var(--t-info);
+	--syn-property: var(--t-mauve);
+	--syn-string: var(--t-ok);
+	--syn-comment: var(--t-dim);
+	--syn-operator: var(--t-danger);
+	--syn-punctuation: var(--t-muted);
+}
+
+/*
+ * Overlays. Needing transparency, they cannot be plain palette entries, and
+ * mixing toward `transparent` keeps them a wash of the text colour — light on a
+ * dark theme, dark on a light one.
+ */
+:root {
+	--ui-selection: color-mix(in oklab, var(--t-info) 25%, transparent);
+	--ui-selection-soft: color-mix(in oklab, var(--t-info) 14%, transparent);
+	--ui-active-line: color-mix(in oklab, var(--t-bright) 5%, transparent);
+	--ui-search: color-mix(in oklab, var(--t-warn) 40%, transparent);
+	--ui-search-active: color-mix(in oklab, var(--t-warn) 65%, transparent);
+	--ui-bracket: color-mix(in oklab, var(--t-info) 16%, transparent);
 }

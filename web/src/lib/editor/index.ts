@@ -24,14 +24,7 @@ export {
 	prgmLanguage,
 	prgmLanguageSupport
 } from './language';
-export {
-	editorTheme,
-	fxcHighlightStyle,
-	fxcLightHighlightStyle,
-	fxcLightTheme,
-	fxcSyntaxHighlighting,
-	fxcTheme
-} from './theme';
+export { editorTheme, fxcSyntaxHighlighting } from './theme';
 export {
 	completionTypeFor,
 	createCompletionSource,

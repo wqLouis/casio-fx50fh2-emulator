@@ -21,6 +21,7 @@ import { fileURLToPath } from 'node:url';
 
 import {
 	DOCUMENTS,
+	SKILL_FILE,
 	extractDescription,
 	extractTitle,
 	rewriteHref,
@@ -28,7 +29,7 @@ import {
 	slugFor,
 	slugifyHeading
 } from '../scripts/bundle-docs';
-import { docs, docsBySlug, exampleAnchor } from '../src/lib/docs.generated';
+import { docs, docsBySlug, exampleAnchor, skillsMarkdown } from '../src/lib/docs.generated';
 import { libraries, programs } from '../src/lib/examples.generated';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -46,6 +47,7 @@ const EXPECTED_SLUGS = [
 	'fxc',
 	'language',
 	'ai-agents',
+	'skills',
 	'architecture',
 	'decisions',
 	'plan',
@@ -237,6 +239,43 @@ describe('the generated examples', () => {
 		const anchors = programs.map((program) => exampleAnchor(program.path));
 		assert.equal(new Set(anchors).size, anchors.length, 'duplicate example anchor');
 		assert.equal(exampleAnchor('examples/factorial.fxc'), 'example-examples-factorial-fxc');
+	});
+});
+
+describe('the agent skill', () => {
+	test('is published with a sensible slug, a title and a body', () => {
+		assert.equal(slugFor(SKILL_FILE), 'skills');
+		const skill = docsBySlug.skills;
+		assert.ok(skill, 'the skills document is missing');
+		assert.equal(skill.sourcePath, SKILL_FILE);
+		assert.ok(skill.title.length > 0, 'the skill has no title');
+		assert.ok(skill.description.length > 0, 'the skill has no description');
+		assert.ok(htmlText(skill.html).length > 500, 'the skill body is suspiciously short');
+	});
+
+	test('is registered exactly once in the source registry', () => {
+		assert.equal(
+			DOCUMENTS.filter((spec) => spec.file === SKILL_FILE).length,
+			1,
+			'the skill should appear once in DOCUMENTS'
+		);
+	});
+
+	test('exposes its raw markdown, matching the file on disk', async () => {
+		assert.ok(skillsMarkdown.length > 1000, 'the raw skill is suspiciously short');
+		assert.equal(skillsMarkdown, await Bun.file(join(repository, SKILL_FILE)).text());
+		assert.ok(skillsMarkdown.includes('fn main()'), 'the raw skill never mentions `fn main()`');
+		assert.match(skillsMarkdown, /fn \w+\(v\[2\]/, 'the raw skill never shows an array parameter');
+	});
+
+	test('is real markdown whose rendered page has no un-rendered heading markers', () => {
+		// The raw file keeps its `# ` headings — that is what makes it a file an
+		// agent can use — while the rendered page must have converted them.
+		assert.match(skillsMarkdown, /^# /m, 'the raw skill has no `#` heading');
+		const outsideCode = docsBySlug.skills.html
+			.replace(/<pre[\s\S]*?<\/pre>/g, '')
+			.replace(/<code[\s\S]*?<\/code>/g, '');
+		assert.ok(!/^# /m.test(outsideCode), 'the rendered skill contains a raw heading marker');
 	});
 });
 

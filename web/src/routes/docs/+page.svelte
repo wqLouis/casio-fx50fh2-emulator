@@ -11,6 +11,9 @@
 	import BookOpen from '@lucide/svelte/icons/book-open';
 	import Calculator from '@lucide/svelte/icons/calculator';
 	import FlaskConical from '@lucide/svelte/icons/flask-conical';
+	import Sparkles from '@lucide/svelte/icons/sparkles';
+
+	import SkillActions from './SkillActions.svelte';
 
 	let { data } = $props();
 
@@ -52,6 +55,27 @@
 				</a>
 			</div>
 		</header>
+
+		<section class="mt-8 rounded-xl border border-sky-500/30 bg-sky-500/5 p-5">
+			<div class="flex flex-wrap items-start justify-between gap-5">
+				<div class="max-w-2xl">
+					<p
+						class="flex items-center gap-1.5 text-xs font-medium tracking-wide text-sky-400 uppercase"
+					>
+						<Sparkles class="size-3.5" /> Agent skill
+					</p>
+					<h2 class="mt-2 text-base font-semibold text-neutral-100">
+						Hand your agent <code class="font-mono text-sky-300">SKILLS.md</code>
+					</h2>
+					<p class="mt-1.5 text-sm leading-relaxed text-neutral-400">
+						A single self-contained markdown file for writing correct
+						<code class="font-mono text-neutral-300">.fxc</code> programs. Copy it to the clipboard or
+						download it and hand it to an agent — no other page required.
+					</p>
+				</div>
+				<SkillActions />
+			</div>
+		</section>
 
 		<div class="mt-8 space-y-10">
 			{#each data.groups as group (group.name)}

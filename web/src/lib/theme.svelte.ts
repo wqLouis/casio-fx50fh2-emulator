@@ -1,27 +1,34 @@
 /**
- * Light, dark, and the choice between them.
+ * Which theme is in force.
  *
- * The theme is a class on `<html>` — `light` or `dark`, never both and never
- * neither — because that is what the palette in `layout.css` keys off. The
- * class is put there before the first paint by an inline script in `app.html`,
- * so the page never flashes the wrong theme; this store's job is to take over
- * from that script once the app is running, and to remember what the user
- * picked.
+ * A theme is a class on `<html>` — `theme-catppuccin-mocha` and friends — and
+ * that is the only switch. `layout.css` holds the palettes; the class is put
+ * there before the first paint by an inline script in `app.html` so the page
+ * never flashes the wrong one, and this store takes over from that script once
+ * the app is running and remembers what was chosen.
  *
- * `restore()` must be called from `onMount`. Nothing here may touch a browser
- * global at module scope: every route is prerendered, and `matchMedia` does not
- * exist on the server.
+ * The list, the validation and the fallbacks are in `theme.ts` so they can be
+ * tested without the Svelte compiler. This file only applies them.
+ *
+ * `restore()` must be called from `onMount`: every route is prerendered, and
+ * `matchMedia` does not exist on the server.
  */
 
-export type ThemeChoice = 'light' | 'dark' | 'system';
-export type ResolvedTheme = 'light' | 'dark';
+import {
+	DEFAULT_DARK,
+	DEFAULT_LIGHT,
+	THEMES,
+	THEME_STORAGE_KEY,
+	counterpartOf,
+	isThemeId,
+	themeById,
+	type ThemeChoice,
+	type ThemeId,
+	type ThemeInfo
+} from './theme';
 
-/** Shared with the inline script in `app.html`; changing it means changing both. */
-export const THEME_STORAGE_KEY = 'fx50.theme';
-
-function isChoice(value: string | null): value is ThemeChoice {
-	return value === 'light' || value === 'dark' || value === 'system';
-}
+// Re-exported so a component needs one import, not two.
+export { THEMES, THEME_STORAGE_KEY, isThemeId, type ThemeChoice, type ThemeId, type ThemeInfo };
 
 class ThemeStore {
 	/** What the user picked. `system` follows the operating system. */
@@ -30,17 +37,23 @@ class ThemeStore {
 	systemDark = $state(false);
 
 	/** The theme actually in force. */
-	resolved = $derived<ResolvedTheme>(
-		this.choice === 'system' ? (this.systemDark ? 'dark' : 'light') : this.choice
+	resolved = $derived<ThemeId>(
+		this.choice === 'system' ? (this.systemDark ? DEFAULT_DARK : DEFAULT_LIGHT) : this.choice
 	);
+
+	/** Its entry in the list, for the label and the editor's dark flag. */
+	info = $derived<ThemeInfo>(themeById(this.resolved));
+
+	/** `light` or `dark`, which is all the editor needs to know. */
+	appearance = $derived<'light' | 'dark'>(this.info.dark ? 'dark' : 'light');
 
 	#media: MediaQueryList | null = null;
 
 	/**
 	 * Adopt the stored choice and start following the system setting.
 	 *
-	 * Safe to call more than once — the media listener is registered once — so a
-	 * component may call it without coordinating with any other.
+	 * Safe to call more than once, so a component may call it without
+	 * coordinating with any other.
 	 */
 	restore(): void {
 		if (typeof window === 'undefined') return;
@@ -57,14 +70,14 @@ class ThemeStore {
 
 		try {
 			const stored = localStorage.getItem(THEME_STORAGE_KEY);
-			if (isChoice(stored)) this.choice = stored;
+			if (stored === 'system' || isThemeId(stored)) this.choice = stored;
 		} catch {
 			// Storage can throw when it is disabled; the default still works.
 		}
 		this.#apply();
 	}
 
-	/** Choose explicitly. `system` hands control back to the operating system. */
+	/** Choose a theme, or hand control back to the operating system. */
 	set(choice: ThemeChoice): void {
 		this.choice = choice;
 		try {
@@ -75,19 +88,19 @@ class ThemeStore {
 		this.#apply();
 	}
 
-	/** Flip between light and dark, leaving `system` behind for good. */
+	/** Flip between light and dark, keeping the theme family where there is one. */
 	toggle(): void {
-		this.set(this.resolved === 'dark' ? 'light' : 'dark');
+		this.set(counterpartOf(this.resolved));
 	}
 
 	#apply(): void {
 		if (typeof document === 'undefined') return;
-		const dark = this.resolved === 'dark';
 		const root = document.documentElement;
-		root.classList.toggle('dark', dark);
-		root.classList.toggle('light', !dark);
-		// Form controls, scrollbars and the canvas behind the page.
-		root.style.colorScheme = dark ? 'dark' : 'light';
+		for (const entry of THEMES) {
+			root.classList.toggle(entry.id, entry.id === this.resolved);
+		}
+		// `color-scheme` is declared per theme in `layout.css`, so it is not set
+		// here: two sources for it would be one too many.
 	}
 }
 

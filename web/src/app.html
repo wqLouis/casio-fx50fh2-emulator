@@ -6,21 +6,23 @@
 		<meta name="text-scale" content="scale" />
 		<script>
 			// Runs before the first paint, so the page never flashes the wrong theme.
-			// Same key and same rule as `$lib/theme.svelte`, which takes over once
-			// the app has mounted and keeps the class in step from then on.
+			// Same key and same rule as `$lib/theme.svelte`, which takes over once the
+			// app has mounted. The theme class is the only switch — `layout.css` owns
+			// the palettes and the `color-scheme` that goes with each one, so nothing
+			// here needs to know which themes are dark.
 			(function () {
 				try {
-					var choice = localStorage.getItem('fx50.theme');
+					var stored = localStorage.getItem('fx50.theme');
 					var dark =
-						choice === 'dark' ||
-						(choice !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches);
-					var root = document.documentElement;
-					root.classList.add(dark ? 'dark' : 'light');
-					root.style.colorScheme = dark ? 'dark' : 'light';
+						stored === 'theme-fx50-dark' ||
+						((stored === null || stored === 'system') &&
+							matchMedia('(prefers-color-scheme: dark)').matches);
+					var fallback = dark ? 'theme-fx50-dark' : 'theme-fx50-light';
+					// An unrecognised value is used as-is; the store corrects it on mount,
+					// and a class that matches no theme simply leaves the default in place.
+					document.documentElement.classList.add(stored || fallback);
 				} catch (error) {
-					// No storage, no matchMedia: fall back to the dark ramp, which is
-					// what the palette does with neither class present.
-					document.documentElement.classList.add('dark');
+					document.documentElement.classList.add('theme-fx50-dark');
 				}
 			})();
 		</script>

@@ -780,7 +780,7 @@ fn main() {
 					path={activePath}
 					{files}
 					{diagnostics}
-					theme={theme.resolved}
+					theme={theme.appearance}
 					onchange={onEditorChange}
 				/>
 			{:else}
