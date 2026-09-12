@@ -14,6 +14,37 @@ fx50 regs  program.fxc          # which of the seven memories each name got
 fx50 test  program.fxc          # run the cases in the program's `#tests` table
 ```
 
+## The most important skills
+
+If you read nothing else, these are the ones that decide whether the program
+fits and whether it is correct. Each is expanded below.
+
+1. **Spend memories deliberately.** There are exactly seven, and names take them
+   in first-seen order. `const`/`#data` cost none, `free` returns one. Naming
+   variables `a b c d x y m` in that order makes the allocation predictable.
+   → §3
+2. **Pack two reals into one memory as a complex number** when memories are what
+   you are short of. In CMPLX mode one memory holds a *pair*, and arithmetic
+   works on both parts at once. This is the single biggest lever when a program
+   does not fit. → §3
+3. **Remember that arguments are call by name.** An argument mentioned twice is
+   *emitted* twice (bytes) and *evaluated* twice (so `twice(ran())` draws two
+   random numbers). Assigning a parameter writes back through the argument.
+   → §2
+4. **Return several values through output parameters.** There is one `return`
+   and it must be the last statement, so multi-value results are assigned into
+   caller variables passed as parameters. → §2
+5. **Move anything that never changes into `const`/`#data`.** They are inlined
+   and occupy no memory at all. → §3, §7
+6. **Measure rather than guess.** `fx50 regs` shows which memory each name got,
+   `fx50 size` counts the keys out of 680. The transpiler already folds
+   constants, propagates unchanging values and drops unread stores. → §3, §10
+7. **Make the mode match the keys.** `i`, `conjg`, `rep`/`imp` need
+   `#mode CMPLX`; base literals and `and`/`or` need `#mode BASE`; `stat.*` needs
+   `#mode SD` or `REG`. → §8
+8. **Write `#tests`.** They travel with the program, document its contract, and
+   `fx50 test` runs them on the real interpreter. → §7
+
 ## 1. Skeleton
 
 A program **is a set of functions**. `fn main()` is required; the top level may
@@ -119,6 +150,66 @@ The transpiler already folds constants, propagates values that never change,
 decides constant conditions and drops unread stores — write clearly and measure,
 do not hand-optimise. Running out of memories names the culprits; `const`,
 `#data` and `free` are the levers.
+
+### Packing two reals into one memory
+
+When **memories** are what you are short of, a complex number holds two reals in
+**one** memory. This is the biggest single lever there is, and it needs CMPLX
+mode:
+
+```c
+#mode CMPLX
+
+fn pack(x, y) = x + y * i();      // one memory: x + yi
+fn unpack_x(p) = rep(p);          // the real part back
+fn unpack_y(p) = imp(p);          // the imaginary part back
+```
+
+`rep` and `imp` are built in. **This model has no `ReP`/`ImP` key** — those are
+on other Casio models — so the transpiler lowers them to the `conjg` identities:
+
+```
+rep(z)  →  (z + Conjg(z)) ÷ 2
+imp(z)  →  (z − Conjg(z)) ÷ (2i)
+```
+
+```c
+fn point(x, y) = x + y * i();
+
+fn main() {
+    let p = point(1, 2);
+    print(rep(p));        // 1
+    print(imp(p));        // 2
+    print(abs(p));        // 2.236067977 — the distance, nothing unpacked
+}
+```
+
+`fx50 regs` on that program reports **1 of 7 memories used**: three values, one
+memory. Two things make it worth its cost:
+
+- **Arithmetic works on both parts at once.** `p1 + p2` adds two coordinates
+  with a single `+`; `p * 2` scales both; `abs(p)` is the modulus.
+- **A whole list can stay live.** [`examples/packing.fxc`](../examples/packing.fxc)
+  keeps eight reals — four points — in four memories, which the unpacked version
+  cannot do at all. [`examples/lib/pack.fxc`](../examples/lib/pack.fxc) is the
+  three-line library.
+
+And the cost, which is the other half of the trade:
+
+- **It trades program bytes for memories.** Functions are inlined, so each
+  `rep(p)` emits **nine** keys and each `imp(p)` **thirteen**, against **five**
+  for `pack(x, y)`. Packing always makes the program *longer* — do it when a
+  memory is scarce, never to save bytes.
+- **Unpack into the expression that needs the value** (`print(rep(p))`), not into
+  a new variable, which would spend the memory you just saved.
+- **`free` the two reals as soon as they are packed**, or they still occupy two
+  memories each and nothing has been gained.
+- **The round trip is exact to 14 significant digits.** `2·x` can need one digit
+  more than `x` had and every operation is normalised to 15, so a 15-digit value
+  can lose its last digit. The display shows 10, so it is invisible in practice.
+
+A library cannot declare `#mode`, so the program that includes `pack.fxc` must
+say `#mode CMPLX` itself.
 
 ## 4. Arrays and array parameters
 
@@ -268,7 +359,8 @@ fn main() { print(i() * i()); }
 
 With no directive the output has no header and runs in COMP. A directive is
 copied into the output. Use `rep(z)` / `imp(z)` for the real and imaginary
-parts — this model has no `ReP`/`ImP` key.
+parts — this model has no `ReP`/`ImP` key, and the pair is how two reals share
+one memory (§3, *Packing two reals into one memory*).
 
 ## 9. Worked example
 
@@ -316,6 +408,9 @@ demo.fxc
 - [ ] An assigned parameter gets a variable or array element, not an expression.
 - [ ] At most seven live names; `const`/`#data` for fixed values; `free` what is
       finished with.
+- [ ] If memories run out, pack pairs into complex numbers with `i()`, `rep` and
+      `imp` (§3) before trying anything else — and `free` the reals once they are
+      packed.
 - [ ] Every array index resolves to a literal; array parameters are written
       `v[n]` and passed an array *name*.
 - [ ] `input()` is only a complete assignment right-hand side.

@@ -16,8 +16,8 @@
 //   fx50 test  examples/packing.fxc
 //
 // The trade is real and worth stating: packing costs *program bytes* and saves
-// *memories*. Every call is inlined, so each `unpack_x` emits its six keys. Do it
-// when a memory is what you are short of.
+// *memories*. Every call is inlined, so each `unpack_x` emits its nine keys. Do
+// it when a memory is what you are short of.
 
 #mode CMPLX
 

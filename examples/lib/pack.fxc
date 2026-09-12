@@ -34,7 +34,7 @@
 //
 // Packing trades **program bytes for memories**, and only the second is scarce
 // in the way this helps with. Every call is inlined, so each `unpack_x(p)` emits
-// the eight keys of `(p+Conjg(p))÷2` and each `pack(x, y)` the four of `x+yi`:
+// the nine keys of `(p+Conjg(p))÷2` and each `pack(x, y)` the five of `x+y×i`:
 //
 //   * pack a pair when a *memory* is what you are short of, not when the program
 //     is too long — it always makes the program longer;
