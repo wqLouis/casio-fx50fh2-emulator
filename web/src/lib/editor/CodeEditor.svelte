@@ -194,5 +194,5 @@
 
 <div
 	bind:this={host}
-	class="h-full overflow-hidden rounded-lg border border-neutral-800 bg-neutral-900 text-neutral-100"
+	class="h-full overflow-hidden border border-neutral-800 bg-neutral-900 text-neutral-100"
 ></div>

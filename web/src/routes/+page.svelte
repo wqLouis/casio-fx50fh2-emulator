@@ -723,6 +723,21 @@ fn main() {
 		</div>
 	</header>
 
+	<!--
+		The panel switches are their own strip at the top, deliberately *outside*
+		the panel area. Inside it they disappeared the instant the last panel was
+		switched off, taking with them the only way to switch one back on — a dead
+		end recoverable only by clearing localStorage.
+	-->
+	<div
+		class="flex shrink-0 items-center gap-2 border-b border-neutral-800 bg-neutral-950 px-3 py-1"
+	>
+		<Toolbar panels={panelDescriptors} ontoggle={(id) => layout.togglePanel(id)} />
+		{#if visibleTabs.length === 0}
+			<span class="text-xs text-neutral-500"> No panels shown — switch one on to see it. </span>
+		{/if}
+	</div>
+
 	{#if banner}
 		<div
 			class="flex shrink-0 items-start gap-2 border-b border-red-900/50 bg-red-950/40 px-3 py-2 text-xs text-red-300"
@@ -768,22 +783,6 @@ fn main() {
 
 	{#snippet panelPane()}
 		<section class="flex h-full min-h-0 flex-col bg-neutral-950">
-			<!--
-				Which panels exist is a view preference, so the switches live next to the
-				panels they control, not up in the header where they would compete with
-				the file actions.
-			-->
-			<div
-				class="flex shrink-0 items-center gap-2 border-b border-neutral-800 bg-neutral-950 px-2 py-1"
-			>
-				<Toolbar panels={panelDescriptors} ontoggle={(id) => layout.togglePanel(id)} />
-				{#if visibleTabs.length === 0}
-					<span class="text-xs text-neutral-500">
-						No panels shown — use the switches to bring one back.
-					</span>
-				{/if}
-			</div>
-
 			<Tabs.Root bind:value={panel} class="flex min-h-0 flex-1 flex-col">
 				<Tabs.List
 					class="flex shrink-0 items-center gap-0.5 overflow-x-auto border-b border-neutral-800 px-2"
