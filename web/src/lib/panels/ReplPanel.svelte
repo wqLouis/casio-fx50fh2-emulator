@@ -28,10 +28,12 @@
 		historyBack,
 		historyForward,
 		parseInputs,
-		pushHistory,
-		withInputHint
+		pushHistory
 	} from './repl';
 	import type { ReplLine } from './types';
+
+	/** The interpreter's way of saying the entry reached a `?` with nothing to read. */
+	const NEEDS_INPUT = /no input available/;
 
 	interface Props {
 		/** The loaded module, or `null` before it is ready. */
@@ -48,6 +50,24 @@
 	let lines = $state<ReplLine[]>([]);
 	let source = $state('');
 	let inputsText = $state('');
+	/**
+	 * The entry stopped at a `?` with no value supplied, waiting to be run once
+	 * one arrives.
+	 *
+	 * A terminal asks for input and waits; refusing outright made `?→A` an error
+	 * with a hint pointing at a field above the entry. Now the panel asks, the
+	 * next thing typed is the value, and the entry runs.
+	 */
+	let awaiting = $state<string | null>(null);
+	/**
+	 * Values already given for the pending entry.
+	 *
+	 * Each attempt restarts the entry from the beginning, so the values have to
+	 * be replayed in order: an entry with two prompts asks twice, and the second
+	 * attempt is run with both answers. Nothing from a failed attempt is applied
+	 * to the session, so replaying is safe.
+	 */
+	let answered = $state<number[]>([]);
 	let history = $state<string[]>([]);
 	let historyIndex = $state<number | null>(null);
 	let machine = $state<MachineState | null>(null);
@@ -141,6 +161,25 @@
 		const text = source.trim();
 		if (!module || id === null || text === '' || busy) return;
 
+		// Answering a prompt: what was typed is the value, not a new entry.
+		if (awaiting !== null) {
+			const values = parseInputs(text);
+			if (values === null) {
+				appendLine({
+					source: text,
+					error: 'Inputs must be numbers, separated by spaces or commas.'
+				});
+				source = '';
+				return;
+			}
+			const entry = awaiting;
+			answered = [...answered, ...values];
+			source = '';
+			inputsText = '';
+			evaluate(entry, answered);
+			return;
+		}
+
 		const inputs = parseInputs(inputsText);
 		if (inputs === null) {
 			appendLine({
@@ -150,6 +189,24 @@
 			source = '';
 			return;
 		}
+		source = '';
+		inputsText = '';
+		evaluate(text, inputs);
+	}
+
+	/**
+	 * Run one entry and record what it did.
+	 *
+	 * "No input available for `?`" is not treated as a failure. It means the
+	 * entry reached a prompt nobody answered, so the panel asks for the value and
+	 * remembers the entry to run again with it. The interpreter only adopts the
+	 * environment on success, so a failed attempt leaves nothing half-applied and
+	 * running the entry a second time is not a repeat of any effect.
+	 */
+	function evaluate(text: string, inputs: number[]) {
+		const module = fx;
+		const id = sessionId;
+		if (!module || id === null) return;
 
 		busy = true;
 		const wasPinned = pinned;
@@ -157,6 +214,8 @@
 		try {
 			const response = module.replEval({ id, source: text, inputs });
 			if (response.ok) {
+				awaiting = null;
+				answered = [];
 				appendLine({
 					source: text,
 					outputs: response.outputs,
@@ -164,20 +223,28 @@
 				});
 				machine = response.state;
 			} else {
-				appendLine({
-					source: text,
-					error: withInputHint(formatReplError(response.error))
-				});
+				const message = formatReplError(response.error);
+				if (NEEDS_INPUT.test(message)) {
+					awaiting = text;
+					appendLine({
+						source: text,
+						note: 'Type the value for `?`, then Enter. Separate several with spaces or commas.'
+					});
+				} else {
+					awaiting = null;
+					answered = [];
+					appendLine({ source: text, error: message });
+				}
 			}
 		} catch (cause) {
+			awaiting = null;
+			answered = [];
 			appendLine({ source: text, error: describeThrown(cause) });
 		}
 
 		history = pushHistory(history, text, HISTORY_LIMIT);
 		historyIndex = null;
 		draft = '';
-		source = '';
-		inputsText = '';
 		busy = false;
 
 		if (wasPinned) void scrollToEnd();
@@ -241,6 +308,17 @@
 	}
 
 	function onSourceKeyDown(event: KeyboardEvent) {
+		if (event.key === 'Escape' && awaiting !== null) {
+			// Escape abandons the prompt rather than trapping the entry field: a
+			// mistyped entry should not have to be answered before it can be fixed.
+			event.preventDefault();
+			const entry = awaiting;
+			awaiting = null;
+			answered = [];
+			source = '';
+			appendLine({ source: entry, note: 'Input cancelled.' });
+			return;
+		}
 		if (event.key === 'ArrowUp') {
 			event.preventDefault();
 			navigateHistory('up');
@@ -380,7 +458,13 @@
 			submit();
 		}}
 	>
-		<span class="font-mono text-xs text-neutral-600 select-none">›</span>
+		<!-- The prompt character says which of the two things the field is for:
+		     an entry, or the value an entry asked for. -->
+		<span
+			class="font-mono text-xs select-none {awaiting !== null
+				? 'text-amber-400'
+				: 'text-neutral-600'}">{awaiting !== null ? '?' : '›'}</span
+		>
 		<input
 			bind:this={sourceEl}
 			bind:value={source}
@@ -389,7 +473,11 @@
 			aria-label="REPL entry"
 			autocomplete="off"
 			spellcheck="false"
-			placeholder={sessionId === null ? 'No interactive session' : 'e.g. 5→A   or   sqrt(2)'}
+			placeholder={awaiting !== null
+				? 'value for `?` — separate several with spaces or commas'
+				: sessionId === null
+					? 'No interactive session'
+					: 'e.g. 5→A   or   sqrt(2)'}
 			class="min-w-0 flex-1 rounded border border-neutral-800 bg-neutral-950 px-2 py-1 font-mono text-xs text-neutral-100 placeholder:text-neutral-600 focus:border-neutral-600 focus:outline-none disabled:text-neutral-600"
 		/>
 		<input

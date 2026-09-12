@@ -37,7 +37,6 @@ export {
 	historyBack,
 	historyForward,
 	parseInputs,
-	pushHistory,
-	withInputHint
+	pushHistory
 } from './repl';
 export type { PanelDescriptor, ReplLine, SplitOrientation } from './types';
