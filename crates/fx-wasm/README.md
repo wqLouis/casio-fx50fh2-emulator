@@ -14,7 +14,8 @@ cargo build --profile wasm --target wasm32-unknown-unknown -p fx-wasm
 # -> target/wasm32-unknown-unknown/wasm/fx_wasm.wasm
 ```
 
-`./web/build.sh` does that and copies the result next to the page.
+`web` wraps that in `bun run build:wasm`, which also copies the module next to the
+page.
 
 ## The interface
 
@@ -30,7 +31,8 @@ There is deliberately no `wasm-bindgen` here (see [ADR 0031](../../docs/DECISION
 the boundary is a string, the project already ships a zero-dependency JSON reader
 and writer ([ADR 0014](../../docs/DECISIONS.md)), and this way the module is a
 plain `wasm32-unknown-unknown` binary with **no imports at all** that any host can
-instantiate with no tooling. `web/fx50.js` is the JavaScript side.
+instantiate with no tooling. `web/src/lib/fx50.ts` is the JavaScript side, and
+typed.
 
 ## Three layers
 
@@ -38,7 +40,7 @@ instantiate with no tooling. `web/fx50.js` is the JavaScript side.
 | --- | --- |
 | [`api`](src/api.rs) | every operation as `&str -> String`. Plain Rust, no wasm types, so `cargo test` covers the behaviour directly. **Start here.** |
 | [`abi`](src/abi.rs) | the exports and the pointer marshalling |
-| `web/fx50.js` | reads the JSON and draws it |
+| `web/src/lib/fx50.ts` | the typed client the page imports |
 
 ## Operations
 
@@ -79,7 +81,7 @@ The full shapes, and the reasoning behind them, are on the
 
 ```bash
 cargo test -p fx-wasm        # the API and the ABI, on the host
-node web/test.mjs            # the real .wasm module, under Node
+cd ../web && bun test        # the real .wasm module, under bun
 ```
 
 Both matter. The host tests cover behaviour; only instantiating the actual

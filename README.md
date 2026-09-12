@@ -215,9 +215,15 @@ and the editor features run on a web page with no server behind it:
 
 ```bash
 rustup target add wasm32-unknown-unknown   # once
-./web/build.sh
-python3 -m http.server 8000                # then open http://localhost:8000/web/
+cd web
+bun install
+bun run build:wasm                         # Rust -> web/static/fx_wasm.wasm
+bun run dev                                # then open the printed URL
 ```
+
+The Rust and JavaScript sides build **independently**: `bun run build:wasm` is
+only needed when `src/` or `crates/` changes, so working on the page needs no
+Rust toolchain at all.
 
 [`web/`](web) is a workbench: write `.fxc` with completions and hover, watch it
 become PRGM as you type, see the bytes it costs out of the machine's 680, see
@@ -274,7 +280,7 @@ fx50 test examples/factorial.fxc
 ```bash
 cargo test                          # everything
 cargo test -p fx-transpiler --no-default-features   # transpiler with zero deps
-./web/build.sh && node web/test.mjs # the real .wasm module, under Node
+cd web && bun test                   # the real .wasm module, under bun
 ```
 
 The last one matters more than it looks: it is the only place the actual artifact

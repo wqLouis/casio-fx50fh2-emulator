@@ -16,7 +16,7 @@ crates/fx-transpiler/       `.fxc` -> PRGM (library `fx_transpiler`)
 crates/fx-lsp/              language server (library `fx_lsp`)
 crates/fx-cli/              the single `fx50` binary, dispatching on subcommands
 crates/fx-wasm/             WebAssembly build of all of the above (library `fx_wasm`)
-web/                        the browser workbench: a page, and the generated module
+web/                        the browser workbench: SvelteKit + Tailwind, built static
 examples/  docs/  tests/    programs, documentation, integration tests
 editors/                    VS Code and Zed integrations, tree-sitter grammars
 ```
@@ -30,6 +30,12 @@ transpiler and language server are libraries that `fx50` drives through its
 `Cargo.toml` lists every package in `default-members`, so a bare `cargo build` at
 the root builds the whole workspace (and therefore `fx50`), `cargo run` runs it,
 and `cargo test` runs every crate's tests.
+
+`web/` is not part of the Cargo workspace. It is a SvelteKit project with its own
+package manager, and it consumes the Rust side through one generated file: the
+WebAssembly module in `web/static/`. That boundary is deliberate — `bun run
+build:wasm` is only needed when `src/` or `crates/` changes, so the frontend can
+be built and tested without a Rust toolchain present.
 
 ### The file seam
 
