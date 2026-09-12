@@ -56,6 +56,31 @@ JavaScript side, and typed.
 | `symbols` | the document outline |
 | `constants` | the 40 scientific constants |
 | `eval` | one expression |
+| `replOpen` | open an interactive session |
+| `replEval` | run one entry in a session |
+| `replReset` | clear a session's memories |
+| `replClose` | forget a session |
+
+### Interactive sessions
+
+The calculator is stateful, and `eval` is not: it builds a fresh interpreter
+for every call, so `#mode CMPLX` on one line is forgotten by the next and a
+variable set on one line is gone. The `repl*` operations mirror `fx50`'s
+interactive REPL instead, keeping the environment between entries:
+
+```json
+{ "op": "replOpen" }
+{ "op": "replEval", "id": 1, "source": "5→A", "inputs": [] }
+{ "op": "replReset", "id": 1 }
+{ "op": "replClose", "id": 1 }
+```
+
+`replOpen` returns a unique `id`, and the other three address a session by it.
+A line with no `#mode` of its own inherits the session's mode, so
+`#mode CMPLX` followed by `3+4i` works as it does on the command line. `outputs`
+are the `◢` displays and `state` is the same `MachineState` shape `eval`
+returns. On failure the error is reported and the stored environment is left
+untouched.
 
 Every request takes the same envelope, and uses what it needs:
 

@@ -27,5 +27,9 @@ vite.config.ts.timestamp-*
 # and then left alone while the frontend is iterated on.
 /static/fx_wasm.wasm
 
-# Generated from `../examples/*.fxc` by `bun run build:examples`.
+# Generated from `../examples/*.fxc` and `../examples/*.fx` by `bun run
+# build:examples`.
 /src/lib/examples.generated.ts
+
+# Generated from `../docs/*.md` and `../README.md` by `bun run build:docs`.
+/src/lib/docs.generated.ts

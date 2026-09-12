@@ -30,6 +30,10 @@
 //! | `symbols` | the document outline |
 //! | `constants` | the 40 scientific constants |
 //! | `eval` | one expression |
+//! | `replOpen` | open an interactive session |
+//! | `replEval` | run one entry in a session |
+//! | `replReset` | clear a session's memories |
+//! | `replClose` | forget a session |
 //!
 //! # The request
 //!
@@ -88,10 +92,11 @@
 //! the response is always parseable JSON. The `re`/`im`/`value` fields can
 //! therefore be `null`.
 
+use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 
-use casio_fx50fh2::token::VarName;
+use casio_fx50fh2::token::{TokenKind, VarName};
 use casio_fx50fh2::{Environment, Interpreter, MockHost, Mode, Value, compile_with};
 use fx_lsp::logic::{self, Language};
 use fx_transpiler::{FileLoader, MemoryLoader, Options};
@@ -100,7 +105,7 @@ use serde::{Deserialize, Serialize};
 
 /// The operations, named for the error a misspelled `op` produces.
 const OPERATIONS: &str = "version, transpile, run, tests, diagnostics, completions, hover, \
-                          symbols, constants, eval";
+                          symbols, constants, eval, replOpen, replEval, replReset, replClose";
 
 // ---------------------------------------------------------------------------
 // The request
@@ -125,6 +130,10 @@ enum Request {
     Symbols(Fields),
     Constants,
     Eval(Fields),
+    ReplOpen,
+    ReplEval(Fields),
+    ReplReset(Fields),
+    ReplClose(Fields),
 }
 
 /// The fields any operation might read.
@@ -146,6 +155,8 @@ struct Fields {
     optimize: Option<bool>,
     inputs: Option<Vec<f64>>,
     position: Option<Position>,
+    /// The session for `replEval`/`replReset`/`replClose`, from `replOpen`.
+    id: Option<u64>,
 }
 
 /// Handle one request and return one response, both JSON text.
@@ -173,6 +184,10 @@ fn dispatch(request: Request) -> String {
         Request::Symbols(fields) => symbols(&fields),
         Request::Constants => constants(),
         Request::Eval(fields) => eval(&fields),
+        Request::ReplOpen => repl_open(),
+        Request::ReplEval(fields) => repl_eval(&fields),
+        Request::ReplReset(fields) => repl_reset(&fields),
+        Request::ReplClose(fields) => repl_close(&fields),
     }
 }
 
@@ -560,6 +575,21 @@ struct EvalInfo {
     state: StateInfo,
 }
 
+#[derive(Serialize)]
+struct OpenInfo {
+    id: u64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ResetInfo {
+    state: StateInfo,
+}
+
+/// `replClose` has nothing to report but its `ok`.
+#[derive(Serialize)]
+struct CloseInfo {}
+
 // ---------------------------------------------------------------------------
 // Operations
 
@@ -932,5 +962,140 @@ fn eval(fields: &Fields) -> String {
     success(EvalInfo {
         outputs: interpreter.host().output.clone(),
         state: state_info(interpreter.environment()),
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Interactive sessions
+
+/// The open sessions, and the counter that keeps their ids distinct.
+///
+/// The module is single-threaded, so a thread-local map is enough: there is no
+/// lock to take and no session on another thread to worry about. Ids are handed
+/// out monotonically and never reused within one module instance, so an id from
+/// a closed session is an error rather than another session's state.
+#[derive(Default)]
+struct Sessions {
+    next_id: u64,
+    open: HashMap<u64, Environment>,
+}
+
+thread_local! {
+    static SESSIONS: RefCell<Sessions> = RefCell::new(Sessions::default());
+}
+
+/// Start a session with a fresh environment and return its id.
+///
+/// Two routes in a page may each want a session, so the id is the handle rather
+/// than an assumption that there is only one.
+fn repl_open() -> String {
+    SESSIONS.with(|sessions| {
+        let mut sessions = sessions.borrow_mut();
+        sessions.next_id += 1;
+        let id = sessions.next_id;
+        sessions.open.insert(id, Environment::default());
+        success(OpenInfo { id })
+    })
+}
+
+/// Run one entry in the session, storing the interpreter's environment on
+/// success.
+///
+/// The entry inherits the session's mode unless it declares its own `#mode`,
+/// which is `fx50`'s REPL rule and what makes `#mode CMPLX` on one line change
+/// what `3+4i` means on the next. A failure is reported and the stored
+/// environment is left untouched, so a bad entry cannot corrupt the session.
+fn repl_eval(fields: &Fields) -> String {
+    let Some(id) = fields.id else {
+        return failure("`replEval` needs an `id` from `replOpen`");
+    };
+    let Some(source) = fields.source.as_deref() else {
+        return failure("`replEval` needs `source`, holding the entry to run");
+    };
+    let Some(environment) = session_environment(id) else {
+        return failure(format!("unknown session {id}"));
+    };
+
+    let inherited = if declares_mode(source) {
+        None
+    } else {
+        Some(environment.mode)
+    };
+    let program = match compile_with(source, inherited) {
+        Ok(program) => program,
+        Err(error) => return calc_failure(source, &error),
+    };
+
+    let mut interpreter = Interpreter::new(program, MockHost::with_inputs(inputs(fields)));
+    *interpreter.environment_mut() = environment;
+    match interpreter.run() {
+        Ok(()) => {
+            let environment = interpreter.environment().clone();
+            session_store(id, environment.clone());
+            success(EvalInfo {
+                outputs: interpreter.host().output.clone(),
+                state: state_info(&environment),
+            })
+        }
+        // The interpreter is dropped here and the session keeps the environment
+        // it had before the entry, so a bad line changes nothing.
+        Err(error) => calc_failure(source, &error),
+    }
+}
+
+/// Start the session's environment over, clearing every memory and setting.
+fn repl_reset(fields: &Fields) -> String {
+    let Some(id) = fields.id else {
+        return failure("`replReset` needs an `id` from `replOpen`");
+    };
+    SESSIONS.with(|sessions| {
+        let mut sessions = sessions.borrow_mut();
+        match sessions.open.get_mut(&id) {
+            Some(environment) => {
+                *environment = Environment::default();
+                success(ResetInfo {
+                    state: state_info(environment),
+                })
+            }
+            None => failure(format!("unknown session {id}")),
+        }
+    })
+}
+
+/// Forget a session.
+fn repl_close(fields: &Fields) -> String {
+    let Some(id) = fields.id else {
+        return failure("`replClose` needs an `id` from `replOpen`");
+    };
+    SESSIONS.with(|sessions| {
+        if sessions.borrow_mut().open.remove(&id).is_some() {
+            success(CloseInfo {})
+        } else {
+            failure(format!("unknown session {id}"))
+        }
+    })
+}
+
+/// The stored environment for `id`, if the session is open.
+fn session_environment(id: u64) -> Option<Environment> {
+    SESSIONS.with(|sessions| sessions.borrow().open.get(&id).cloned())
+}
+
+/// Replace the stored environment for `id`.
+fn session_store(id: u64, environment: Environment) {
+    SESSIONS.with(|sessions| {
+        sessions.borrow_mut().open.insert(id, environment);
+    });
+}
+
+/// Does the entry carry its own `#mode` directive?
+///
+/// This is the `fx50` REPL's rule: a line with a header uses it, and a line
+/// without one inherits the session's mode.
+fn declares_mode(entry: &str) -> bool {
+    casio_fx50fh2::lexer::lex(entry).is_ok_and(|tokens| {
+        tokens
+            .iter()
+            .any(|token| matches!(token.kind, TokenKind::ModeDirective(_)))
     })
 }

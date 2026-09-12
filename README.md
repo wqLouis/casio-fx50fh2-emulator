@@ -225,16 +225,25 @@ The Rust and JavaScript sides build **independently**: `bun run build:wasm` is
 only needed when `src/` or `crates/` changes, so working on the page needs no
 Rust toolchain at all.
 
-[`web/`](web) is a workbench: write `.fxc` with completions and hover, watch it
-become PRGM as you type, see the bytes it costs out of the machine's 680, see
-which of the seven memories each variable got, and run it with values for the
-`?` prompts. Each example carries its own `#tests` and can be run from the page.
+[`web/`](web) is a workbench, and it also serves the documentation you are
+reading now as a website. Write `.fxc` with completions and hover, build it into
+PRGM when you ask, see the bytes it costs out of the machine's 680, see which of
+the seven memories each variable got, and run it with values for the `?` prompts.
+The build is deliberately manual: the diagnostics stay live, but the listing, the
+size and the memory plan only change when you press Build, and they say
+`out of date` when the editor has moved on rather than quietly showing a
+different program. There is a switch for the size optimiser, a terminal-like
+REPL whose session remembers the mode and the memories, resizable and hideable
+panels, and a light and dark theme. Each example carries its own `#tests` and
+can be run from the page.
+
 Nothing is reimplemented in JavaScript — it is the same Rust crates the CLI and
 the editor extensions use, behind three `extern "C"` functions and a JSON string
 ([why not `wasm-bindgen`](docs/DECISIONS.md#adr-0031--the-webassembly-interface-is-a-json-string-over-three-exports)).
 
 `crates/fx-wasm` is the module itself; [`web/README.md`](web/README.md) covers
-the page, and `fx50.js` plus `fx_wasm.wasm` can be dropped into any other site.
+the page, and `build/fx_wasm.wasm` can be dropped into any other site behind the
+same three functions.
 
 ## Documentation
 

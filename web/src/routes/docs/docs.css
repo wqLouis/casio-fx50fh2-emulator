@@ -1,0 +1,173 @@
+/*
+ * Styling for rendered markdown.
+ *
+ * The HTML comes from `{@html}`, so it never carries Svelte's scoping
+ * attribute; these rules are global on purpose and scoped by the `.doc-prose`
+ * wrapper instead.
+ *
+ * Every colour is one of Tailwind's own variables rather than a literal. The
+ * light theme re-points those variables in `layout.css`, so the prose follows
+ * the rest of the site between themes without a single `dark:` variant.
+ */
+.doc-prose {
+	color: var(--color-neutral-300);
+	font-size: 0.875rem;
+	line-height: 1.7;
+}
+
+.doc-prose > :first-child {
+	margin-top: 0;
+}
+
+.doc-prose h1,
+.doc-prose h2,
+.doc-prose h3,
+.doc-prose h4,
+.doc-prose h5,
+.doc-prose h6 {
+	color: var(--color-neutral-100);
+	font-weight: 600;
+	line-height: 1.3;
+	margin: 1.75em 0 0.75em;
+	scroll-margin-top: 1rem;
+}
+
+.doc-prose h1 {
+	font-size: 1.5rem;
+}
+
+.doc-prose h2 {
+	font-size: 1.2rem;
+	border-bottom: 1px solid var(--color-neutral-800);
+	padding-bottom: 0.3em;
+}
+
+.doc-prose h3 {
+	font-size: 1.05rem;
+}
+
+.doc-prose h4 {
+	font-size: 0.95rem;
+}
+
+.doc-prose p,
+.doc-prose ul,
+.doc-prose ol,
+.doc-prose table,
+.doc-prose blockquote,
+.doc-prose pre {
+	margin: 0.9em 0;
+}
+
+.doc-prose a {
+	color: var(--color-sky-400);
+	text-decoration: none;
+}
+
+.doc-prose a:hover {
+	text-decoration: underline;
+}
+
+.doc-prose strong {
+	color: var(--color-neutral-100);
+	font-weight: 600;
+}
+
+.doc-prose ul {
+	list-style: disc;
+	padding-left: 1.4em;
+}
+
+.doc-prose ol {
+	list-style: decimal;
+	padding-left: 1.4em;
+}
+
+.doc-prose li {
+	margin: 0.2em 0;
+}
+
+.doc-prose li > ul,
+.doc-prose li > ol {
+	margin: 0.2em 0;
+}
+
+.doc-prose li::marker {
+	color: var(--color-neutral-500);
+}
+
+.doc-prose code {
+	font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
+	font-size: 0.85em;
+	background: var(--color-neutral-900);
+	border: 1px solid var(--color-neutral-800);
+	border-radius: 0.25rem;
+	padding: 0.1em 0.35em;
+	color: var(--color-neutral-200);
+}
+
+.doc-prose pre {
+	background: var(--color-neutral-900);
+	border: 1px solid var(--color-neutral-800);
+	border-radius: 0.375rem;
+	padding: 0.85rem 1rem;
+	overflow-x: auto;
+}
+
+.doc-prose pre code {
+	display: block;
+	background: transparent;
+	border: 0;
+	padding: 0;
+	color: var(--color-neutral-200);
+	font-size: 0.8125rem;
+	line-height: 1.6;
+	white-space: pre;
+}
+
+.doc-prose blockquote {
+	border-left: 3px solid var(--color-neutral-700);
+	padding-left: 1em;
+	color: var(--color-neutral-400);
+}
+
+.doc-prose blockquote p {
+	margin: 0.4em 0;
+}
+
+.doc-prose table {
+	border-collapse: collapse;
+	display: block;
+	width: 100%;
+	overflow-x: auto;
+}
+
+.doc-prose th,
+.doc-prose td {
+	border: 1px solid var(--color-neutral-800);
+	padding: 0.4em 0.7em;
+	text-align: left;
+	vertical-align: top;
+}
+
+.doc-prose th {
+	background: var(--color-neutral-900);
+	color: var(--color-neutral-200);
+	font-weight: 600;
+	white-space: nowrap;
+}
+
+.doc-prose hr {
+	border: 0;
+	border-top: 1px solid var(--color-neutral-800);
+	margin: 1.75em 0;
+}
+
+.doc-prose img {
+	max-width: 100%;
+}
+
+.doc-prose input[type='checkbox'] {
+	margin-right: 0.4em;
+	vertical-align: middle;
+}

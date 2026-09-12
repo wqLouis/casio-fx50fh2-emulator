@@ -1,1 +1,66 @@
 @import 'tailwindcss';
+
+/*
+ * Light and dark.
+ *
+ * The UI is authored against the dark ramp: `bg-neutral-950` is the page,
+ * `neutral-900` a raised surface, `neutral-800` a hairline, `neutral-100` body
+ * text. Rather than write a `light:` variant on ~260 utility classes, the light
+ * theme re-points Tailwind's own colour variables — every generated utility
+ * already references them (`background-color: var(--color-neutral-950)`), so
+ * one block restyles the whole application, including pages written later.
+ *
+ * The neutral ramp is mirrored about 500: 950 becomes 50, 800 becomes 200, and
+ * so on. A colour that read as "a step up off the page" in the dark theme reads
+ * as "a step down into the page" in the light one, which is the same
+ * relationship. The accents move two or three steps darker so that text built
+ * for a near-black background stays legible on a near-white one.
+ *
+ * `.dark` needs no block: those are Tailwind's defaults. `theme.svelte.ts`
+ * always puts exactly one of the two classes on `<html>`, and the inline script
+ * in `app.html` does it before the first paint so the page never flashes.
+ */
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+.light {
+	color-scheme: light;
+
+	--color-neutral-50: oklch(14.5% 0 none);
+	--color-neutral-100: oklch(20.5% 0 none);
+	--color-neutral-200: oklch(26.9% 0 none);
+	--color-neutral-300: oklch(37.1% 0 none);
+	--color-neutral-400: oklch(43.9% 0 none);
+	--color-neutral-500: oklch(55.6% 0 none);
+	--color-neutral-600: oklch(70.8% 0 none);
+	--color-neutral-700: oklch(87% 0 none);
+	--color-neutral-800: oklch(92.2% 0 none);
+	--color-neutral-900: oklch(97% 0 none);
+	--color-neutral-950: oklch(98.5% 0 none);
+
+	/* Danger: the tint shades become pale, the text shades become saturated. */
+	--color-red-950: oklch(97.1% 0.013 17.38);
+	--color-red-900: oklch(88.5% 0.062 18.334);
+	--color-red-600: oklch(50.5% 0.213 27.518);
+	--color-red-500: oklch(57.7% 0.245 27.325);
+	--color-red-400: oklch(57.7% 0.245 27.325);
+	--color-red-300: oklch(50.5% 0.213 27.518);
+
+	/* Caution. */
+	--color-amber-500: oklch(66.6% 0.179 58.318);
+	--color-amber-400: oklch(55.5% 0.163 48.998);
+
+	/* Success. */
+	--color-emerald-600: oklch(50.8% 0.118 165.612);
+	--color-emerald-500: oklch(59.6% 0.145 163.225);
+	--color-emerald-400: oklch(59.6% 0.145 163.225);
+	--color-emerald-300: oklch(50.8% 0.118 165.612);
+
+	/* Accent. */
+	--color-sky-500: oklch(58.8% 0.158 241.966);
+	--color-sky-400: oklch(58.8% 0.158 241.966);
+}
+
+.dark {
+	color-scheme: dark;
+}

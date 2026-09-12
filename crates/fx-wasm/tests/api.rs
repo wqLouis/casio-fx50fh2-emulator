@@ -757,3 +757,197 @@ fn embedded_tests_may_include_a_library_from_the_files_map() {
     assert_eq!(number(&response, "passed"), 1.0);
     assert_eq!(number(&response, "failed"), 0.0);
 }
+
+// ---------------------------------------------------------------------------
+// interactive sessions
+
+/// Open a session and return its id.
+fn repl_open() -> f64 {
+    let response = ok(object([("op", string("replOpen"))]));
+    number(&response, "id")
+}
+
+/// Run one entry in a session, expecting success.
+fn repl(id: f64, source: &str) -> Json {
+    ok(object([
+        ("op", string("replEval")),
+        ("id", Value::from(id as u64)),
+        ("source", string(source)),
+    ]))
+}
+
+/// One entry in a session, carrying `?` inputs.
+fn repl_with_inputs(id: f64, source: &str, inputs: [Json; 1]) -> Json {
+    ok(object([
+        ("op", string("replEval")),
+        ("id", Value::from(id as u64)),
+        ("source", string(source)),
+        ("inputs", Value::Array(inputs.into_iter().collect())),
+    ]))
+}
+
+/// The display of one memory in a session's state.
+fn memory(state: &Json, name: &str) -> String {
+    text(
+        state
+            .get("memories")
+            .and_then(|memories| memories.get(name))
+            .unwrap_or_else(|| panic!("no memory `{name}` in {state:?}")),
+        "display",
+    )
+}
+
+#[test]
+fn repl_open_returns_a_usable_id_and_ids_are_unique() {
+    let response = ok(object([("op", string("replOpen"))]));
+    let id = number(&response, "id");
+    assert!(id >= 1.0, "{id}");
+
+    let second = number(&ok(object([("op", string("replOpen"))])), "id");
+    assert_ne!(id, second, "ids must be distinct");
+
+    // The id addresses the session it opened.
+    let result = repl(id, "2 + 3");
+    assert_eq!(strings(&result, "outputs"), vec!["5"]);
+    assert_eq!(text(result.get("state").unwrap(), "mode"), "COMP");
+}
+
+#[test]
+fn repl_entries_share_their_memories() {
+    let id = repl_open();
+    // `5→A` stores, and the machine shows the value it stored.
+    let assign = repl(id, "5\u{2192}A");
+    assert_eq!(strings(&assign, "outputs"), vec!["5"]);
+    assert_eq!(memory(assign.get("state").unwrap(), "A"), "5");
+    // The next entry sees it.
+    let show = repl(id, "A\u{25e2}");
+    assert_eq!(strings(&show, "outputs"), vec!["5"]);
+    assert_eq!(memory(show.get("state").unwrap(), "A"), "5");
+}
+
+#[test]
+fn a_mode_declared_on_one_entry_changes_the_next() {
+    let id = repl_open();
+    // The directive is silent, but it changes the session's mode.
+    let declared = repl(id, "#mode CMPLX");
+    assert!(strings(&declared, "outputs").is_empty(), "{declared:?}");
+    assert_eq!(text(declared.get("state").unwrap(), "mode"), "CMPLX");
+    // `3+4i` now means the complex number, not an error.
+    let complex = repl(id, "3 + 4i");
+    assert_eq!(strings(&complex, "outputs"), vec!["3+4\u{1d456}"]);
+}
+
+#[test]
+fn i_is_not_imaginary_until_the_session_is_in_cmplx() {
+    let id = repl_open();
+    // A fresh session is COMP, where `i` is not the imaginary unit; the entry
+    // is a Mode ERROR rather than quietly becoming complex.
+    let message = err(object([
+        ("op", string("replEval")),
+        ("id", Value::from(id as u64)),
+        ("source", string("3 + 4i")),
+    ]));
+    assert!(message.contains("CMPLX"), "{message}");
+    // After `#mode CMPLX` it is imaginary, in the same session.
+    repl(id, "#mode CMPLX");
+    let complex = repl(id, "3 + 4i");
+    assert_eq!(strings(&complex, "outputs"), vec!["3+4\u{1d456}"]);
+}
+
+#[test]
+fn a_failing_entry_reports_and_leaves_the_session_working() {
+    let id = repl_open();
+    repl(id, "7\u{2192}A");
+
+    let message = err(object([
+        ("op", string("replEval")),
+        ("id", Value::from(id as u64)),
+        ("source", string("1 / 0")),
+    ]));
+    assert!(message.to_ascii_lowercase().contains("math"), "{message}");
+
+    // The stored environment is untouched: `A` is still 7, and lines still run.
+    let after = repl(id, "A + 1");
+    assert_eq!(strings(&after, "outputs"), vec!["8"]);
+    assert_eq!(memory(after.get("state").unwrap(), "A"), "7");
+}
+
+#[test]
+fn repl_entries_answer_prompts_from_inputs() {
+    let id = repl_open();
+    let response = repl_with_inputs(id, "?\u{2192}A:A \u{d7} 2", [Value::from(21.0)]);
+    assert_eq!(strings(&response, "outputs"), vec!["42"]);
+
+    // Too few inputs fails the way the interpreter fails with none available.
+    let message = err(object([
+        ("op", string("replEval")),
+        ("id", Value::from(id as u64)),
+        ("source", string("?")),
+    ]));
+    assert!(message.contains("input"), "{message}");
+}
+
+#[test]
+fn repl_reset_clears_the_memories() {
+    let id = repl_open();
+    repl(id, "42\u{2192}A");
+    repl(id, "5\u{2192}B");
+    repl(id, "#mode CMPLX");
+
+    let reset = ok(object([
+        ("op", string("replReset")),
+        ("id", Value::from(id as u64)),
+    ]));
+    let state = reset.get("state").expect("state");
+    assert_eq!(memory(state, "A"), "0");
+    assert_eq!(memory(state, "B"), "0");
+    assert_eq!(text(state, "mode"), "COMP");
+
+    // The session is still open and usable.
+    assert_eq!(strings(&repl(id, "A + 1"), "outputs"), vec!["1"]);
+}
+
+#[test]
+fn an_unknown_session_id_is_an_error() {
+    for op in ["replEval", "replReset", "replClose"] {
+        let mut request = object([("op", string(op)), ("id", Value::from(9999))]);
+        if op == "replEval" {
+            request
+                .as_object_mut()
+                .unwrap()
+                .insert("source".to_string(), string("1 + 1"));
+        }
+        let message = err(request);
+        assert!(message.contains("unknown session"), "{op}: {message}");
+    }
+}
+
+#[test]
+fn a_closed_session_id_is_an_error() {
+    let id = repl_open();
+    let closed = ok(object([
+        ("op", string("replClose")),
+        ("id", Value::from(id as u64)),
+    ]));
+    // `replClose` reports nothing but `ok`.
+    assert_eq!(closed.as_object().map(|object| object.len()), Some(1));
+
+    // The id is not reused, so it stays an error rather than opening a new
+    // session's state.
+    let message = err(object([
+        ("op", string("replEval")),
+        ("id", Value::from(id as u64)),
+        ("source", string("1 + 1")),
+    ]));
+    assert!(message.contains("unknown session"), "{message}");
+}
+
+#[test]
+fn two_sessions_do_not_see_each_other() {
+    let one = repl_open();
+    let two = repl_open();
+    repl(one, "11\u{2192}A");
+    repl(two, "22\u{2192}A");
+    assert_eq!(memory(repl(one, "A").get("state").unwrap(), "A"), "11");
+    assert_eq!(memory(repl(two, "A").get("state").unwrap(), "A"), "22");
+}

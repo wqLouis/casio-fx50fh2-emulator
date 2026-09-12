@@ -227,6 +227,28 @@ export interface EvalResult {
 	state: MachineState;
 }
 
+/** An open interactive session. */
+export interface ReplSession {
+	id: number;
+}
+
+/** One entry typed into an interactive session. */
+export interface ReplEntry {
+	id: number;
+	/** The line or program to run. */
+	source: string;
+	/** Values for any `?` in it. */
+	inputs?: number[];
+}
+
+/** What an entry did. */
+export interface ReplResult {
+	/** The `◢` displays, in order. */
+	outputs: string[];
+	/** The session's state after the entry, for a memory or status display. */
+	state: MachineState;
+}
+
 /** One case from a `#tests` table. */
 export interface TestCase {
 	name: string;
@@ -384,6 +406,45 @@ export class Fx50 {
 	/** Evaluate one expression, with no program around it. */
 	evaluate(options: SourceOptions): FxResponse<EvalResult> {
 		return this.call<EvalResult>({ op: 'eval', ...options });
+	}
+
+	// -- interactive session -------------------------------------------------
+	//
+	// A plain `evaluate` is stateless: each call starts from nothing. The
+	// calculator is not — `#mode CMPLX` on one line changes what the next line
+	// means, and a variable set on one line is there on the next. So an
+	// interactive panel needs a session that outlives a single call, which is
+	// what these four operations are. They mirror the `fx50` command line's
+	// REPL, including its rule that a line with no `#mode` of its own inherits
+	// the session's current mode.
+
+	/** Open a session. Close it when the panel goes away. */
+	replOpen(): FxResponse<ReplSession> {
+		return this.call<ReplSession>({ op: 'replOpen' });
+	}
+
+	/**
+	 * Run one entry in a session and return what it displayed.
+	 *
+	 * `outputs` holds the `◢` displays, and a trailing value-producing entry
+	 * displays too — `5→A` shows `5`, exactly as the machine does. A failing
+	 * entry reports an error and leaves the session usable.
+	 *
+	 * `inputs` answers `?` prompts; a line containing `?` without enough of them
+	 * fails the way it would with no input available.
+	 */
+	replEval(options: ReplEntry): FxResponse<ReplResult> {
+		return this.call<ReplResult>({ op: 'replEval', ...options });
+	}
+
+	/** Start the session over: clear every memory and all display settings. */
+	replReset(id: number): FxResponse<{ state: MachineState }> {
+		return this.call<{ state: MachineState }>({ op: 'replReset', id });
+	}
+
+	/** Forget a session. */
+	replClose(id: number): FxResponse<Record<string, never>> {
+		return this.call<Record<string, never>>({ op: 'replClose', id });
 	}
 }
 

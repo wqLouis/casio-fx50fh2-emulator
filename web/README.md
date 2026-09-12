@@ -122,16 +122,19 @@ its autocomplete/lint/hover APIs map one-to-one onto the module's `completions`,
 than from the package root — the barrel re-exports about 1700 of them and there
 is no reason for the dev server to walk all of them.
 
-**Examples belong to the documentation, not the editor.** `bundle-examples.ts`
-generates them for the docs pages; the editor's workspace holds the user's own
-program and nothing else, so opening the workbench never lands you in a folder
-full of files you did not write.
+**Examples and docs belong to the documentation, not the editor.**
+`bundle-examples.ts` and `bundle-docs.ts` generate them for the docs pages; the
+editor's workspace holds the user's own program and nothing else, so opening the
+workbench never lands you in a folder full of files you did not write.
 
 **Everything is a `devDependency`.** The output is fully static, so nothing is
 needed at runtime; Vite bundles it all, which is why SvelteKit itself is a
 `devDependency` too.
 
-### Still to do
+### Deployment
 
-- The editor, and the documentation pages that consume the examples.
-- A favicon — the scaffold's Svelte logo is still in place.
+`.github/workflows/pages.yml` builds the wasm, builds the site, and deploys it to
+GitHub Pages on every push to `master`. The base path comes from
+`actions/configure-pages`'s `base_path` output rather than a hard-coded repo
+name, so it is right for a project page, a user page, or a custom domain without
+editing the workflow.

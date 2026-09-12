@@ -1,0 +1,91 @@
+name: Deploy to GitHub Pages
+
+on:
+  # The default branch is `master`.
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+# `contents: read` to check the repo out; `pages: write` and `id-token: write`
+# let deploy-pages publish and exchange an OIDC token for a Pages credential.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One Pages deployment at a time: a newer run supersedes an in-flight one.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Install the WebAssembly target
+        run: rustup target add wasm32-unknown-unknown
+
+      # Caches ~/.cargo plus target/, including target/wasm32-unknown-unknown,
+      # where `bun run build:wasm` writes the module.
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+
+      - name: Cache Bun install artifacts
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('web/bun.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-
+
+      # Must run before the frontend build: it publishes the project page's
+      # base path as `base_path` (`/casio-fx50fh2-emulator` for this repo, or
+      # "" for a user/org page), which the next step hands to vite.config.ts.
+      - name: Configure Pages
+        id: pages
+        uses: actions/configure-pages@v5
+
+      - name: Install web dependencies
+        working-directory: web
+        run: bun install --frozen-lockfile
+
+      # The project's own script: it installs nothing itself, but runs
+      # `cargo build --profile wasm --target wasm32-unknown-unknown -p fx-wasm`
+      # and copies the artifact to web/static/fx_wasm.wasm.
+      - name: Build the WebAssembly module
+        working-directory: web
+        run: bun run build:wasm
+
+      # `bun run build` also regenerates the examples and checks that the wasm
+      # is present. vite.config.ts requires BASE_PATH to be empty or to start
+      # with "/", which is exactly what configure-pages' `base_path` is.
+      - name: Build the static site
+        working-directory: web
+        env:
+          BASE_PATH: ${{ steps.pages.outputs.base_path }}
+        run: bun run build
+
+      - name: Upload the Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          # The directory @sveltejs/adapter-static writes to (web/build).
+          path: web/build
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
