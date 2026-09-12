@@ -111,13 +111,6 @@ fn main() {
 	// ---- editing session -------------------------------------------------
 	let openPaths = $state<string[]>([]);
 	let activePath = $state<string | null>(null);
-	/**
-	 * The text the editor is given. It is deliberately *not* derived from the
-	 * buffer: the editor treats a changed `value` as a new document, so feeding
-	 * the user's own keystrokes back would reset the cursor on every character.
-	 * It changes only when the page switches documents.
-	 */
-	let editorValue = $state('');
 	let buffers = $state<Record<string, string>>({});
 	let savedText = $state<Record<string, string>>({});
 	let diskFiles = $state<Record<string, string>>({});
@@ -169,6 +162,20 @@ fn main() {
 		'rounded-t-md px-3 py-1.5 text-xs font-medium text-neutral-400 outline-none select-none hover:text-neutral-200 focus-visible:ring-2 focus-visible:ring-neutral-600 data-[state=active]:bg-neutral-900 data-[state=active]:text-neutral-100';
 
 	// ---- derived ---------------------------------------------------------
+	/**
+	 * The active file's text, which is also what the editor is given.
+	 *
+	 * It is the buffer itself, not a copy taken when the file was opened. A copy
+	 * goes stale the moment the user types, and the editor is rebuilt whenever a
+	 * panel toggle changes the shape of the layout — so a recreation would
+	 * faithfully restore text from before the last several minutes of work. This
+	 * happened: hiding PRGM when it was the last visible panel threw the editor
+	 * away and brought it back with the starter program.
+	 *
+	 * Handing the editor its own text back is safe because `CodeEditor` ignores a
+	 * `value` that already matches its document, so no keystroke can reset the
+	 * cursor.
+	 */
 	const activeText = $derived(activePath ? (buffers[activePath] ?? '') : '');
 	const dirtySet = $derived(
 		new Set(openPaths.filter((path) => (buffers[path] ?? '') !== (savedText[path] ?? '')))
@@ -322,7 +329,6 @@ fn main() {
 	async function adoptWorkspace() {
 		openPaths = [];
 		activePath = null;
-		editorValue = '';
 		buffers = {};
 		savedText = {};
 		diskFiles = {};
@@ -366,7 +372,6 @@ fn main() {
 		}
 		if (!openPaths.includes(path)) openPaths = [...openPaths, path];
 		activePath = path;
-		editorValue = buffers[path] ?? '';
 	}
 
 	function selectFile(path: string) {
@@ -376,7 +381,6 @@ fn main() {
 			return;
 		}
 		activePath = path;
-		editorValue = buffers[path] ?? '';
 	}
 
 	function onEditorChange(text: string) {
@@ -405,9 +409,7 @@ fn main() {
 		delete buffers[path];
 		delete savedText[path];
 		if (activePath === path) {
-			const next = openPaths[openPaths.length - 1] ?? null;
-			activePath = next;
-			editorValue = next ? (buffers[next] ?? '') : '';
+			activePath = openPaths[openPaths.length - 1] ?? null;
 		}
 	}
 
@@ -472,9 +474,7 @@ fn main() {
 				delete savedText[path];
 			}
 			if (activePath && removed.includes(activePath)) {
-				const next = openPaths[openPaths.length - 1] ?? null;
-				activePath = next;
-				editorValue = next ? (buffers[next] ?? '') : '';
+				activePath = openPaths[openPaths.length - 1] ?? null;
 			}
 			await refreshDisk();
 		} catch (cause) {
@@ -764,7 +764,7 @@ fn main() {
 		<div class="h-full min-h-0">
 			{#if activePath}
 				<CodeEditor
-					value={editorValue}
+					value={activeText}
 					{fx}
 					path={activePath}
 					{files}
