@@ -35,7 +35,8 @@
 //! ```
 
 use crate::ast::{
-    Accessor, BinOp, Expr, FnDef, ForStmt, MemOp, Program, RegType, Setup, StatVar, Stmt, UnOp,
+    Accessor, BinOp, Expr, FnDef, ForStmt, MemOp, Param, Program, RegType, Setup, StatVar, Stmt,
+    UnOp,
 };
 use crate::builtins;
 use crate::error::TranspileError;
@@ -566,8 +567,33 @@ impl<'a> Parser<'a> {
         let mut params = Vec::new();
         if !self.check(&Tok::RParen) {
             loop {
-                let (param, _) = self.expect_ident("a parameter name")?;
-                params.push(param);
+                let (name, name_pos) = self.expect_ident("a parameter name")?;
+                // `v[2]` declares an array parameter. The size is required
+                // rather than optional: an argument is passed by name, so the
+                // parameter *is* the caller's array, and the size is the extent
+                // the body may index. Without it there would be no way to tell
+                // `v[0]` on an array from an index on a plain value.
+                let array = if self.matches(&Tok::LBracket) {
+                    if self.check(&Tok::RBracket) {
+                        return Err(self.error_at(
+                            format!(
+                                "`{name}[]` needs a size; write `{name}[n]`. The size is the \
+                                 extent the body may index, so there is nothing to infer it from"
+                            ),
+                            name_pos,
+                        ));
+                    }
+                    let size = self.bracket_index()?;
+                    self.expect(&Tok::RBracket, "`]` after the array size")?;
+                    if size == 0 {
+                        return Err(self
+                            .error_at(format!("`{name}` is declared with no elements"), name_pos));
+                    }
+                    Some(size)
+                } else {
+                    None
+                };
+                params.push(Param { name, array });
                 if !self.matches(&Tok::Comma) {
                     break;
                 }

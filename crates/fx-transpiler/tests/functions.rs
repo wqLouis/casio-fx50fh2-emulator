@@ -354,6 +354,110 @@ fn a_library_error_points_at_the_library_line() {
 }
 
 // ---------------------------------------------------------------------------
+// Array parameters
+//
+// A parameter is passed by name, so an array parameter is not a copy: `v` *is*
+// the caller's array, and `v[0]` is resolved against it after substitution. The
+// declared size is therefore the extent the body may index, not storage.
+
+#[test]
+fn an_array_parameter_names_the_callers_array() {
+    // A procedure's `return` lands in a temp, so `v[0] * v[1]` becomes `A×B→C`.
+    glyph(
+        "fn area(v[2]) { return v[0] * v[1]; }\nfn main() { let a[] = {3, 4}; print(area(a)); }",
+        "3→A\n4→B\nA×B→C\nC◢\n",
+    );
+
+    // The expression form inlines straight in, with no temp at all.
+    glyph(
+        "fn area(v[2]) = v[0] * v[1];\nfn main() { let a[] = {3, 4}; print(area(a)); }",
+        "3→A\n4→B\nA×B◢\n",
+    );
+}
+
+#[test]
+fn writing_through_an_array_parameter_writes_the_callers_array() {
+    glyph(
+        "fn clear(v[2]) { v[0] = 0; v[1] = 0; }\nfn main() { let a[] = {1, 2}; clear(a); print(a[0]); }",
+        "1→A\n2→B\n0→A\n0→B\nA◢\n",
+    );
+}
+
+#[test]
+fn an_array_parameter_may_be_passed_on_to_another() {
+    // `f` hands its own parameter to `g`. Parameters are substituted before
+    // nested calls are lowered, so both end up naming the caller's array — which
+    // is why a bare array parameter is substituted like any other name.
+    glyph(
+        "fn g(w[2]) { return w[1]; }\nfn f(v[2]) { return g(v) + v[0]; }\nfn main() { let a[] = {3, 4}; print(f(a)); }",
+        "3→A\n4→B\nB→C\nC+A→D\nD◢\n",
+    );
+}
+
+#[test]
+fn an_array_parameter_indexed_by_a_loop_unrolls() {
+    glyph(
+        "fn total(v[3]) { let s = 0; for (let i = 0; i < 3; i = i + 1) { s = s + v[i]; } return s; }\nfn main() { let a[] = {1, 2, 3}; print(total(a)); }",
+        "1→A\n2→B\n3→C\n0→D\nD+A→D\nD+B→D\nD+C→D\nD→X\nX◢\n",
+    );
+}
+
+#[test]
+fn an_index_past_the_declared_size_is_rejected() {
+    let e = err("fn f(v[2]) { return v[2]; }\nfn main() { let a[] = {1, 2}; print(f(a)); }");
+    assert!(e.message.contains("out of bounds"), "{}", e.message);
+    assert!(
+        e.message.contains("declared with 2 element(s)"),
+        "{}",
+        e.message
+    );
+}
+
+#[test]
+fn an_argument_that_is_not_an_array_name_is_rejected() {
+    let e = err("fn f(v[2]) { return v[0]; }\nfn main() { print(f(5)); }");
+    assert!(
+        e.message.contains("must be the name of an array"),
+        "{}",
+        e.message
+    );
+
+    // An element is a value, not an array.
+    let e = err("fn f(v[2]) { return v[0]; }\nfn main() { let a[] = {1, 2}; print(f(a[0])); }");
+    assert!(
+        e.message.contains("must be the name of an array"),
+        "{}",
+        e.message
+    );
+}
+
+#[test]
+fn a_value_parameter_cannot_be_indexed() {
+    let e = err("fn f(x) { return x[0]; }\nfn main() { print(f(1)); }");
+    assert!(
+        e.message.contains("value parameter used as an array"),
+        "{}",
+        e.message
+    );
+    // The diagnostic says how to fix it.
+    assert!(e.message.contains("fn f(x[n])"), "{}", e.message);
+}
+
+#[test]
+fn an_array_parameter_has_no_value_of_its_own() {
+    // Caught after substitution, by the check that rejects any array name in a
+    // value position — the same error a direct `print(a)` gets.
+    let e = err("fn f(v[2]) { return v; }\nfn main() { let a[] = {1, 2}; print(f(a)); }");
+    assert!(e.message.contains("is an array"), "{}", e.message);
+}
+
+#[test]
+fn an_array_size_must_be_positive() {
+    let e = err("fn f(v[0]) { return 1; }\nfn main() { print(f(1)); }");
+    assert!(e.message.contains("no elements"), "{}", e.message);
+}
+
+// ---------------------------------------------------------------------------
 // Execution
 
 #[cfg(feature = "execute")]
@@ -395,6 +499,35 @@ fn sum_to(n) {
 fn main() { print(sum_to(10)); }
 ";
         assert_eq!(run(source, &[]), vec!["55"]);
+    }
+
+    #[test]
+    fn an_array_parameter_runs() {
+        // The program from the report that prompted array parameters: an array
+        // of two inputs handed to a function that multiplies them.
+        let source = "\
+fn mul(v[2]) { return v[0] * v[1]; }
+fn main() {
+    let a[] = {input(), input()};
+    print(mul(a));
+}
+";
+        assert_eq!(run(source, &[6.0, 7.0]), vec!["42"]);
+    }
+
+    #[test]
+    fn an_array_parameter_can_be_written_through() {
+        let source = "\
+fn scale(v[3], by) {
+    for (let i = 0; i < 3; i = i + 1) { v[i] = v[i] * by; }
+}
+fn main() {
+    let a[] = {1, 2, 3};
+    scale(a, 10);
+    print(a[2]);
+}
+";
+        assert_eq!(run(source, &[]), vec!["30"]);
     }
 
     #[test]

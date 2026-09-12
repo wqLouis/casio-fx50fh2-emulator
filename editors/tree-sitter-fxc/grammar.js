@@ -191,7 +191,11 @@ module.exports = grammar({
         $.block,
       ),
     ),
-    parameters: $ => seq($.identifier, repeat(seq(',', $.identifier))),
+    parameters: $ => seq($.parameter, repeat(seq(',', $.parameter))),
+    // `v` is a value parameter; `v[2]` is an array parameter, which names the
+    // caller's array rather than copying it.  The size is written down because
+    // it is the extent the body may index.
+    parameter: $ => seq($.identifier, optional(seq('[', $.number, ']'))),
 
     // `return;` or `return expr;`.  The transpiler requires it to be the last
     // statement of a block function; that is a semantic check, not a

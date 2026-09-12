@@ -313,6 +313,11 @@ Rules that matter when generating code:
   numbers; an argument mentioned `n` times is emitted `n` times.
 * **A parameter that is assigned needs an assignable argument** (a variable or
   array element), not an expression.
+* **An array parameter is written `v[2]`** and takes the *name* of an array:
+  `fn dot(v[2], w[2]) { return v[0]*w[0] + v[1]*w[1]; }` called as `dot(a, b)`.
+  It is the caller's array — no memory of its own, and `v[0] = …` writes `a[0]`.
+  The size is required and is the extent the body may index; the argument may
+  not be an expression or an element. A bare `v` has no value, so index it.
 * **`return` is the last statement only**, and there is one return value. For
   two results, assign through output parameters:
   `fn minmax(a, b, lo, hi) { lo = a; hi = b; … }`.

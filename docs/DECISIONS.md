@@ -1448,3 +1448,45 @@ and work. An unexercised feature is worse than no feature, because it advertises
 a configuration that does not exist, and the dead `cfg` branches it leaves behind
 cannot be caught by the compiler *or* by a test suite that only ever runs the
 default. When adding one, build both sides.
+
+## ADR 0034 — An array parameter is the caller's array, passed by name
+
+**Context.** Functions are inlined and arguments are substituted at each mention
+([ADR 0026](#adr-0026--include-pulls-in-libraries-not-statement-fragments)), and
+arrays are one memory per element with compile-time indices
+([ADR 0018](#adr-0018--arrays-use-one-memory-per-element-with-compile-time-indices)).
+Together those left a hole: a parameter could not be used as an array. The parser
+rejected `fn f(v[2])` outright, and `fn f(v)` with `v[0]` in the body was an
+error telling the author to pass the elements as separate scalars. Every function
+over a vector had to take its elements one at a time, so a three-element sum was
+`fn sum(a, b, c)` — which does not generalise and does not compose with a loop.
+
+**Decision.** `fn f(v[2])` declares an **array parameter**, and the argument must
+be the *name* of an array. The parameter is the caller's array: `v[0]` resolves
+against it after substitution, the parameter occupies none of the machine's seven
+memories, and an assignment through `v[i]` writes the caller's element.
+
+The declared size is the extent the body may index, and it is required. It is
+also the only thing separating an array parameter from a value parameter, so `v`
+keeps meaning "one value" and `v[0]` on it stays an error — now one that says how
+to declare what was meant.
+
+**Why not infer the size (`v[]`)?** There is nothing to infer it from. With call
+by name a parameter is a name, not a sized value crossing a boundary, so a size
+would have to come from the argument — which is known only at each call site, and
+a function may be called from several. Requiring it keeps "is this index inside
+the declaration?" answerable from the body, which is where the author is looking
+when it fails.
+
+**Why not copy the array in?** It would cost memory this machine does not have:
+680 bytes shared by all four program areas, and a two-element copy is two of the
+seven memories. It would also be a silent behaviour change, because writing
+through a *value* parameter already writes back to the caller — arrays behaving
+the opposite way would be the surprising choice.
+
+**One thing deliberately left un-rejected.** A bare array parameter is
+substituted like any other name instead of being refused for having no value. It
+has to be: `g(v)` hands the array on to another function's array parameter, and
+that is only decidable once `g` is known. Misuse (`print(v)`) is caught after
+substitution by the check that already refuses any array name in a value
+position, so it reports the same thing a direct `print(a)` does.

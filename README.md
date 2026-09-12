@@ -269,7 +269,8 @@ same three functions.
   `quadratic.fx`, `complex_quadratic.fx`, `statistics.fx`.
 * **`.fxc`** (`fx50 run` / `build` / `test`): `factorial.fxc`, `quadratic.fxc`,
   `constants.fxc` (the 40 scientific constants), `compiletime.fxc` (`#data`,
-  `const`, `free`), `arrays.fxc` (one memory per element), `determinant.fxc`
+  `const`, `free`), `arrays.fxc` (one memory per element), `array_params.fxc`
+  (passing an array to a function by name), `determinant.fxc`
   (a 3x3 determinant against the seven-memory limit), `functions.fxc`
   (user-defined functions, inlined at each call), `packing.fxc` (eight reals in
   four memories, by packing each pair into a complex number), and `include.fxc`,

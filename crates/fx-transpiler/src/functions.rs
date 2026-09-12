@@ -291,12 +291,12 @@ fn check_def(def: &FnDef, source: &str) -> Result<(), TranspileError> {
 
     let mut seen = BTreeSet::new();
     for param in &def.params {
-        if !seen.insert(param.clone()) {
+        if !seen.insert(param.name.clone()) {
             return Err(TranspileError::at(
                 source,
                 format!(
-                    "`{param}` is listed twice in the parameters of `{}`",
-                    def.name
+                    "`{}` is listed twice in the parameters of `{}`",
+                    param.name, def.name
                 ),
                 def.pos,
             ));
@@ -435,7 +435,7 @@ fn check_scope(
 ) -> Result<(), TranspileError> {
     let mut declared = collect_declared(&def.body);
     for param in &def.params {
-        declared.insert(param.clone());
+        declared.insert(param.name.clone());
     }
 
     let mut uses = Vec::new();
@@ -1171,7 +1171,7 @@ impl Inliner<'_> {
         want_value: bool,
     ) -> Result<Option<Expr>, TranspileError> {
         if let Some(expr) = &def.expr {
-            let map: BTreeMap<String, Expr> = def.params.iter().cloned().zip(args).collect();
+            let map = bind_params(def, args);
             let mut body = expr.clone();
             // The allocator resolves names by byte offset, so the body has to
             // speak in the caller's coordinates before its names are looked up.
@@ -1190,7 +1190,7 @@ impl Inliner<'_> {
         reposition_stmts(&mut body, call_pos);
         self.rename_locals(def, &mut body)?;
 
-        let map: BTreeMap<String, Expr> = def.params.iter().cloned().zip(args).collect();
+        let map = bind_params(def, args);
         substitute_stmts(&mut body, &map, self.source)?;
 
         let mut lowered = self.lower_stmts(body)?;
@@ -1252,11 +1252,11 @@ impl Inliner<'_> {
     fn rename_locals(&mut self, def: &FnDef, body: &mut [Stmt]) -> Result<(), TranspileError> {
         let locals = collect_declared(body);
         for param in &def.params {
-            if locals.contains(param) {
+            if locals.contains(&param.name) {
                 return Err(self.error(
                     format!(
-                        "`{param}` is both a parameter and a local of `{}`; rename one of them",
-                        def.name
+                        "`{}` is both a parameter and a local of `{}`; rename one of them",
+                        param.name, def.name
                     ),
                     def.pos,
                 ));
@@ -1647,9 +1647,36 @@ fn rename_expr(expr: &mut Expr, map: &BTreeMap<String, String>) {
 // ---------------------------------------------------------------------------
 // Parameter substitution (call by name)
 
+/// A parameter paired with the argument it was called with.
+///
+/// The argument is substituted at each mention rather than read once, so this is
+/// a *name* for whatever the caller wrote, not a slot holding a value. `array` is
+/// the declared size when the parameter was written `v[…]`, which is what makes
+/// `v[0]` legal inside the body and a bare `v` illegal.
+struct Binding {
+    arg: Expr,
+    array: Option<usize>,
+}
+
+fn bind_params(def: &FnDef, args: Vec<Expr>) -> BTreeMap<String, Binding> {
+    def.params
+        .iter()
+        .zip(args)
+        .map(|(param, arg)| {
+            (
+                param.name.clone(),
+                Binding {
+                    arg,
+                    array: param.array,
+                },
+            )
+        })
+        .collect()
+}
+
 fn substitute_stmts(
     stmts: &mut [Stmt],
-    map: &BTreeMap<String, Expr>,
+    map: &BTreeMap<String, Binding>,
     source: &str,
 ) -> Result<(), TranspileError> {
     for stmt in stmts {
@@ -1660,7 +1687,7 @@ fn substitute_stmts(
 
 fn substitute_stmt(
     stmt: &mut Stmt,
-    map: &BTreeMap<String, Expr>,
+    map: &BTreeMap<String, Binding>,
     source: &str,
 ) -> Result<(), TranspileError> {
     match stmt {
@@ -1672,10 +1699,10 @@ fn substitute_stmt(
         // argument has to be a variable or an array element.
         Stmt::Assign { name, value, pos } => {
             substitute(value, map, source)?;
-            let Some(arg) = map.get(name) else {
+            let Some(binding) = map.get(name) else {
                 return Ok(());
             };
-            let replacement = match target_of(arg, name, *pos, source)? {
+            let replacement = match target_of(&binding.arg, name, *pos, source)? {
                 Target::Name(target) => Stmt::Assign {
                     name: target,
                     value: value.clone(),
@@ -1699,8 +1726,8 @@ fn substitute_stmt(
         } => {
             substitute(index, map, source)?;
             substitute(value, map, source)?;
-            if let Some(arg) = map.get(name) {
-                let target = match target_of(arg, name, *pos, source)? {
+            if let Some(binding) = map.get(name) {
+                let target = match target_of(&binding.arg, name, *pos, source)? {
                     Target::Name(target) => target,
                     Target::Element { .. } => {
                         return Err(TranspileError::at(
@@ -1734,8 +1761,8 @@ fn substitute_stmt(
             name, value, pos, ..
         } => {
             substitute(value, map, source)?;
-            if let Some(arg) = map.get(name) {
-                match target_of(arg, name, *pos, source)? {
+            if let Some(binding) = map.get(name) {
+                match target_of(&binding.arg, name, *pos, source)? {
                     Target::Name(target) => *name = target,
                     Target::Element { .. } => {
                         return Err(TranspileError::at(
@@ -1796,8 +1823,8 @@ fn substitute_stmt(
                 (&mut for_stmt.init_name, for_stmt.pos),
                 (&mut for_stmt.update_name, for_stmt.pos),
             ] {
-                if let Some(arg) = map.get(name).cloned() {
-                    match target_of(&arg, name, pos, source)? {
+                if let Some(binding) = map.get(name) {
+                    match target_of(&binding.arg, name, pos, source)? {
                         Target::Name(target) => *name = target,
                         Target::Element { .. } => {
                             return Err(TranspileError::at(
@@ -1866,13 +1893,19 @@ fn target_of(arg: &Expr, param: &str, pos: usize, source: &str) -> Result<Target
 
 fn substitute(
     expr: &mut Expr,
-    map: &BTreeMap<String, Expr>,
+    map: &BTreeMap<String, Binding>,
     source: &str,
 ) -> Result<(), TranspileError> {
     match expr {
         Expr::Name(name, _) => {
-            if let Some(replacement) = map.get(name) {
-                *expr = replacement.clone();
+            // A bare array parameter is substituted like any other name, even
+            // though it has no value of its own. It has to be: `g(v)` passes the
+            // array on to another function's array parameter, and that is only
+            // decidable once `g` is known. Using one as a value (`print(v)`) is
+            // caught after substitution, by the check that rejects any array
+            // name in a value position — the same error a direct `print(a)` gets.
+            if let Some(binding) = map.get(name) {
+                *expr = binding.arg.clone();
             }
         }
         Expr::Unary(_, inner) => substitute(inner, map, source)?,
@@ -1885,19 +1918,60 @@ fn substitute(
                 substitute(arg, map, source)?;
             }
         }
-        Expr::Data { name, pos, .. } => {
-            // A parameter used with an index would mean an array parameter,
-            // which has no faithful inlining.
-            if map.contains_key(name) {
+        Expr::Data {
+            name,
+            accessors,
+            pos,
+        } => {
+            let Some(binding) = map.get(name) else {
+                return Ok(());
+            };
+            let Some(size) = binding.array else {
                 return Err(TranspileError::at(
                     source,
                     format!(
-                        "`{name}` is a parameter used as an array (`{name}[…]`); pass the array's \
-                         elements as separate scalar parameters instead"
+                        "`{name}` is a value parameter used as an array (`{name}[…]`); declare it \
+                         `fn f({name}[n])` to pass an array, or pass the elements as separate \
+                         parameters"
                     ),
                     *pos,
                 ));
+            };
+            // Call by name: `v[0]` becomes `a[0]` in the caller, so the array is
+            // the caller's own and each access is bounds-checked against it
+            // there. Nothing is copied and the parameter costs no memory.
+            let Expr::Name(target, _) = &binding.arg else {
+                return Err(TranspileError::at(
+                    source,
+                    format!(
+                        "the argument for the array parameter `{name}[{size}]` must be the name \
+                         of an array"
+                    ),
+                    *pos,
+                ));
+            };
+            // The declared size is the extent the body may index, so a literal
+            // beyond it is reportable here — and naming the parameter is more
+            // use than naming whichever array the caller happened to pass.
+            for accessor in accessors.iter() {
+                if let Accessor::Index { index, pos: at } = accessor
+                    && *index >= size
+                {
+                    return Err(TranspileError::at(
+                        source,
+                        format!(
+                            "`{name}[{index}]` is out of bounds: `{name}` is declared with \
+                             {size} element(s)"
+                        ),
+                        *at,
+                    ));
+                }
             }
+            *expr = Expr::Data {
+                name: target.clone(),
+                accessors: accessors.clone(),
+                pos: *pos,
+            };
         }
         Expr::Number(_)
         | Expr::BaseLiteral { .. }

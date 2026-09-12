@@ -582,6 +582,43 @@ fn main() {
 }
 ```
 
+### Array parameters
+
+A parameter written `v[2]` is an **array parameter**: it names the caller's
+array rather than copying it. Arguments are passed by name, so `v` simply *is*
+the argument that was written at the call, and `v[0]` is resolved against the
+caller's array. The parameter costs no memory of its own.
+
+```c
+fn mul(v[2]) {
+    return v[0] * v[1];
+}
+
+fn main() {
+    let a[] = {input(), input()};
+    print(mul(a));
+}
+```
+
+The size is not decoration — it is the extent the body may index, and the only
+thing that tells an array parameter apart from a value parameter:
+
+* **The argument must be the name of an array**, not an expression and not an
+element. `mul(a)` is accepted; `mul(1 + 2)` and `mul(a[0])` are errors.
+* **Writes go through.** `v[0] = 9` writes `a[0]`, exactly like a value parameter
+that the body assigns.
+* **Beyond the declared size is an error.** In `fn f(v[2])`, `v[2]` is reported
+against the declaration rather than against whichever array the caller passed,
+which is the more useful name to see.
+* **An array parameter can be passed on.** `g(v)` hands `v`'s array to `g`; the
+callee's parameter ends up naming the caller's array too.
+* **A bare `v` has no value.** `print(v)` is an error, with the same complaint
+that a direct `print(a)` gets. Index it, or print the element you meant.
+
+Without the brackets the parameter is a value, and indexing it is an error
+telling you to declare it as an array. `v[]` is not allowed: with call by name
+there is nothing to infer a size from, so write the size you intend.
+
 ### Returning more than one value
 
 `return` may only be the **last statement** of a function body, so there is one
@@ -611,7 +648,6 @@ fn main() {
 | Recursion, direct or indirect | PRGM has no call stack |
 | A `return` that is not the last statement | It would need a jump out |
 | A procedure called from a `while`/`for` condition | Inlining would move its statements out of the loop |
-| A parameter used as an array (`x[0]`) | Pass the elements as separate scalars |
 | A parameter that is also a local | Rename one of them |
 | Redefining a built-in (`fn sqrt(…)`) | Choose another name |
 

@@ -416,10 +416,34 @@ pub struct ForStmt {
 /// be used anywhere a value is expected. `fn name(a, b) { … }` is the
 /// *procedure* form: it may declare locals and end with a single `return expr;`
 /// in the last position.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Param {
+    pub name: String,
+    /// `Some(size)` for `v[size]` — an array parameter; `None` for a value.
+    pub array: Option<usize>,
+}
+
+impl Param {
+    /// The parameter as it is written in a signature: `v` or `v[2]`.
+    ///
+    /// Used where a human sees the signature — diagnostics and hover text — so
+    /// an array parameter is not mistaken for a value there.
+    pub fn signature(&self) -> String {
+        match self.array {
+            Some(size) => format!("{}[{size}]", self.name),
+            None => self.name.clone(),
+        }
+    }
+}
+
+/// `fn name(a, b) = expr;` is the *expression* form: it has no locals and may
+/// be used anywhere a value is expected. `fn name(a, b) { … }` is the
+/// *procedure* form: it may declare locals and end with a single `return expr;`
+/// in the last position.
 #[derive(Debug, Clone, PartialEq)]
 pub struct FnDef {
     pub name: String,
-    pub params: Vec<String>,
+    pub params: Vec<Param>,
     /// `Some` for the `= expr` form; `None` for a block body.
     pub(crate) expr: Option<Expr>,
     /// The block body. Empty for the expression form.

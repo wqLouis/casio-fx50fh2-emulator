@@ -1479,7 +1479,12 @@ fn collect_fxc_symbols(
                 }
             }
             Stmt::Function(def) => {
-                let name = format!("{}({})", def.name, def.params.join(", "));
+                // `Param::signature` rather than the bare name, so an array
+                // parameter reads `v[2]` in the outline instead of looking like
+                // a value that happens to be indexed in the body.
+                let params: Vec<String> =
+                    def.params.iter().map(|param| param.signature()).collect();
+                let name = format!("{}({})", def.name, params.join(", "));
                 if !seen.contains(&name) {
                     seen.push(name.clone());
                     symbols.push(fxc_symbol(

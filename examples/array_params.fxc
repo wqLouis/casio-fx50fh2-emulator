@@ -1,0 +1,43 @@
+// Array parameters: hand a function the caller's array, not a copy of it.
+//
+// A parameter written `v[2]` is an array parameter. Arguments are passed by
+// name, so `v` *is* the array written at the call — `v[0]` is resolved against
+// the caller's memory, the parameter costs none of its own, and a write through
+// `v[0]` writes the caller's element.
+//
+// The size is the extent the body may index: in `v[2]`, `v[0]` and `v[1]` are
+// fine and `v[2]` is an error naming the declaration.
+//
+//   fx50 build examples/array_params.fxc
+//   fx50 run   examples/array_params.fxc   with inputs 6, 7
+//   fx50 regs  examples/array_params.fxc
+//   fx50 size  examples/array_params.fxc
+//   fx50 test  examples/array_params.fxc
+
+// Two array parameters, used as values.
+fn dot(v[2], w[2]) {
+    return v[0] * w[0] + v[1] * w[1];
+}
+
+// Writes go through to the caller's array, the same way assigning a value
+// parameter writes back through its argument.
+fn scale(v[2], by) {
+    v[0] = v[0] * by;
+    v[1] = v[1] * by;
+}
+
+fn main() {
+    let a[] = {input(), input()};
+    let b[] = {1, 2};
+
+    print(dot(a, b));
+
+    scale(a, 10);
+    print(a[0]);
+    print(a[1]);
+}
+
+#tests = [
+  { "name": "a dot product, then scaling the first array in place",
+    "input": [6, 7], "output": ["20", "60", "70"] }
+];
