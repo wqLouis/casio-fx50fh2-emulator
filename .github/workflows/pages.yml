@@ -49,9 +49,18 @@ jobs:
       # Must run before the frontend build: it publishes the project page's
       # base path as `base_path` (`/casio-fx50fh2-emulator` for this repo, or
       # "" for a user/org page), which the next step hands to vite.config.ts.
+      #
+      # `enablement: true` matters on a repository where Pages has never been
+      # turned on: without it this step fails with a bare "Get Pages site
+      # failed", because there is no Pages site for it to read. Run #1 of this
+      # workflow failed exactly that way. With it, the action creates the site
+      # as a workflow build and the run is self-sufficient — Pages never has to
+      # be enabled by hand in repository settings.
       - name: Configure Pages
         id: pages
         uses: actions/configure-pages@v5
+        with:
+          enablement: true
 
       - name: Install web dependencies
         working-directory: web
