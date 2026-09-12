@@ -28,7 +28,8 @@
 		historyBack,
 		historyForward,
 		parseInputs,
-		pushHistory
+		pushHistory,
+		withInputHint
 	} from './repl';
 	import type { ReplLine } from './types';
 
@@ -163,7 +164,10 @@
 				});
 				machine = response.state;
 			} else {
-				appendLine({ source: text, error: formatReplError(response.error) });
+				appendLine({
+					source: text,
+					error: withInputHint(formatReplError(response.error))
+				});
 			}
 		} catch (cause) {
 			appendLine({ source: text, error: describeThrown(cause) });

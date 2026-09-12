@@ -549,6 +549,17 @@ fn main() {
 		// Run what is on screen. If the listing is out of date, refresh it first,
 		// so the PRGM panel and the displays cannot describe different programs.
 		if (buildStale) build();
+		// That build may have changed how many `?` the program reads, and the values
+		// handed in were collected for the *previous* listing — the panel said "reads
+		// no input" when they were filled in. Running anyway feeds the interpreter
+		// too few of them, which surfaces as "no input available for `?`" beside a
+		// panel that is, by then, asking for one. Stop after the build instead: the
+		// fields re-render with the right count and the user fills them in.
+		if (promptCount > inputs.length) {
+			runResult = null;
+			runError = `This build reads ${promptCount} input(s). Fill them in, then press Run.`;
+			return;
+		}
 		const response = fx.run({
 			entry: activePath,
 			files: { ...files, [activePath]: activeText },

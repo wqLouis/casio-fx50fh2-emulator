@@ -28,7 +28,8 @@ import {
 	historyBack,
 	historyForward,
 	parseInputs,
-	pushHistory
+	pushHistory,
+	withInputHint
 } from './repl';
 
 // ---------------------------------------------------------------------------
@@ -304,5 +305,21 @@ describe('repl errors', () => {
 		assert.equal(describeThrown(new Error('boom')), 'boom');
 		assert.equal(describeThrown('boom'), 'boom');
 		assert.equal(describeThrown(42), '42');
+	});
+});
+
+describe('withInputHint', () => {
+	const missing = '1:1: Argument ERROR: no input available for `?`';
+
+	test('keeps the message and points at the field that fixes it', () => {
+		const hinted = withInputHint(missing);
+		assert.ok(hinted.startsWith(missing), 'the interpreter’s own words come first');
+		assert.match(hinted, /\? values/);
+	});
+
+	test('leaves every other error alone', () => {
+		const other = '1:1: Syntax ERROR: unexpected token';
+		assert.equal(withInputHint(other), other);
+		assert.equal(withInputHint(''), '');
 	});
 });

@@ -78,6 +78,20 @@ export function formatReplError(error: FxError): string {
 	return where ? `${where}: ${error.message}` : error.message;
 }
 
+/**
+ * Point at the fix when the interpreter reports a missing `?` value.
+ *
+ * "no input available for `?`" is accurate, but it reads like the panel broke
+ * when in fact the panel simply was not given a value — and the field that
+ * supplies one sits above the entry, easy to overlook. Any other error is
+ * passed through untouched, because the hint would be noise on it.
+ */
+export function withInputHint(message: string): string {
+	return /no input available/.test(message)
+		? `${message}\nThis entry reads a value with \u0060?\u0060. Put it in the "? values" field, then run it again.`
+		: message;
+}
+
 /** A thrown value as a message. The wasm should not throw, but a panel must not die if it does. */
 export function describeThrown(cause: unknown): string {
 	return cause instanceof Error ? cause.message : String(cause);
