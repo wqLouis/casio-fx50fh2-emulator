@@ -1248,3 +1248,91 @@ would raise identically both times.
 against the one key `ReP(` would be if the machine had it. That is the price of
 the key not existing, and it is why the built-in exists at all: it is written
 once in `pack.fxc` rather than at every use.
+
+## ADR 0030 — Where the transpiler reads files
+
+Two language features read files: `#include` pulls in a library of `fn`
+definitions, and `#data`/`#tests` read a JSON value. Both used `std::fs`
+directly, which is the one thing that cannot survive a move to a browser —
+`wasm32-unknown-unknown` has no filesystem, and an editor has unsaved buffers
+that are not files at all.
+
+**A `FileLoader` trait.** `fx_transpiler::loader` defines
+
+```rust
+pub trait FileLoader {
+    fn read(&self, path: &Path) -> Result<String, String>;
+}
+```
+
+with two implementations: `FsLoader`, which *is* the old behaviour and the
+default every existing entry point uses, and `MemoryLoader`, a map of path to
+text. The error is a `String` rather than an `io::Error` precisely so that an
+in-memory loader can say something as useful ("no source named `lib/x.fxc` was
+provided") as the filesystem does about a missing file. Every entry point gained
+a `*_with_loader` form and the plain one became that with `FsLoader`, so nothing
+on a command line changed: `transpile_file`, `transpile_with_base` and `analyze`
+behave exactly as before, and the whole existing suite passed untouched.
+
+**Path resolution is now lexical, not `canonicalize`.** Include-cycle detection
+used `Path::canonicalize`, which needs the file to exist, cannot work in memory,
+and resolves symlinks differently on different machines. The replacement resolves
+`.` and `..` from the text of the path. This is a *better* answer for the job:
+cycle detection wants the same result everywhere, and `lib/../lib/a.fxc` and
+`lib/a.fxc` are the same file regardless of what is on disk. `MemoryLoader` is
+lenient in the same spirit, ignoring a leading `/` on either side so `main.fxc`,
+`/main.fxc` and `./main.fxc` all resolve — a browser keys its files however the
+site feels like.
+
+**What this bought.** The transpiler, the interpreter and the language server
+now run in a browser with no second implementation of any of them. It also made
+the suite parser and the suite *runner* disagree for a while — the parser was
+made loader-aware first, so a tested program with an `#include` worked locally and
+failed in wasm with "operation not supported on this platform". The browser test
+found it; `run_suite_with_loader` fixed it; a Rust and a Node regression test now
+pin it.
+
+## ADR 0031 — The WebAssembly interface is a JSON string over three exports
+
+`fx-wasm` exposes exactly this, and nothing else:
+
+```rust
+fx_alloc(len) -> *mut u8
+fx_free(ptr, len)
+fx_call(ptr, len) -> *mut u8          // [len: u32 LE][json]
+```
+
+**No `wasm-bindgen`.** The boundary here is a request object and a response
+object — a JSON string either way — and the project already ships a
+zero-dependency JSON reader *and writer* ([ADR 0014](#adr-0014--json-is-hand-written-and-compile-time-data-is-a-language-feature)).
+Adding `wasm-bindgen` would mean a dependency *and* a CLI whose version has to
+match the crate exactly, to generate glue for a boundary that is already strings.
+The result of not doing it is a module that is a plain `wasm32-unknown-unknown`
+binary with **no imports at all** — a test asserts it — which any host can
+instantiate with no tooling whatsoever, and which Node can load in a test. That
+last part is what makes the browser build testable at all, and it is how the
+`#include`-in-tests bug was caught.
+
+**Not running the LSP protocol in the browser either.** Monaco can be driven by a
+real language server over `postMessage`, and that is the right answer when you
+are consuming someone else's server. Here we own both sides: `fx_lsp::logic` is
+already pure (`&str` in, LSP structures out) and is reused directly, so a
+JSON-RPC framing layer in a worker would be protocol overhead between two halves
+of the same program. The editor features are the *same functions* the editor
+extensions call; a request-per-operation surface is what the page actually wants.
+
+**Positions are 0-based.** This is the one place the API deliberately disagrees
+with the CLI, which prints 1-based columns for people. The consumers are Monaco
+and LSP clients, which are 0-based, so translating for them would be pointless
+churn at both ends.
+
+**What was measured, and what was left alone.** The module is ~640 KB, ~220 KB
+gzipped. A probe build without the language server put the floor — interpreter
+plus transpiler — at 453 KB, so the editor layer costs 185 KB. Nearly all of that
+is `serde`/`serde_json`/`url` arriving only because `lsp-types` derives them; the
+ICU data is dropped by LTO already (the binary has 87 KB of data and no ICU
+strings). Moving `logic` onto its own types would recover most of those 185 KB and
+would make the logic layer dependency-free, which fits this project's character.
+It was **not** done, because ~60 KB gzipped is not worth a refactor across ~15
+types and 45 existing language-server tests, and because the editor layer is not
+the dominant cost. It remains available if the module ever needs to be small.

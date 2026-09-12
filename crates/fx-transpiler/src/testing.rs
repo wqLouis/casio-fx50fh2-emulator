@@ -65,7 +65,7 @@ use std::path::{Path, PathBuf};
 use casio_fx50fh2::{Interpreter, MockHost};
 
 use crate::json::{self, Json};
-use crate::{Mode, Options, data, include, transpile_with_base};
+use crate::{Mode, Options, data, include, transpile_with_loader};
 
 // ---------------------------------------------------------------------------
 // Errors
@@ -474,8 +474,25 @@ pub fn parse_embedded_suite(
     name: &str,
     base_dir: &Path,
 ) -> Result<Option<TestSuite>, TestError> {
-    let expanded = include::expand(source, None, base_dir).map_err(|e| schema(format!("{e}")))?;
-    let (_, tables) = data::extract(&expanded, base_dir).map_err(|e| schema(format!("{e}")))?;
+    parse_embedded_suite_with_loader(source, name, base_dir, &crate::loader::FsLoader)
+}
+
+/// Like [`parse_embedded_suite`], but reads `#include`d libraries and `#data`
+/// files through `loader`.
+///
+/// The suite that comes out is self-contained — [`assemble`] does no I/O — so a
+/// host with no filesystem can run the embedded tests of a program it holds in
+/// memory.
+pub fn parse_embedded_suite_with_loader(
+    source: &str,
+    name: &str,
+    base_dir: &Path,
+    loader: &dyn crate::loader::FileLoader,
+) -> Result<Option<TestSuite>, TestError> {
+    let expanded =
+        include::expand_with(source, None, base_dir, loader).map_err(|e| schema(format!("{e}")))?;
+    let (_, tables) =
+        data::extract_with(&expanded, base_dir, loader).map_err(|e| schema(format!("{e}")))?;
     let Some(tests) = tables.tests() else {
         return Ok(None);
     };
@@ -630,7 +647,18 @@ impl SuiteReport {
 /// Transpile and compile failures are reported once per case rather than
 /// aborting the suite, so a single report shows everything that is wrong.
 pub fn run_suite(suite: &TestSuite) -> SuiteReport {
-    let prepared = prepare(suite);
+    run_suite_with_loader(suite, &crate::loader::FsLoader)
+}
+
+/// Like [`run_suite`], but reads `#include`d libraries through `loader`.
+///
+/// A suite parsed out of memory (an editor buffer, a browser) has no filesystem
+/// to fall back on, so running it has to use the same loader that parsed it.
+pub fn run_suite_with_loader(
+    suite: &TestSuite,
+    loader: &dyn crate::loader::FileLoader,
+) -> SuiteReport {
+    let prepared = prepare(suite, loader);
     let cases = suite
         .cases
         .iter()
@@ -657,15 +685,16 @@ enum Prepared {
     Failed(String),
 }
 
-fn prepare(suite: &TestSuite) -> Prepared {
+fn prepare(suite: &TestSuite, loader: &dyn crate::loader::FileLoader) -> Prepared {
     let options = Options {
         ascii: suite.ascii,
         mode: suite.mode,
         ..Default::default()
     };
     // Resolve the program's `#include` directives relative to wherever the
-    // program actually lives, not the process's working directory.
-    let prgm = match transpile_with_base(&suite.program, options, &suite.base_dir) {
+    // program actually lives, and through whichever loader the caller supplied
+    // — a suite held in memory has no filesystem to fall back on.
+    let prgm = match transpile_with_loader(&suite.program, options, None, &suite.base_dir, loader) {
         Ok(prgm) => prgm,
         Err(e) => return Prepared::Failed(format!("transpile error: {e}")),
     };

@@ -15,6 +15,8 @@ src/                        the interpreter library (casio-fx50fh2)
 crates/fx-transpiler/       `.fxc` -> PRGM (library `fx_transpiler`)
 crates/fx-lsp/              language server (library `fx_lsp`)
 crates/fx-cli/              the single `fx50` binary, dispatching on subcommands
+crates/fx-wasm/             WebAssembly build of all of the above (library `fx_wasm`)
+web/                        the browser workbench: a page, and the generated module
 examples/  docs/  tests/    programs, documentation, integration tests
 editors/                    VS Code and Zed integrations, tree-sitter grammars
 ```
@@ -28,6 +30,23 @@ transpiler and language server are libraries that `fx50` drives through its
 `Cargo.toml` lists every package in `default-members`, so a bare `cargo build` at
 the root builds the whole workspace (and therefore `fx50`), `cargo run` runs it,
 and `cargo test` runs every crate's tests.
+
+### The file seam
+
+Two language features read files: `#include` pulls in a library of `fn`
+definitions, and `#data`/`#tests` read a JSON value. Both go through
+[`fx_transpiler::FileLoader`](../crates/fx-transpiler/src/loader.rs) rather than
+calling `std::fs` directly.
+
+The default is `FsLoader`, so nothing on a command line changed. `MemoryLoader`
+replaces the filesystem with a map of path to text, which is what lets the same
+transpiler run in a browser — where there is no filesystem at all — against an
+editor's unsaved buffers. Path resolution is *lexical* (`.` and `..` are resolved
+from the text of the path), so include-cycle detection gives the same answer
+everywhere instead of depending on symlinks and what happens to exist.
+
+Every entry point has a `*_with_loader` form; the plain ones are those with
+`FsLoader`. See [ADR 0030](DECISIONS.md).
 
 ## The PRGM interpreter
 

@@ -356,6 +356,7 @@ version = "0.1.0"
 dependencies = [
  "casio-fx50fh2",
  "fx-transpiler",
+ "lsp-types",
  "tokio",
  "tower-lsp",
 ]
@@ -365,6 +366,16 @@ name = "fx-transpiler"
 version = "0.1.0"
 dependencies = [
  "casio-fx50fh2",
+]
+
+[[package]]
+name = "fx-wasm"
+version = "0.1.0"
+dependencies = [
+ "casio-fx50fh2",
+ "fx-lsp",
+ "fx-transpiler",
+ "lsp-types",
 ]
 
 [[package]]

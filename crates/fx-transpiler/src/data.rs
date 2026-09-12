@@ -202,7 +202,16 @@ fn describe(value: &Json) -> String {
 /// `base_dir` resolves file references in an anonymous root; a directive that
 /// came from an included file resolves against that file instead.
 pub fn extract(expanded: &Expanded, base_dir: &Path) -> Result<(String, Data), TranspileError> {
-    let mut extractor = Extractor::new(expanded, base_dir);
+    extract_with(expanded, base_dir, &crate::loader::FsLoader)
+}
+
+/// Like [`extract`], but reads referenced data files through `loader`.
+pub fn extract_with(
+    expanded: &Expanded,
+    base_dir: &Path,
+    loader: &dyn crate::loader::FileLoader,
+) -> Result<(String, Data), TranspileError> {
+    let mut extractor = Extractor::new(expanded, base_dir, loader);
     extractor.run()?;
     Ok((extractor.out, extractor.data))
 }
@@ -214,13 +223,19 @@ struct Extractor<'a> {
     offsets: Vec<usize>,
     expanded: &'a Expanded,
     base_dir: PathBuf,
+    /// How referenced data files are read.
+    loader: &'a dyn crate::loader::FileLoader,
     i: usize,
     out: String,
     data: Data,
 }
 
 impl<'a> Extractor<'a> {
-    fn new(expanded: &'a Expanded, base_dir: &Path) -> Self {
+    fn new(
+        expanded: &'a Expanded,
+        base_dir: &Path,
+        loader: &'a dyn crate::loader::FileLoader,
+    ) -> Self {
         let source = expanded.text.as_str();
         let chars: Vec<char> = source.chars().collect();
         let mut offsets = Vec::with_capacity(chars.len() + 1);
@@ -236,6 +251,7 @@ impl<'a> Extractor<'a> {
             offsets,
             expanded,
             base_dir: base_dir.to_path_buf(),
+            loader,
             i: 0,
             out: String::with_capacity(source.len()),
             data: Data::default(),
@@ -485,7 +501,7 @@ impl<'a> Extractor<'a> {
             .map(Path::to_path_buf)
             .unwrap_or_else(|| self.base_dir.clone());
         let target = dir.join(path);
-        let text = std::fs::read_to_string(&target).map_err(|e| {
+        let text = self.loader.read(&target).map_err(|e| {
             TranspileError::at(
                 self.source,
                 format!("cannot read data file `{}`: {e}", target.display()),

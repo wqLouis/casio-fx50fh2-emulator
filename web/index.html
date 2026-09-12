@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>fx-50FH II workbench — write, transpile, run</title>
+    <meta
+      name="description"
+      content="Write .fxc programs for the CASIO fx-50FH II in the browser, watch them become PRGM, and run them on the emulator. The transpiler and interpreter are Rust compiled to WebAssembly."
+    />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header>
+      <div class="title">
+        <h1>fx-50FH II workbench</h1>
+        <p class="subtitle">
+          Write <code>.fxc</code>, watch it become PRGM, run it on the emulator.
+          <span id="version"></span>
+        </p>
+      </div>
+      <div class="header-right">
+        <span id="limits" class="limits"></span>
+        <span id="status"></span>
+      </div>
+    </header>
+
+    <main>
+      <!-- ------------------------------------------------------------------ -->
+      <aside class="sidebar">
+        <section>
+          <h2>Example</h2>
+          <select id="examples" aria-label="Load an example program"></select>
+        </section>
+
+        <section>
+          <h2>Files</h2>
+          <div id="files" class="files"></div>
+          <p class="hint">
+            <code>#include "lib/….fxc"</code> resolves against these files, not
+            the disk — which is also how the wasm module is given a
+            &ldquo;filesystem&rdquo;.
+          </p>
+        </section>
+
+        <section>
+          <h2>Constants</h2>
+          <div id="constants" class="constants"></div>
+        </section>
+      </aside>
+
+      <!-- ------------------------------------------------------------------ -->
+      <section class="editor-column">
+        <div class="column-head">
+          <h2><span id="editor-title">main.fxc</span></h2>
+          <span id="editor-note" class="note"></span>
+        </div>
+        <div id="editor"></div>
+        <div id="editor-fallback" hidden></div>
+        <div class="diagnostics-head">
+          <h3>Problems</h3>
+          <span id="diagnostics-count" class="note"></span>
+        </div>
+        <div id="diagnostics" class="diagnostics"></div>
+      </section>
+
+      <!-- ------------------------------------------------------------------ -->
+      <section class="output-column">
+        <div class="tabs" role="tablist">
+          <button data-tab="prgm" class="active" role="tab">PRGM</button>
+          <button data-tab="size" role="tab">Size</button>
+          <button data-tab="memory" role="tab">Memories</button>
+          <button data-tab="run" role="tab">Run</button>
+        </div>
+
+        <div data-panel="prgm" class="panel">
+          <p class="hint">
+            What the transpiler produced. This is what you would type into the
+            calculator.
+          </p>
+          <pre id="prgm" class="prgm"></pre>
+          <div id="transpile-error" class="run-error" hidden></div>
+        </div>
+
+        <div data-panel="size" class="panel" hidden>
+          <p class="hint">
+            The whole machine has <strong>680 bytes</strong> of program storage,
+            shared by all four program areas — so every byte matters.
+          </p>
+          <div class="bar"><div id="size-bar" class="bar-fill"></div></div>
+          <p id="size-text" class="size-text"></p>
+        </div>
+
+        <div data-panel="memory" class="panel" hidden>
+          <p class="hint">
+            The seven memories (<code>A B C D X Y M</code>). A memory showing
+            more than one name was released with <code>free</code> and reused.
+          </p>
+          <div id="memory" class="memory-list"></div>
+        </div>
+
+        <div data-panel="run" class="panel" hidden>
+          <div class="run-controls">
+            <label for="inputs">
+              <code>?</code> inputs
+              <input
+                id="inputs"
+                type="text"
+                placeholder="e.g. 3, 4"
+                autocomplete="off"
+              />
+            </label>
+            <button id="run" class="primary">Run</button>
+            <button id="run-tests">Run tests</button>
+          </div>
+          <p class="hint">
+            Values are fed to the program's <code>input()</code> prompts in
+            order.
+          </p>
+          <div id="run-output" class="run-output"></div>
+          <h3>After the run</h3>
+          <div id="run-state" class="state-list"></div>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <p>
+        The transpiler, interpreter and language logic on this page are the same
+        Rust crates the <code>fx50</code> command-line tool and the editor
+        extensions use, compiled to WebAssembly. Nothing is reimplemented in
+        JavaScript.
+      </p>
+    </footer>
+
+    <script type="module" src="app.js"></script>
+  </body>
+</html>

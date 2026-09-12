@@ -9,8 +9,18 @@ description = "Language server for CASIO fx-50FH II PRGM source"
 name = "fx_lsp"
 path = "src/lib.rs"
 
+[features]
+default = ["server"]
+# The stdio JSON-RPC server. Turned off by a host that has no processes and no
+# stdio — a browser running the same logic through `fx-wasm`.
+server = ["dep:tower-lsp", "dep:tokio"]
+
 [dependencies]
 casio-fx50fh2 = { path = "../.." }
 fx-transpiler = { path = "../fx-transpiler", default-features = false }
-tower-lsp = "0.20"
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "io-std"] }
+# `tower-lsp` re-exports this crate, so pinning it here keeps one version in the
+# graph and lets `logic` compile without `tower-lsp` (and therefore without
+# tokio) when the `server` feature is off.
+lsp-types = "0.94"
+tower-lsp = { version = "0.20", optional = true }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "io-std"], optional = true }

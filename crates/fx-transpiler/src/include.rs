@@ -50,10 +50,10 @@
 //! any real file. [`Expanded`] carries a line map so a diagnostic can be
 //! reported against the file and line that actually caused it.
 
-use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::error::TranspileError;
+use crate::loader::{FileLoader, FsLoader, normalize};
 
 /// How deep `#include` may nest before we assume something is wrong.
 const MAX_DEPTH: usize = 32;
@@ -94,17 +94,30 @@ impl Expanded {
 /// `root` names the file `source` came from, used both for reporting and for
 /// resolving includes relative to it. Pass `None` for anonymous text (an
 /// inline string), in which case `base_dir` resolves the includes.
+///
+/// Files are read from the real filesystem; use [`expand_with`] to supply them
+/// some other way (an in-memory map, for instance).
 pub fn expand(
     source: &str,
     root: Option<&Path>,
     base_dir: &Path,
 ) -> Result<Expanded, TranspileError> {
-    let mut expander = Expander::default();
+    expand_with(source, root, base_dir, &FsLoader)
+}
+
+/// Like [`expand`], but reads included files through `loader`.
+pub fn expand_with(
+    source: &str,
+    root: Option<&Path>,
+    base_dir: &Path,
+    loader: &dyn FileLoader,
+) -> Result<Expanded, TranspileError> {
+    let mut expander = Expander::new(loader);
     let root_index = expander.file_index(root.map(Path::to_path_buf));
     expander.root = root.map(Path::to_path_buf);
     expander.base_dir = base_dir.to_path_buf();
     if let Some(path) = root {
-        expander.stack.push(canonical(path));
+        expander.stack.push(normalize(path));
     }
 
     expander.walk(
@@ -121,8 +134,7 @@ pub fn expand(
     })
 }
 
-#[derive(Default)]
-struct Expander {
+struct Expander<'a> {
     text: String,
     line_origins: Vec<(usize, usize)>,
     files: Vec<Option<PathBuf>>,
@@ -130,9 +142,25 @@ struct Expander {
     stack: Vec<PathBuf>,
     root: Option<PathBuf>,
     base_dir: PathBuf,
+    /// How included files are read.
+    loader: &'a dyn FileLoader,
 }
 
-impl Expander {
+impl<'a> Expander<'a> {
+    fn new(loader: &'a dyn FileLoader) -> Self {
+        Expander {
+            text: String::new(),
+            line_origins: Vec::new(),
+            files: Vec::new(),
+            stack: Vec::new(),
+            root: None,
+            base_dir: PathBuf::new(),
+            loader,
+        }
+    }
+}
+
+impl Expander<'_> {
     fn file_index(&mut self, path: Option<PathBuf>) -> usize {
         if let Some(existing) = self.files.iter().position(|known| *known == path) {
             return existing;
@@ -214,7 +242,7 @@ impl Expander {
         at: Option<&Path>,
     ) -> Result<(), TranspileError> {
         let target = dir.join(relative);
-        let canonical_target = canonical(&target);
+        let canonical_target = normalize(&target);
         let offset = line_offset(source, line_number);
 
         if self.stack.contains(&canonical_target) {
@@ -240,7 +268,7 @@ impl Expander {
             .in_file(at));
         }
 
-        let included = fs::read_to_string(&target).map_err(|e| {
+        let included = self.loader.read(&target).map_err(|e| {
             TranspileError::at(
                 source,
                 format!("cannot include `{}`: {e}", target.display()),
@@ -365,10 +393,6 @@ fn is_mode_directive(line: &str) -> bool {
         Some(after) => after.is_empty() || after.starts_with([' ', '\t', '=']),
         None => false,
     }
-}
-
-fn canonical(path: &Path) -> PathBuf {
-    path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
 }
 
 #[cfg(test)]

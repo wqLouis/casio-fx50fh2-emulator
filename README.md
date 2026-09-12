@@ -208,6 +208,28 @@ fn main() {
 ];
 ```
 
+## Run it in a browser
+
+The whole toolkit also builds to WebAssembly, so the transpiler, the interpreter
+and the editor features run on a web page with no server behind it:
+
+```bash
+rustup target add wasm32-unknown-unknown   # once
+./web/build.sh
+python3 -m http.server 8000                # then open http://localhost:8000/web/
+```
+
+[`web/`](web) is a workbench: write `.fxc` with completions and hover, watch it
+become PRGM as you type, see the bytes it costs out of the machine's 680, see
+which of the seven memories each variable got, and run it with values for the
+`?` prompts. Each example carries its own `#tests` and can be run from the page.
+Nothing is reimplemented in JavaScript — it is the same Rust crates the CLI and
+the editor extensions use, behind three `extern "C"` functions and a JSON string
+([why not `wasm-bindgen`](docs/DECISIONS.md#adr-0031--the-webassembly-interface-is-a-json-string-over-three-exports)).
+
+`crates/fx-wasm` is the module itself; [`web/README.md`](web/README.md) covers
+the page, and `fx50.js` plus `fx_wasm.wasm` can be dropped into any other site.
+
 ## Documentation
 
 | Document | What it covers |
@@ -219,8 +241,10 @@ fn main() {
 | [`docs/DECISIONS.md`](docs/DECISIONS.md) | Design decisions and the alternatives rejected (ADRs) |
 | [`docs/PLAN.md`](docs/PLAN.md) | The original specification, kept as a record |
 | [`editors/README.md`](editors/README.md) | LSP contract, editor setup, grammars |
+| [`web/README.md`](web/README.md) | The browser workbench: building the wasm module, testing it, embedding it |
 | [`crates/fx-transpiler/README.md`](crates/fx-transpiler/README.md) | The transpiler crate: CLI, Rust API, tests |
 | [`crates/fx-lsp/README.md`](crates/fx-lsp/README.md) | The language-server crate |
+| [`crates/fx-wasm/README.md`](crates/fx-wasm/README.md) | The WebAssembly crate: the ABI, the operations |
 
 ## Examples
 
@@ -250,7 +274,12 @@ fx50 test examples/factorial.fxc
 ```bash
 cargo test                          # everything
 cargo test -p fx-transpiler --no-default-features   # transpiler with zero deps
+./web/build.sh && node web/test.mjs # the real .wasm module, under Node
 ```
+
+The last one matters more than it looks: it is the only place the actual artifact
+a browser downloads is exercised, and a `cargo test` cannot catch a broken export
+or a wrong length prefix.
 
 ## License
 

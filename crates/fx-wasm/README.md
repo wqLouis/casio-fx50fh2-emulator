@@ -1,0 +1,86 @@
+# fx-wasm
+
+A WebAssembly build of the whole fx-50FH II toolkit: the transpiler, the
+interpreter, and the same language logic the editor extensions use.
+
+It exists because a browser has no filesystem and no processes. `fx50` reads
+`#include`d libraries from disk and `?` prompts from stdin; this crate supplies
+both from JavaScript and reuses everything else unchanged. The browser workbench
+in [`web/`](../../web) is its consumer.
+
+```bash
+rustup target add wasm32-unknown-unknown
+cargo build --profile wasm --target wasm32-unknown-unknown -p fx-wasm
+# -> target/wasm32-unknown-unknown/wasm/fx_wasm.wasm
+```
+
+`./web/build.sh` does that and copies the result next to the page.
+
+## The interface
+
+Three `extern "C"` functions, and a JSON string either way:
+
+```rust
+fx_alloc(len: usize) -> *mut u8
+fx_free(ptr: *mut u8, len: usize)
+fx_call(ptr: *const u8, len: usize) -> *mut u8   // [len: u32 LE][json]
+```
+
+There is deliberately no `wasm-bindgen` here (see [ADR 0031](../../docs/DECISIONS.md)):
+the boundary is a string, the project already ships a zero-dependency JSON reader
+and writer ([ADR 0014](../../docs/DECISIONS.md)), and this way the module is a
+plain `wasm32-unknown-unknown` binary with **no imports at all** that any host can
+instantiate with no tooling. `web/fx50.js` is the JavaScript side.
+
+## Three layers
+
+| Module | |
+| --- | --- |
+| [`api`](src/api.rs) | every operation as `&str -> String`. Plain Rust, no wasm types, so `cargo test` covers the behaviour directly. **Start here.** |
+| [`abi`](src/abi.rs) | the exports and the pointer marshalling |
+| `web/fx50.js` | reads the JSON and draws it |
+
+## Operations
+
+| `op` | does |
+| --- | --- |
+| `version` | what this build is, plus the machine's limits |
+| `transpile` | `.fxc` → PRGM, with its size and memory plan |
+| `run` | transpile if needed, run, and report the displays and state |
+| `tests` | run a program's embedded `#tests` table |
+| `diagnostics` | errors for the editor (markers) |
+| `completions` | the completion list for a language |
+| `hover` | documentation at a position |
+| `symbols` | the document outline |
+| `constants` | the 40 scientific constants |
+| `eval` | one expression |
+
+Every request takes the same envelope, and uses what it needs:
+
+```json
+{
+  "op": "transpile",
+  "source": "fn main() { print(1 + 1); }",
+  "entry": "main.fxc",
+  "files": { "lib/pack.fxc": "fn pack(x, y) = x + y * i();" },
+  "mode": "COMP", "ascii": false, "optimize": true,
+  "inputs": [3, 4]
+}
+```
+
+`source` may be omitted when `entry` names a file inside `files`, which is how a
+whole project is built. Positions in responses are **0-based** (LSP-style) so an
+editor can use them directly; the CLI prints 1-based columns for humans.
+
+The full shapes, and the reasoning behind them, are on the
+[`api` module](src/api.rs).
+
+## Tests
+
+```bash
+cargo test -p fx-wasm        # the API and the ABI, on the host
+node web/test.mjs            # the real .wasm module, under Node
+```
+
+Both matter. The host tests cover behaviour; only instantiating the actual
+artifact catches a broken export, a wrong length prefix or a double free.

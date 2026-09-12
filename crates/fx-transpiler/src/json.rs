@@ -666,6 +666,15 @@ fn format_number(value: f64) -> String {
     if value == 0.0 {
         return "0".to_string();
     }
+    // JSON has no way to spell an infinity or a NaN, and `format!` would write
+    // `inf`/`NaN`, which no JSON reader accepts. Nothing that *parses* JSON can
+    // reach this (a document cannot contain them), so a non-finite value here
+    // can only have been computed — and the machine raises `Math ERROR` rather
+    // than producing one. Emitting `null` keeps the output parseable instead of
+    // handing a consumer something that is not JSON at all.
+    if !value.is_finite() {
+        return "null".to_string();
+    }
     format!("{value}")
 }
 
@@ -870,5 +879,18 @@ mod tests {
         assert_eq!(value.get("n").unwrap().type_name(), "number");
         assert_eq!(Json::Null.type_name(), "null");
         assert_eq!(Json::string("x").as_str(), Some("x"));
+    }
+
+    #[test]
+    fn a_non_finite_number_is_written_as_null_not_as_inf() {
+        // `inf`/`NaN` are not JSON, and a reader would reject the whole
+        // document. `null` is the only representable answer.
+        assert_eq!(to_string(&Json::Number(f64::INFINITY)), "null");
+        assert_eq!(to_string(&Json::Number(f64::NEG_INFINITY)), "null");
+        assert_eq!(to_string(&Json::Number(f64::NAN)), "null");
+        // Finite numbers are untouched, including the zero special case.
+        assert_eq!(to_string(&Json::Number(0.0)), "0");
+        assert_eq!(to_string(&Json::Number(-0.0)), "0");
+        assert_eq!(to_string(&Json::Number(1.5)), "1.5");
     }
 }

@@ -28,6 +28,7 @@ pub mod error;
 pub mod include;
 pub mod json;
 pub mod lexer;
+pub mod loader;
 pub mod mode;
 pub mod parser;
 pub mod size;
@@ -45,6 +46,7 @@ mod validate;
 
 pub use alloc::Allocation;
 pub use data::{Data, DataTable};
+pub use loader::{FileLoader, FsLoader, MemoryLoader};
 pub use mode::Mode;
 pub use size::Size;
 
@@ -144,8 +146,26 @@ fn transpile_named(
     root: Option<&Path>,
     base_dir: &Path,
 ) -> Result<String, TranspileError> {
-    let expanded = include::expand(source, root, base_dir)?;
-    match transpile_expanded(&expanded, opts, base_dir) {
+    transpile_with_loader(source, opts, root, base_dir, &loader::FsLoader)
+}
+
+/// Transpile `source`, reading `#include` and `#data` files through `loader`.
+///
+/// This is the entry point for a host that does not have a filesystem — a
+/// browser, or an editor holding unsaved buffers. `root` names the file the text
+/// came from (used for diagnostics and to resolve relative paths); pass `None`
+/// for anonymous text, in which case `base_dir` resolves them.
+///
+/// The other entry points are this one with [`loader::FsLoader`].
+pub fn transpile_with_loader(
+    source: &str,
+    opts: Options,
+    root: Option<&Path>,
+    base_dir: &Path,
+    loader: &dyn FileLoader,
+) -> Result<String, TranspileError> {
+    let expanded = include::expand_with(source, root, base_dir, loader)?;
+    match transpile_expanded(&expanded, opts, base_dir, loader) {
         Ok(prgm) => Ok(prgm),
         // Positions refer to the expanded text, so translate them back to the
         // file and line the user actually wrote.
@@ -175,8 +195,9 @@ fn transpile_expanded(
     expanded: &include::Expanded,
     opts: Options,
     base_dir: &Path,
+    loader: &dyn FileLoader,
 ) -> Result<String, TranspileError> {
-    let (text, data) = data::extract(expanded, base_dir)?;
+    let (text, data) = data::extract_with(expanded, base_dir, loader)?;
     let tokens = lexer::lex(&text)?;
     let header = tokens.iter().find_map(|token| match &token.tok {
         lexer::Tok::Mode(mode) => Some(*mode),
@@ -246,8 +267,17 @@ pub struct Analysis {
 /// memory plan can be inspected (and failures reported) without a program.
 /// `base_dir` resolves relative `#include` paths.
 pub fn analyze(source: &str, base_dir: &Path) -> Result<Analysis, TranspileError> {
-    let expanded = include::expand(source, None, base_dir)?;
-    match analyze_expanded(&expanded, base_dir) {
+    analyze_with_loader(source, base_dir, &loader::FsLoader)
+}
+
+/// Like [`analyze`], but reads files through `loader`.
+pub fn analyze_with_loader(
+    source: &str,
+    base_dir: &Path,
+    loader: &dyn FileLoader,
+) -> Result<Analysis, TranspileError> {
+    let expanded = include::expand_with(source, None, base_dir, loader)?;
+    match analyze_expanded(&expanded, base_dir, loader) {
         Ok(analysis) => Ok(analysis),
         Err(error) => Err(attribute(error, &expanded)),
     }
@@ -256,8 +286,9 @@ pub fn analyze(source: &str, base_dir: &Path) -> Result<Analysis, TranspileError
 fn analyze_expanded(
     expanded: &include::Expanded,
     base_dir: &Path,
+    loader: &dyn FileLoader,
 ) -> Result<Analysis, TranspileError> {
-    let (text, data) = data::extract(expanded, base_dir)?;
+    let (text, data) = data::extract_with(expanded, base_dir, loader)?;
     let tokens = lexer::lex(&text)?;
     let mut program = parser::parse(&tokens, &text)?;
     // Mirror the transpiler front end, so `fx50 regs` and `fx50 build` never

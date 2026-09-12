@@ -12,7 +12,9 @@
 //! library entry point that the unified CLI calls.
 
 pub mod logic;
+#[cfg(feature = "server")]
 pub mod server;
 
 pub use logic::Language;
+#[cfg(feature = "server")]
 pub use server::run_server;

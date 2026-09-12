@@ -1,0 +1,25 @@
+[package]
+name = "fx-wasm"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "WebAssembly build of the fx-50FH II transpiler, interpreter and language logic"
+
+[lib]
+name = "fx_wasm"
+path = "src/lib.rs"
+# `cdylib` is what a host instantiates; `rlib` is what `cargo test` links, so the
+# ABI and the API are both exercised on the host rather than only in a browser.
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+casio-fx50fh2 = { path = "../.." }
+# `testing` (on by default) is what makes the `tests` op able to run a program's
+# embedded `#tests` table.
+fx-transpiler = { path = "../fx-transpiler" }
+# No `server` feature: this is the same language logic the editor extensions use,
+# without the stdio JSON-RPC shell, which cannot exist in a browser.
+fx-lsp = { path = "../fx-lsp", default-features = false }
+# Named only so the API can build `Position`s and read `Diagnostic`s; `fx-lsp`
+# re-exports it from `tower-lsp`, so this is the same version in the graph.
+lsp-types = "0.94"

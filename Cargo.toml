@@ -15,9 +15,35 @@ path = "src/lib.rs"
 [dependencies]
 
 [workspace]
-members = ["crates/fx-transpiler", "crates/fx-lsp", "crates/fx-cli"]
+members = [
+    "crates/fx-transpiler",
+    "crates/fx-lsp",
+    "crates/fx-cli",
+    "crates/fx-wasm",
+]
 # `cargo build`, `cargo run` and `cargo test` at the root act on the whole
 # workspace. Without this, bare `cargo build` would only build the root library
 # and never produce the `fx50` binary.
-default-members = [".", "crates/fx-transpiler", "crates/fx-lsp", "crates/fx-cli"]
+default-members = [
+    ".",
+    "crates/fx-transpiler",
+    "crates/fx-lsp",
+    "crates/fx-cli",
+    "crates/fx-wasm",
+]
 resolver = "3"
+
+# A size-first profile for the browser build:
+#
+#     cargo build --profile wasm --target wasm32-unknown-unknown -p fx-wasm
+#
+# `panic = "abort"` is not optional here: unwinding needs an OS. `lto` and
+# `codegen-units = 1` let the linker drop the interpreter code no exported
+# operation reaches, which matters because the module is downloaded by a page.
+[profile.wasm]
+inherits = "release"
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

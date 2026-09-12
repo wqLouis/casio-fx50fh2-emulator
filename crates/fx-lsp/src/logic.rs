@@ -17,7 +17,7 @@ use casio_fx50fh2::lexer::lex;
 use casio_fx50fh2::token::{BinOp, ConstName, FuncName, Postfix, Token, TokenKind, VarName};
 use fx_transpiler::ast::Stmt;
 use fx_transpiler::error::TranspileError;
-use tower_lsp::lsp_types::{
+use lsp_types::{
     CompletionItem, CompletionItemKind, Diagnostic, DiagnosticSeverity, DocumentSymbol,
     Documentation, Hover, HoverContents, InsertTextFormat, MarkupContent, MarkupKind,
     NumberOrString, Position, Range, SymbolKind,
@@ -273,25 +273,42 @@ pub fn diagnostic(source: &str, err: &CalcError) -> Diagnostic {
 /// broken include can never panic the server.  Purely runtime errors (Math
 /// ERROR etc.) are not reported by the language server.
 pub fn diagnostics(source: &str, language: Language, base_dir: Option<&Path>) -> Vec<Diagnostic> {
+    // A directory that does not exist cannot resolve an `#include`, so falling
+    // back to `.` keeps the reported paths short. With a `FileLoader` there is
+    // nothing to stat, and `diagnostics_with_loader` does not do this.
+    let base = match base_dir {
+        Some(dir) if dir.exists() => dir,
+        _ => Path::new("."),
+    };
+    diagnostics_with_loader(source, language, base, &fx_transpiler::FsLoader)
+}
+
+/// Like [`diagnostics`], but reads `#include`d libraries through `loader`.
+///
+/// This is what a host without a filesystem calls: an editor holding unsaved
+/// buffers, or a browser. `base_dir` resolves relative includes and is used as
+/// given, since there is nothing to check for existence.
+pub fn diagnostics_with_loader(
+    source: &str,
+    language: Language,
+    base_dir: &Path,
+    loader: &dyn fx_transpiler::FileLoader,
+) -> Vec<Diagnostic> {
     match language {
         Language::Prgm => match compile(source) {
             Ok(_) => Vec::new(),
             Err(err) => vec![diagnostic(source, &err)],
         },
-        Language::Fxc => {
-            let base = match base_dir {
-                Some(dir) if dir.exists() => dir,
-                _ => Path::new("."),
-            };
-            match fx_transpiler::transpile_with_base(
-                source,
-                fx_transpiler::Options::default(),
-                base,
-            ) {
-                Ok(_) => Vec::new(),
-                Err(err) => vec![transpile_diagnostic(source, &err)],
-            }
-        }
+        Language::Fxc => match fx_transpiler::transpile_with_loader(
+            source,
+            fx_transpiler::Options::default(),
+            None,
+            base_dir,
+            loader,
+        ) {
+            Ok(_) => Vec::new(),
+            Err(err) => vec![transpile_diagnostic(source, &err)],
+        },
     }
 }
 
